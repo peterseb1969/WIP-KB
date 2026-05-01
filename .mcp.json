@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "wip": {
+      "command": "/Users/peter/Development/World-in-a-Pie/.venv/bin/python",
+      "args": ["-m", "wip_mcp"],
+      "cwd": "/Users/peter/Development/World-in-a-Pie",
+      "env": {
+        "WIP_API_KEY": "dev_master_key_for_testing",
+        "PYTHONPATH": "/Users/peter/Development/World-in-a-Pie/components/mcp-server/src"
+      }
+    }
+  }
+}

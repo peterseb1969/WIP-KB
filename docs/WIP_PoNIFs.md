@@ -1,0 +1,242 @@
+# PoNIFs — Powerful, Non-Intuitive Features
+
+*A guide to the things that make WIP powerful and the things that make WIP confusing — which are the same things.*
+
+---
+
+## What Is a PoNIF?
+
+A **PoNIF** (Powerful, Non-Intuitive Feature) is a design decision that:
+
+1. **Enables a genuinely powerful capability** that simpler designs cannot provide
+2. **Violates the expectations** of developers (human or AI) trained on conventional patterns
+3. **Will be gotten wrong** on first contact, and sometimes on second and third contact
+4. **Cannot be simplified away** without losing the capability it provides
+
+PoNIFs are not bugs. They are not accidental complexity. They are the price of capabilities that matter — versioning that never loses history, identity resolution that works across systems, validation that catches mistakes the developer didn't know they were making.
+
+The challenge is not to remove PoNIFs. It is to:
+- **Document them** so they are understood before they are encountered
+- **Provide sensible defaults** so the common case works without understanding the PoNIF
+- **Design guardrails** so the PoNIF's power is available when needed but doesn't bite when it isn't
+
+---
+
+## WIP's PoNIFs
+
+### 1. Nothing Ever Dies
+
+**The feature:** Every entity in WIP — terms, terminologies, templates, documents — has an ID that persists forever. Deactivation (soft-delete) makes an entity unavailable for future use, but it always resolves for existing references. Historical data never breaks.
+
+**Why it's powerful:** A document created in 2024 referencing term `ACTIVE` will always resolve that reference, even if `ACTIVE` was deactivated in 2025. Audit trails are complete. Regulatory compliance is built in. You cannot accidentally destroy data integrity by cleaning up old vocabularies.
+
+**Why it's non-intuitive:** Every developer's instinct is "delete the old one." Every AI's training says "clean up unused resources." The concept of an entity that is simultaneously "gone" (can't be used in new data) and "present" (resolves in old data) doesn't exist in most systems.
+
+**What goes wrong:** Users deactivate a term and expect all documents using it to fail. They don't — they keep working. Users expect deactivated templates to be invisible. They're not — they still resolve when documents reference them. The mental model of "inactive = deleted" is wrong; the correct model is "inactive = retired."
+
+**Sensible default:** The current behaviour is the correct default — with one important nuance that needs verification: when a term is deactivated, can new documents still use that term value? If yes, "retired" is incomplete — it should mean "existing documents keep resolving, but new documents cannot use this value." If deactivated terms are still accepted in new documents, that's a gap between the mental model and the implementation.
+
+Documentation should be explicit: *"Inactive means retired, not deleted. Retired entities are invisible to new data but always visible to existing data."* And the implementation should enforce the "invisible to new data" part.
+
+### 2. Template Versioning — Multiple Active Versions
+
+**The feature:** Template updates create new versions. The old version remains active. Multiple versions of the same template can be active simultaneously. New documents can be created against any active version. Existing documents retain their original template version reference.
+
+**Why it's powerful:** Schema evolution without migration. A new field can be added to a template (v2) while existing documents remain valid against v1. Both versions coexist. No downtime, no batch migration, no breaking changes.
+
+**Why it's non-intuitive:** In every other system, updating a schema replaces the old one. There is one active schema, and all data conforms to it. The idea that two versions of the "same" template are both valid simultaneously — and that the system doesn't automatically migrate data to the latest version — contradicts every ORM, every database migration tool, and every schema registry the developer has ever used.
+
+**What goes wrong:** 
+- A developer updates a template to fix a field type. Both versions remain active. New documents might be created against either version depending on which one the client resolves. (This caused the Day 4 `file_config` bug — the bootstrap created v1 with PDF-only restriction, the fix created v2, but the cached v1 was still active and being used.)
+- An AI updates a template and assumes the old version is gone. It isn't. The AI doesn't deactivate the old version because that's not what "update" means in any system it was trained on.
+
+**Sensible default:** The obvious default — "deactivate the previous version on update" — is actually dangerous. If a pipeline is still creating documents against v1, silently deactivating it breaks that pipeline. The real PoNIF isn't that multiple versions exist; it's that the client defaults to "latest" instead of requiring an explicit version.
+
+The correct default is in the client library: `@wip/client` should require `template_version` in document creation calls, or at minimum warn loudly when it's omitted. The CLAUDE.md versioning table already says "always pass `template_version`" — the library should enforce what the documentation recommends.
+
+For `updateTemplate()`, the default should be to keep the previous version active (preserving the PoNIF's power) but return a clear message: *"Template X updated to v2. Previous version v1 is still active. Pass `{ deactivatePrevious: true }` to deactivate it, or pin `template_version: 2` in document creation calls."*
+
+### 3. Document Identity — The Registry Decides
+
+**The feature:** Documents don't need an explicit ID to be updated. Instead, templates define identity fields. When a document is submitted, WIP computes an identity hash from those fields. If a document with the same hash exists, it's a new version (update). If not, it's a new document (create). The same endpoint handles both — it's an upsert, not a create-or-update decision.
+
+**Why it's powerful:** Data pipelines don't need to track IDs. Import the same CSV twice — identical records are deduplicated, changed records get new versions, new records are created. No "does this exist?" query before every insert. No ID mapping tables. The data defines its own identity.
+
+**Why it's non-intuitive:** 
+- Developers expect to control the ID. They expect `POST` to create and `PUT` to update. WIP's `POST` does both, and the identity fields — not the URL, not a client-provided ID — determine which.
+- If a template has zero identity fields, every submission creates a new document. There is no update path. This is by design (some data, like event logs, is append-only), but it surprises developers who expect every entity to be updatable.
+- If the identity fields are wrong (too many — correcting a field creates a new document instead of a version; too few — different real-world entities collide), the consequences are silent and structural. There's no error — just wrong versioning behaviour.
+
+**What goes wrong:**
+- An AI adds a timestamp to the document data. Now every import creates new documents instead of updating existing ones — the timestamp makes every identity hash unique.
+- A developer defines all fields as identity fields. Now correcting a typo creates a new document instead of a new version.
+- A template has no identity fields. The developer tries to "update" a document and gets a duplicate instead.
+
+**Sensible default:** `@wip/client` should warn (not error) when creating a document against a template with zero identity fields. The warning should say: *"Template X has no identity fields. Every submission will create a new document. If you intend updates, add identity fields to the template."*
+
+### 4. Bulk First — 200 OK Always
+
+**The feature:** All WIP write endpoints accept arrays and return `200 OK` even when individual items fail. The response body contains per-item status (`created`, `updated`, `error`, `skipped`). This includes `DELETE`, which takes a JSON body array, not an ID in the URL.
+
+**Why it's powerful:** Batch operations are first-class. A 10,000-record import doesn't fail on record 47 and lose records 1-46 or skip 48-10,000. Every record gets its own status. Error handling is granular. And the array-in, array-out pattern is consistent across every endpoint.
+
+**Why it's non-intuitive:**
+- REST conventions say `DELETE /resource/{id}`, not `DELETE /resource` with a body. Every developer will try the URL-based pattern first and get `405 Method Not Allowed`.
+- A `200 OK` response that contains errors inside is contrary to HTTP semantics. Developers (and AIs) check the status code, see 200, and assume success. The per-item errors are invisible unless the response body is parsed.
+- Single-item operations still require wrapping in an array (or the client library handles this).
+
+**What goes wrong:**
+- On Day 4, Constellation-Claude tried four different `DELETE` URL patterns before WIP-Claude explained the bulk-first convention. Each attempt returned 405. The AI's training on REST conventions was a liability, not an asset.
+- The Statement Manager's import showed "Imported 0 items with 1 error" when 911 transactions were actually created — the FIN_IMPORT tracking record failed, and the app checked only the response status code (200) and the error count, not the success count.
+
+**Sensible default:** `@wip/client` already wraps single items in arrays transparently. The remaining gap is error surfacing — the library should provide helpers like `response.hasErrors()`, `response.successCount`, `response.errors` that make it hard to miss partial failures.
+
+### 5. Registry Synonym Management
+
+**The feature:** Any entity in WIP can have multiple identifiers (synonyms) registered in the Registry. A synonym can be any key-value pair: `{"erp_id": "SAP-001"}`, `{"iban": "CH93 0076..."}`, `{"gandalf_name": "Mithrandir"}`. All synonyms resolve to the same canonical WIP ID. Lookup by any synonym is O(1), as fast as lookup by canonical ID.
+
+Additionally, two WIP IDs can be declared as synonyms of each other (merge), and a WIP ID can be deprecated in favour of another (redirect). The Registry maintains the full resolution chain. A single real-world entity can have multiple WIP IDs, not just one.
+
+**Note on merge reversibility:** Merges are currently effectively one-way. Removing the synonym removes the link, but the deprecated entry remains inactive — there is no inactive → active transition endpoint in the Registry. A reactivation endpoint is planned as a future feature to enable clean unmerge operations. Merging is reversible — delete the synonym that linked the two IDs and they separate again.
+
+An entity can have multiple WIP IDs. This is not a bug or an edge case — it's a legitimate state. Different systems may have independently created Registry entries for the same real-world entity before anyone knew they were the same.
+
+**Why it's powerful:** Cross-system integration without mapping tables. Your bank's account number, your employer's ID, your broker's reference — all resolve to the same WIP entity. Import data using any external identifier; WIP resolves it transparently. The same mechanism that links IBAN numbers links Gandalf's eight names.
+
+**Why it's non-intuitive:**
+- Most systems have one ID per entity. Two at most (internal + external). The idea of an entity with an unlimited number of identifiers, all equally valid for lookup, doesn't match any ORM or API framework's assumptions.
+- The assumption that one entity = one WIP ID is deeply ingrained. In reality, an entity can have as many WIP IDs as you want — and merging them (making one a synonym of another) is how you reconcile duplicates discovered after the fact. This is a PoNIF within the PoNIF.
+- Synonym resolution happens transparently during document creation. If a reference field contains a value that matches a synonym, it resolves. The developer might not even know synonyms are being used — which is both the power and the confusion.
+- Merging two WIP IDs is reversible (delete the synonym to unmerge), but developers trained on "merge = permanent destructive operation" will be afraid to use it, or conversely, will be surprised that an unmerge is possible.
+
+**What goes wrong:**
+- A developer assumes each entity has exactly one WIP ID. They discover two IDs for the same entity and panic, thinking the data is corrupt. It's not — it's the normal state before reconciliation. The merge operation exists precisely for this.
+- A developer registers the same external ID as a synonym for two different WIP entities. The Registry rejects this (correctly), but the error message is about "duplicate search values," which doesn't explain what happened.
+- An AI creates documents with a reference value of "CUS-001". If a synonym maps "CUS-001" to a WIP document, the reference resolves. If no synonym exists, WIP falls back to business key lookup. If the business key lookup also fails, the document is rejected. The AI doesn't know which resolution path was attempted or which one failed.
+
+**Sensible default:** `@wip/client` should surface the resolution path in reference errors: *"Reference 'CUS-001' for field 'customer' could not be resolved. Attempted: direct ID (not a UUID), Registry synonym (not found), business key on CUSTOMER template (no match)."* The developer needs to know *why* resolution failed, not just *that* it failed.
+
+### 6. Template Field Resolution Timing
+
+**The feature:** Template metadata (like `file_config.allowed_types`) is resolved at document validation time, not at template creation time. The document store caches the resolved template and uses it for all subsequent validations until the cache expires or the service restarts.
+
+**Why it's powerful:** Validation always uses the current template definition. No need to rebuild or restart services when templates change.
+
+**Why it's non-intuitive:** When you update a template (creating v2), the document store may continue validating against cached v1 until the cache expires. This is distinct from PoNIF #2 (multiple active versions) — even if v1 is deactivated, the cache may still hold it.
+
+**What goes wrong:** On Day 4, the FIN_IMPORT template was updated from v1 (PDF-only) to v2 (PDF + CSV). v1 was deactivated. The document store continued validating against cached v1, rejecting CSV uploads. Only a service restart cleared the cache. The debugging took 25 minutes because the template showed the correct (v2) definition in every inspection tool — the bug was invisible except in the validation behaviour.
+
+**Sensible default:** This was fixed during the experiment: versioned template lookups are cached permanently (immutable), "latest" resolution uses a 5-second TTL. But the incident demonstrates that cache invalidation is a PoNIF in its own right — the developer expects changes to take effect immediately, the system serves stale data until the cache expires.
+
+*This PoNIF was identified by Constellation-Claude during its review of this document — itself an example of the collaborative review process catching gaps.*
+
+### 7. Edge Types Are Stored as Templates
+
+**The feature:** WIP has two conceptually distinct schemas that share a storage representation: **entity templates** (the default — `usage: "entity"`) and **edge types** (`usage: "relationship"`). Both live in the same `templates` collection and flow through the same APIs, but document-store treats edge-type writes differently — extra cross-namespace and not-archived validation, lazy MongoDB indexes on `data.source_ref` / `data.target_ref`, two query endpoints (`/relationships`, `/traverse`), and reporting-sync columns (`source_ref_id` / `target_ref_id`). The MCP tool `create_edge_type` exists specifically to surface this distinction at the agent-facing API ingress.
+
+The contract that makes an edge type *be* an edge type:
+
+- `usage: "relationship"` (immutable after creation)
+- non-empty `source_templates` and `target_templates` lists declaring which templates can sit at each endpoint
+- two reference fields named **exactly** `source_ref` and `target_ref` (template-store enforces the names)
+
+The motivation comes from a class of data that fits nowhere else cleanly: properties that belong to the *interaction* between two documents. An experiment uses bevacizumab — but the quantity, the role (treatment vs. control), the lot number — none of those belong to the experiment, and none belong to bevacizumab. They belong to *how* the experiment uses bevacizumab. An edge type holds them.
+
+**Why it's powerful:** Models the interaction without forcing the edge data into either endpoint or duplicating fields across both. The query APIs (`/relationships`, `/traverse`) operate over typed edges with full schema validation. Reporting-sync's resolved `source_ref_id` / `target_ref_id` columns enable SQL JOINs that follow the graph in PostgreSQL.
+
+**Why it's non-intuitive:** Conventional ORMs and graph DBs split entities and relationships into different storage with different APIs. WIP unifies them via a single `usage` annotation — edge types *are* templates, relationship documents *are* documents. Same storage, different conceptual layer. The flag is easy to miss when reading a template definition.
+
+**What goes wrong:**
+
+- Developers see a template with two `reference_type: document` fields and assume it's an entity template with foreign keys. The `usage` flag tells you which conceptual type it is — and the validation, indexing, and query surface all change with it.
+- Developers create `usage: "entity"` templates with `source_ref` / `target_ref` fields and try to use them as relationships. The `/relationships` and `/traverse` endpoints require `usage: "relationship"`; the queries return nothing useful against entity templates.
+- Developers name their reference fields anything other than `source_ref` and `target_ref`. Template-store rejects the create. The naming is a contract, not a convention.
+
+**Sensible default:** `create_edge_type` exists as a separate MCP tool precisely so the agent-facing API can't accidentally treat an edge type as an entity template. The library / MCP layer should keep surfacing `usage` in any tool output that describes a template, so the conceptual layer is visible at the ingress, not buried in a JSON blob.
+
+See `docs/design/document-relationships.md` for the full design rationale, validation rules, and query semantics.
+
+### 8. `versioned: false` — Updates Overwrite In Place
+
+**The feature:** Setting `versioned: false` on an edge type (PoNIF #7) makes updates **overwrite the existing payload** instead of creating a new version. Documents under such an edge type stay at `version: 1` forever. The previous data is gone after a successful update.
+
+This is a deliberate exception to PoNIF #2 ("Template Versioning — Update Does NOT Replace"). It applies only to edge types today; the flag is immutable after template creation.
+
+**Why it's powerful:** Some relationships have identity but not history. "Monster has spell" in a bestiary changes when the bestiary author tweaks a spell list — there's no audit interest in "what spells did this monster have last year." Versioning every edge update wastes storage and obscures the current state.
+
+**Why it's non-intuitive:** Every other entity in WIP versions on update — that's PoNIF #1 ("Nothing Ever Dies") combined with PoNIF #2. A reader who has internalised those rules will apply them universally and miss this exception. PoNIF #7 + PoNIF #8 together break two invariants the reader has just learned to trust.
+
+**What goes wrong:**
+
+- Code that loads `version=N-1` to compute a diff against `version=N` returns nothing on a `versioned: false` edge type — there is no previous version.
+- `get_document_versions(id)` returns a list of length 1 forever. Code that paginates or filters this list silently does the wrong thing.
+- Audit-trail assumptions (compliance flows, change history UIs) treat `versioned: false` data the same as everything else and produce gaps.
+- Concurrency on the in-place path needs `if_match` (existing OCC token); naive overwrite logic loses concurrent updates.
+
+**Sensible default:** `template.versioned` defaults to `true` — the conservative default that preserves history. Code reading documents should check `template.versioned` (or equivalently, that `get_document_versions` returns more than one row) before assuming history exists. If you need history on a relationship, build the edge type with `versioned: true`. The flag is immutable after creation, so the choice is permanent — pick deliberately.
+
+See `docs/design/document-relationships.md` §"Versioning" for the rationale and the implementation contract.
+
+---
+
+## PoNIFs and AI Assistants
+
+### The Compactheimer's Problem
+
+AI assistants (Claude, GPT, etc.) have a specific failure mode with PoNIFs that humans don't: **they forget.**
+
+When an AI starts a session, it reads CLAUDE.md, understands the PoNIFs, and works correctly. As the context window fills and compaction occurs, the AI loses the specific instructions and reverts to its training — which is trained on conventional patterns. The AI doesn't know it has forgotten. It continues working confidently, but now it:
+
+- Tries `DELETE /resource/{id}` instead of the bulk pattern
+- Assumes updating a template deactivates the old version
+- Adds timestamps to document data (breaking idempotent import)
+- Expects identity fields to be mandatory (adding synthetic ones to templates that don't have them)
+
+This happened during the experiment:
+- WIP-Claude at some point added a random field to templates without identity fields, assuming every template needs one. It assumed this because that IS the normal pattern in application development.
+- Constellation-Claude tried four `DELETE` URL patterns before being told about bulk-first
+- The template cache fix was needed partly because neither Claude instance passed `template_version` — they relied on the "latest" default, which is the conventional pattern
+
+### The Mitigation Strategy
+
+1. **CLAUDE.md must document PoNIFs explicitly**, with the conventional pattern and the WIP pattern side by side. Not just "how it works" but "how it differs from what you expect."
+
+2. **`@wip/client` must encode PoNIF-aware defaults** so that the common case works correctly even when the AI forgets the documentation. The library is the last line of defence against Compactheimer's.
+
+3. **Guardrails in the process** — the slash commands (`/build-app`, `/improve`) should include PoNIF checkpoints: "Does the app pass `template_version`? Does it handle partial failures in bulk responses? Does it add any per-run data to document fields?"
+
+4. **Tests should verify PoNIF behaviour** — not just "does the feature work?" but "does the feature work the way WIP does it, not the way conventional systems do it?" Test that re-importing the same file creates zero new versions. Test that updating a template leaves the old version active. These are the behaviours that drift.
+
+---
+
+## The PoNIF Principle
+
+> **A PoNIF that surprises the user once is a documentation failure. A PoNIF that surprises the user twice is a defaults failure. A PoNIF that surprises the user three times is a design failure — unless the surprise is the irreducible cost of the capability.**
+
+Some PoNIFs can be defaulted away: bulk-first is hidden by `@wip/client`, template versioning can be managed by requiring explicit version pins. These are "defaultable PoNIFs" — the power is preserved, the surprise is absorbed by the library.
+
+Other PoNIFs are permanent teaching costs: document identity via identity fields cannot be defaulted because the choice of identity fields is a domain decision. The Registry's multi-ID model cannot be simplified to one-ID-per-entity without losing the capability. These are "irreducible PoNIFs" — they must be taught, not defaulted, and the documentation must be good enough that the teaching sticks even after Compactheimer's.
+
+WIP's PoNIFs are a mix of both. The defaults (especially in `@wip/client`) need work to absorb the defaultable ones. The irreducible ones need documentation that is clear enough to survive context compaction — which means short, concrete, and repeated in multiple places rather than explained once in a long document.
+
+---
+
+## Action Items
+
+| PoNIF | Documentation | Sensible Default | Status |
+|---|---|---|---|
+| Nothing ever dies | CLAUDE.md versioning section | Current behaviour is correct | ✓ Documented |
+| Multiple active template versions | CLAUDE.md versioning table | `updateTemplate()` should deactivate previous by default | Pending |
+| Document identity via Registry | CLAUDE.md, AI-Assisted-Dev.md | Warn on zero identity fields | Pending |
+| Bulk first / 200 OK always | CLAUDE.md WIP Access Rules | `@wip/client` wraps singles; needs `hasErrors()` helper | Partial |
+| Registry synonyms | AI-Assisted-Dev.md | Surface resolution path in errors | Pending |
+| Template resolution timing | This document, Entry 019 | Cache with TTL (implemented) | ✓ Fixed |
+| Edge types as templates | This document, `document-relationships.md` | `create_edge_type` MCP tool surfaces the distinction; `usage` always shown in tool outputs | ✓ Documented |
+| `versioned: false` overwrite | This document, `document-relationships.md` | Default `versioned: true`; flag immutable after creation | ✓ Documented |
+| Compactheimer's drift | This document | PoNIF checkpoints in slash commands | Pending |
+
+---
+
+*This document emerged from Day 4 of the WIP Constellation experiment, after repeated encounters with the same pattern: a correct-but-surprising WIP behaviour causing confusion for AI assistants and requiring explicit correction. The term "PoNIF" was coined by Peter to name the pattern and make it discussable. Every bug in the experiment that wasn't a real bug — every "fix" that was actually a misunderstanding — traces back to a PoNIF that wasn't yet documented or defaulted.*
+
+*PoNIFs #7 (Edge Types) and #8 (`versioned: false`) were added Day 42 (2026-04-25) alongside the document-relationships implementation — the first net-new PoNIFs since the original Day 4 list. They follow the same pattern: a powerful capability (typed property-carrying edges between documents) with non-intuitive consequences (a class of templates that is also a class of relationships; a class of documents that opts out of versioning). The fact that two new PoNIFs landed simultaneously is itself instructive — capabilities that violate two reader invariants at once need both invariants spelled out, not just one.*
