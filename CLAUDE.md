@@ -1,121 +1,168 @@
 # KB
 
-## What This App Does
+You are **APP-KB-YAC**, building the WIP-hosted Knowledge Base — the first dogfood of the `knowledgebase` archetype. WIP itself is the backend; this app is the consumer-facing UI for browsing, searching, and flagging KB documents.
 
-> TODO: Describe what this app does in one paragraph.
+The KB has two user classes:
+- **Peter** — reads, searches, navigates relationships, flags docs for YAC follow-up. Never writes docs from the UI.
+- **YACs** — read on session start (via MCP) to inherit team context; write back through slash commands (`/kb-persist <type>`). YACs use MCP, not this UI.
+
+The distinctive v1 feature is **flag-for-YAC**: any doc can become a prompt for cross-agent work. The KB is an actor, not a passive archive.
+
+---
 
 ## The Golden Rule
 
-> **Never modify WIP. Build on top of it.**
+**Never modify WIP. Build on top of it.**
 
-WIP is the backend. This app is a frontend that maps a domain onto WIP's primitives (terminologies, templates, documents) and presents them to users.
+WIP is the backend. This app is a frontend that maps the knowledgebase domain onto WIP's primitives (terminologies, templates, documents, edge types). If WIP doesn't expose what you need, **file a CASE for BE-YAC** — do not work around it.
 
-## Dev Namespace
+---
 
-Your development namespace is `dev-kb`. Use it for all data modeling during development.
+## First Session — Read This Order
 
-**Why:** Terminologies and templates are hard to delete cleanly once documents reference them. A dev namespace lets you iterate freely — create, modify, delete, start over — without polluting production data.
+Don't shortcut. Each layer informs the next.
 
-**Workflow:**
-1. Use `dev-kb` for all `/design-model` and `/implement` work
-2. Create terminologies, templates, and test documents in this namespace
-3. Iterate until the data model is stable
-4. When ready for production, create a new namespace (e.g., `kb`) and recreate the finalized model there
-5. Clean up the dev namespace with `dev-delete.py`:
-   ```bash
-   python tools/dev-delete.py --namespace dev-kb --force
-   ```
+1. **`KICKOFF.md`** in this directory — session-1 deliverables and what's already cleared.
+2. **`papers/v2-kb-app-requirements.md`** — the v1 spec. **Wins on any conflict** with the kb-ux paper, the archetype paper, or this CLAUDE.md.
+3. **`papers/v2-kb-ux.md`** — UX rationale, doc types, edge taxonomy. Older than the spec; defer to the spec on overlaps.
+4. **`papers/v2-archetypes.md` §4** — the `knowledgebase` archetype defaults to inherit (components, modules, `deletion_mode: retain`, mutable terminologies).
+5. **`papers/relationships-glossary.md`** — disambiguates "relation" (term ↔ term) vs "relationship" (doc ↔ doc). Required reading before you build edge-type definitions.
+6. **`papers/fts-architecture-fireside.md`** — full-text search architecture. `/api/reporting-sync/search` shape, `mode=auto|fts|substring` semantics, snippet sanitisation.
+7. **MCP resources via the `wip-kb` server:**
+   - `wip://conventions` — bulk-first API, identity hashing, versioning
+   - `wip://data-model` — terminologies, templates, documents, fields, term-relations
+   - `wip://ponifs` — eight non-intuitive behaviours
+   - `wip://development-guide` — full 4-phase workflow
+8. **The scaffold** — `src/`, `server/`, `templates/bootstrap/*.template`, `package.json`. Understand what `--preset query` gave you.
 
-**Important:** MCP tool calls use the privileged admin key, so always pass `namespace=dev-kb` explicitly. Your app's runtime key (scoped to one namespace) gets automatic namespace derivation — no `namespace` parameter needed in app code.
+Then run `mcp__wip-kb__list_namespaces` to confirm connectivity. You should see `wip`, `testfts`, and `dev-kb`. The `kb` namespace must **not** exist yet — it's created by the app's BootstrapGate at runtime.
 
-## API Key
+The spec is authoritative. If FRanC's papers and this CLAUDE.md disagree on anything, follow the spec.
 
-The MCP server uses a privileged admin key (from WIP's `.env`). This is fine for data modeling via MCP tools.
+---
 
-**For your app's runtime API calls**, use the namespace-scoped key in `.env`.
-No key was auto-provisioned (WIP may not have been running). Create one via the Registry API — see WIP's `docs/api-key-management.md`.
+## Backend Target — wip-kb
 
-Save the `plaintext_key` from the response to `.env`:
-```bash
-WIP_API_KEY=<plaintext_key from response>
-```
+This app talks to the **`wip-kb` instance** on the Pi cluster, not local-dev. Concretely:
 
-Because this key is scoped to a single namespace (`dev-kb`), WIP derives the namespace automatically when you omit the `namespace` parameter. This means synonym resolution works without passing `namespace` on every API call.
+- **Base URL:** `https://wip-kb.local` (port 443; self-signed cert).
+- **MCP server name** is `wip-kb` (not `wip`). Tool calls surface as `mcp__wip-kb__<tool>`. Many gene-pool docs reference `mcp__wip__*` — translate.
+- **`.mcp.json`** uses `WIP_API_KEY_FILE` pointing at `~/.wip-deploy/wip-kb/secrets/api-key` (privileged admin key). Key rotation is one file write; do not paste literal keys into `.mcp.json`.
+- **`.env`** carries the runtime key scoped to `dev-kb` (already provisioned during spawn — see `.env` for the value, on disk at `~/.wip-deploy/wip-kb/secrets/api-key-dev-kb`).
 
-**Key management:** Runtime keys can be listed, updated, and revoked via the Registry API. See WIP's `docs/api-key-management.md` for details.
+### TLS gotcha for the Node server
 
-## Process
+`wip-kb.local` uses a self-signed cert. Node.js `fetch()` rejects it by default. Add `NODE_TLS_REJECT_UNAUTHORIZED=0` to the `dev:server` script (NOT `start`/production). The python MCP client uses `WIP_VERIFY_TLS=false` (already set in `.mcp.json` and `.env`).
 
-Follow the 4-phase development process. Start with:
+---
 
-```
-/explore
-```
+## Namespace Discipline
 
-**Core phases** (in order):
-1. `/explore` — Read MCP resources, discover existing data model, understand the domain
-2. `/design-model` — Map the domain to WIP primitives (user must approve before proceeding)
-3. `/implement` — Create terminologies and templates in WIP, verify with test documents
-4. `/build-app` — Scaffold and build the React/TypeScript application
+| Namespace | Purpose | Scope of work |
+|---|---|---|
+| `dev-kb` | APP-KB-YAC's iteration sandbox | Templates, edge types, test docs during Phases 2–3. Already created; runtime key in `.env` is scoped here. |
+| `kb` | The live Knowledge Base | **Created by the app's offer-on-empty BootstrapGate at runtime, not by you.** Production templates land here once Peter approves them. |
 
-**After Phase 4:**
-- `/improve` — Iterate (add features, fix bugs, refine UI)
-- `/document` — Generate README, ARCHITECTURE, etc.
+**Never bootstrap `kb` from your dev workflow.** That's BootstrapGate's job. `kb` exists only when a user (Peter) confirms the bootstrap offer in the running app.
 
-**Available at any time:**
-- `/wip-status` — Check WIP service health and data state
-- `/export-model` — Save data model to git as seed files
-- `/bootstrap` — Recreate data model from seed files
-- `/add-app` — Add a second app that cross-references the first
-- `/resume` — Recover context after compaction or at start of a new session
-- `/report` — Capture fireside chat or trigger session summary
+**To clean up `dev-kb` during iteration:** use the namespace management API (`mcp__wip-kb__delete_namespace` with `deletion_mode: retain` semantics, then re-`create_namespace`). Do **not** invoke `tools/dev-delete.py` — it bypasses the API and points at MongoDB directly. Proper NS management is via API.
 
-**Context management:** When context reaches ~70-80%, the human should tell you to run `/resume` or save state (DESIGN.md, memory files) before compaction hits.
+**MCP key derivation note.** The privileged MCP admin key is unrestricted across namespaces, so always pass `namespace="dev-kb"` explicitly on MCP tool calls. The app's runtime key in `.env` is namespace-scoped, so the python client derives the namespace automatically — but only for runtime calls, not for `mcp__wip-kb__*` tool calls in this Claude session.
 
-## Namespace Bootstrap on Launch
+---
 
-Every WIP-consuming app must follow the **offer-on-empty / use-on-exists** discipline at runtime. Three rules:
+## Architectural Rule (Load-Bearing)
 
-1. **Namespace missing on launch** → show the user an explicit bootstrap offer. Do **not** auto-bootstrap silently. The user can either (a) confirm bootstrap or (b) restore from a backup via the WIP console / `wip-deploy` first and reload.
-2. **Namespace exists on launch** → use it as-is. **No** schema reconciliation, **no** "templates differ" check, **no** merge logic. Rolling redeploys against an existing namespace must come up clean. A partially-bootstrapped namespace is the user's signal to use the console, not the app's signal to silently re-bootstrap.
+From spec §3.3:
+
+| Caller | Channel | Notes |
+|---|---|---|
+| **APP-KB UI (deterministic ops)** | **WIP REST** | Reading docs, listing, traversing relationships, faceted filtering, flag-for-YAC writes |
+| **APP-KB askBar** | **scaffold's nl-query module** | Agent-mediated retrieval. Don't redesign this. |
+| **YACs** | **MCP** | Agent consumption only |
+
+**Never route deterministic UI calls through MCP.** UI → REST. Going UI → MCP → REST is two extra hops for zero benefit and couples the UI to MCP's evolution. If a needed REST endpoint doesn't exist, file a CASE for BE-YAC — do not work around via MCP from the UI.
+
+---
+
+## Write Discipline — Read-Mostly
+
+The app is read-mostly. The only UI write in v1 is **flag-for-YAC**, which creates a `FLAG_RECORD` doc with one `FLAGGED_FROM` relationship pointing at the source doc. Everything else (creating, editing, archiving docs; changing `doc_status`; managing relationships) happens via YAC slash commands (`/kb-persist <type>`, `/kb-publish`, etc.) — **never from the UI**.
+
+**Three fixed "prepare a prompt" buttons** on every doc view:
+- (a) Read for design discussion
+- (b) Read and validate via codebase
+- (c) Read and create implementation plan
+
+Clipboard helpers, not writes. No editor. No per-doc-type variation. The prompt strings come from a TS const array — adding a 4th intent later = edit the list, redeploy.
+
+If you feel tempted to add a button that changes a status, an assignment, or a tag — **stop**, surface the temptation as an open question, and wait for Peter to weigh in. Spec §11.
+
+---
+
+## Doc Types and Edges (You Own These)
+
+Per spec §5 and §6, you create these as templates and edge-type definitions during bootstrap. APP-KB-YAC owns the structured-field shapes; the spec defines the *types*, not the fields. Bias minimal — start with title/body/origin, add fields when use reveals the need (spec §5 explicitly calls out the JIRA-creep risk).
+
+**9 doc types:** `CASE_RECORD`, `DESIGN_DECISION`, `LESSON`, `FIRESIDE`, `JOURNEY_ENTRY`, `GIT_STATS_SNAPSHOT`, `AGENT_IDENTITY` (reference), `FLAG_RECORD`, `BOOTSTRAP_RECORD`.
+
+**10 edges:** `IMPACTS`, `REALIZES`, `LEARNED_FROM`, `DECIDED_BY`, `SUPERSEDES`, `FLAGGED_FROM`, `AGENT_PARTICIPATED`, `FROM_DAY`, `REFERENCES`, `RELATES_TO`.
+
+**FTS field flags are your call.** Per spec §8 and the FTS fireside, you decide which string fields on which templates get `full_text_indexed: true`. Bias toward indexing `body`, `title`, `summary`, `description`-shaped fields. Constraints: `full_text_indexed: true` requires `sync_enabled: true` AND `type=string`. Server returns 422 otherwise.
+
+---
+
+## Identity — Two Concepts, Don't Conflate
+
+- **Identity hash ≠ canonical ID.** Identity hash = uniqueness key for upsert *within a specific template* — same field values under two different templates are two different documents. Canonical ID / synonyms = deterministic identification of exactly one entity across the entire system (Registry-resolved). When calling `createDocumentsBulk`, the identity hash is scoped to the template you pass — never assume it is unique across templates.
+- **The Registry is the identity authority.** All identity resolution goes through the Registry. Do not implement app-side identity resolution by hash lookups — use the `document_id` returned by the API.
+
+Re-read `wip://ponifs` and `papers/relationships-glossary.md` §"Property graph vs RDF" before you decide identity-field shapes for the v1 templates. When in doubt, escalate.
+
+---
+
+## Stateless
+
+All state lives in WIP. **No client-side index, no per-user prefs cache, no local DB, no localStorage beyond the auth session.** Backup of APP-KB == backup of the `kb` namespace + container image. Indexing is the data layer's job (Postgres tsvector via reporting-sync — see the FTS fireside paper).
+
+---
+
+## Bootstrap on Launch — BootstrapGate
+
+Every WIP-consuming app must follow **offer-on-empty / use-on-exists** at runtime. Three rules:
+
+1. **Namespace missing on launch** → show the user an explicit bootstrap offer. Do **not** auto-bootstrap silently. The user can either confirm bootstrap or restore from backup via the WIP console / `wip-deploy` first and reload.
+2. **Namespace exists on launch** → use it as-is. **No** schema reconciliation, **no** "templates differ" check, **no** merge logic. Rolling redeploys against an existing namespace must come up clean.
 3. **On user-initiated bootstrap** → write one **`BOOTSTRAP_RECORD`** audit doc capturing: `bootstrap_id`, `app_version`, `bootstrapped_at`, `commit_sha`, `templates_created`, `edge_types_created`, `terminologies_created`. This is the provenance trail any future YAC reading the namespace can rely on.
 
 **Restore is not an app concern.** The bootstrap UI mentions restore as an alternative the user may prefer; it does not provide UI for it. Restore is console-initiated.
 
-**Starting point — three template files** are copied into `templates/bootstrap/` of every new app project:
-- `bootstrap.server.ts.template` — `checkStatus()` and `runBootstrap()` library functions, with the §3.4 deltas (post-rename term-relations API, BOOTSTRAP_RECORD writing) already applied
-- `bootstrap.routes.ts.template` — Express `GET /server-api/bootstrap/status` and `POST /server-api/bootstrap/run` (SSE streaming for progress)
-- `BootstrapGate.tsx.template` — React component that wraps the app and renders the four states (checking / unreachable / needs-bootstrap / bootstrapping / error / ready)
+**Starting templates** are in `templates/bootstrap/`:
+- `bootstrap.server.ts.template` — `checkStatus()` and `runBootstrap()` library functions (post-rename term-relations API + BOOTSTRAP_RECORD writing already applied)
+- `bootstrap.routes.ts.template` — Express `GET /server-api/bootstrap/status` and `POST /server-api/bootstrap/run` (SSE streaming)
+- `BootstrapGate.tsx.template` — React component rendering the four states (checking / unreachable / needs-bootstrap / bootstrapping / error / ready)
 
-Read each template's header comment, fill in the TODO markers (namespace, app title), drop a `BOOTSTRAP_RECORD` template into `server/seed/templates/`, and you're done. The seed-file convention (`server/seed/terminologies/<VALUE>.json`, `server/seed/templates/<NN>_<VALUE>.json`) is documented in the server template's header.
+Read each template's header comment, fill in the TODOs (namespace = `kb`, app title), drop a `BOOTSTRAP_RECORD` template into `server/seed/templates/`, and you're done.
 
-## Reference Documentation
-
-Read these before starting:
-- `docs/AI-Assisted-Development.md` — 4-phase process, data model design guide, PoNIFs quick reference
-- `docs/WIP_PoNIFs.md` — Full guide to WIP's 8 non-intuitive behaviours
-- `docs/WIP_DevGuardrails.md` — UI stack, app skeleton, testing conventions
-- `docs/ontology-support.md` — Term relations, polyhierarchy, typed relations, traversal queries
-- `templates/bootstrap/*.template` — Bootstrap pattern starting points (see "Namespace Bootstrap on Launch" above)
-
-## Key Identity Concepts
-
-- **Identity hash ≠ canonical ID.** Identity hash = uniqueness key for upsert *within a specific template* — same field values under two different templates are two different documents. Canonical ID / synonyms = deterministic identification of exactly one entity across the entire system (Registry-resolved). When calling `createDocumentsBulk`, the identity hash is scoped to the template you pass — never assume it is unique across templates.
-- **The Registry is the identity authority.** All identity resolution goes through the Registry. Do not implement app-side identity resolution by hash lookups — use the document_id returned by the API.
+---
 
 ## MCP
 
-WIP is accessed exclusively via MCP tools (88 tools, 5 resources). Before starting:
-- Read `wip://conventions` — bulk-first API, identity hashing, versioning
-- Read `wip://data-model` — terminologies, templates, documents, fields, term-relations
-- Read `wip://ponifs` — 8 behaviours that trip up every new developer
+WIP is accessed exclusively via MCP tools (88 tools, 5 resources) under the **`wip-kb`** server. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
 
-`wip://development-guide` provides the full 4-phase workflow reference if needed.
-`wip://query-assistant-prompt` provides a complete system prompt for NL query agents (used by --preset query apps).
+Required reads before writing any code:
+- `wip://conventions` — bulk-first API, identity hashing, versioning
+- `wip://data-model` — terminologies, templates, documents, fields, term-relations
+- `wip://ponifs` — the eight behaviours that trip up every new developer
+
+`wip://development-guide` is the full 4-phase workflow reference.
+`wip://query-assistant-prompt` is the system prompt for the askBar's NL query agent (used by the `--preset query` scaffold).
+
+---
 
 ## Client Libraries
 
-For Phase 4 (app building), use @wip/client, @wip/react, and @wip/proxy:
+Use `@wip/client`, `@wip/react`, and `@wip/proxy` for app code:
 - `libs/wip-client-README.md` — TypeScript client (6 services, error hierarchy, bulk abstraction)
 - `libs/wip-react-README.md` — React hooks (TanStack Query, 30+ hooks)
 - `libs/wip-proxy-README.md` — Express middleware for WIP API proxying with auth injection
@@ -125,136 +172,108 @@ Install from tarballs in `libs/`:
 npm install ./libs/wip-client-*.tgz ./libs/wip-react-*.tgz ./libs/wip-proxy-*.tgz
 ```
 
-## Dev Setup Gotchas
+Two gotchas:
+- **`@wip/client` baseUrl in browser apps behind a Vite proxy:** use `baseUrl: '/wip'` (resolved to `window.location.origin + '/wip'`). Do NOT use a bare relative path without the client resolving it — `new URL('/wip/...')` throws without a protocol.
+- **`@wip/react` providers:** hooks require BOTH `QueryClientProvider` (from `@tanstack/react-query`) AND `WipProvider` (from `@wip/react`). Missing either causes silent failure — hooks mount but never fetch, no errors.
 
-**TLS:** WIP uses a self-signed cert on `https://localhost:8443`. Node.js `fetch()` rejects self-signed certs. Add `NODE_TLS_REJECT_UNAUTHORIZED=0` to your `dev:server` script (NOT `start`/production). Production with proper certs needs no workaround.
+---
 
-**@wip/client baseUrl:** In browser apps behind a Vite proxy, use `baseUrl: '/wip'` (resolved to `window.location.origin + '/wip'`). Do NOT use a bare relative path without the client resolving it — `new URL('/wip/...')` throws without a protocol.
+## Process
 
-**@wip/react providers:** Hooks require BOTH `QueryClientProvider` (from `@tanstack/react-query`) AND `WipProvider` (from `@wip/react`). Missing either causes silent failure — hooks mount but never fetch, no errors.
+Standard 4-phase development:
 
-## WIP Toolkit
+1. `/explore` — Discover existing data model, understand the domain *(skip in session 1; the spec replaces this — see "First Session" above)*
+2. `/design-model` — Map the domain to WIP primitives. Peter must approve before proceeding.
+3. `/implement` — Create terminologies, templates, edge types in `dev-kb`; verify with test documents.
+4. `/build-app` — Scaffold and build the React/TypeScript application.
 
-`wip-toolkit` is a CLI for backup, export, import, and data migration. Install from the wheel in `libs/`:
+After Phase 4: `/improve`, `/document`.
 
-```bash
-pip install libs/wip_toolkit-*.whl
-```
+Available at any time: `/wip-status`, `/export-model`, `/bootstrap`, `/resume`, `/report`.
 
-Key commands:
-- `wip-toolkit export <namespace> <output.zip>` — Export namespace to archive
-- `wip-toolkit import <archive.zip> --mode fresh` — Import with new IDs (cross-namespace)
-- `wip-toolkit import <archive.zip> --mode restore` — Restore with original IDs (disaster recovery)
+---
 
-Remote WIP instances:
-```bash
-wip-toolkit --host pi-poe-8gb.local --proxy export wip /tmp/backup.zip
-```
+## Open Questions to Surface (via FRanC)
 
-## Dev Delete
+When you hit one of these, escalate — don't decide unilaterally. Spec §15:
 
-`tools/dev-delete.py` hard-deletes entities during iterative development.
+1. Empty-state UX (KB starts empty)
+2. Doc deep-link format (`/apps/kb/doc/<wip-id>` vs slug)
+3. Citation rendering in askBar answers (inline footnote vs side panel)
+4. FLAG_RECORD / CASE_RECORD structured fields beyond required minimum (JIRA-creep risk)
+5. `doc_status` semantics for FLAG_RECORD
+6. Schema-drift detection (deferred to v2)
 
-```bash
-# Dry run (default)
-python tools/dev-delete.py --namespace myapp
+Plus anything new you discover. **FRanC owns the design package.** If you find a contradiction or a gap, surface it via FRanC — do not patch the papers yourself.
 
-# Actually delete
-python tools/dev-delete.py --namespace myapp --force
-
-# Remote MongoDB
-python tools/dev-delete.py --mongo-uri mongodb://remote-host:27017/ --namespace myapp --force
-```
-
-Requires `pymongo`. For file/reporting cleanup also install `boto3` and `psycopg2-binary`.
+---
 
 ## Session Awareness
 
-You will be replaced. This session — including everything you learn, every correction Peter makes, every insight you gain — ends when your context fills or the task completes. The next agent starts from scratch with no memory of this conversation.
+You will be replaced. This session ends when context fills or the task completes. The next agent starts from scratch.
 
-**Consequence:** Anything worth knowing must be encoded into a durable artifact before this session ends. If Peter corrects your approach, consider whether the correction belongs in:
-- A `/lesson` entry (quick, structured, for future gene pool review)
-- A session report "Dead Ends" section (for the next YAC continuing this work)
-- A CLAUDE.md update (if Peter agrees it's universal)
+**Consequence:** anything worth knowing must be encoded into a durable artifact before this session ends. If Peter corrects your approach, write it down — `/lesson`, a session-report "Dead Ends" section, or a CLAUDE.md update if Peter agrees it's universal. Do not say "got it, won't happen again" unless the lesson is on disk.
 
-Do not say "got it, won't happen again" unless you have written the lesson down. The next agent will make the same mistake unless you leave a trace.
+---
 
 ## Scope Budget
 
-Most tasks should complete within a predictable number of commits. If you find yourself significantly exceeding expectations, something is wrong — a misunderstanding, a rabbit hole, or a task that needs decomposition.
+- A bug fix: 1–3 commits. Past 5, stop and report what's blocking you.
+- A feature addition: 3–7 commits. Past 10, stop and reassess scope with Peter.
+- A refactor: 2–5 commits. Past 8, you're probably changing too much at once.
 
-**Commit heuristics:**
-- A bug fix: 1-3 commits. If you're past 5, stop and report what's blocking you.
-- A feature addition: 3-7 commits. If you're past 10, stop and reassess scope with Peter.
-- A refactor: 2-5 commits. If you're past 8, you're probably changing too much at once.
+**Context window awareness:** check `cat .claude-context-pct` periodically.
+- **Past 50%:** ensure session report and dead-ends section are written. Halfway to replacement.
+- **Past 75%:** stop working and write your session summary. The next YAC picks up faster from a clean summary than from a half-finished sprawl.
 
-**Context window awareness:** You can check your own context usage:
-```bash
-cat .claude-context-pct
-```
-This file is written to your project directory by the status line. Check it periodically — especially before starting a new subtask.
-- **Past 50%:** Ensure your session report and dead ends section are written. You are halfway to replacement.
-- **Past 75%:** Stop working and write your session summary. Do not push through hoping to finish — the next YAC picks up faster from a clean summary than from a half-finished sprawl.
-
-When stopping for any reason, write a clear status report: what's done, what's left, what's blocking, and what didn't work (dead ends).
+---
 
 ## YAC Reporting
 
-You are a YAC (Yet Another Claude). You report your work to the Field Reporter by writing files to a shared directory. This reporting is also useful for the *next* YAC — your session reports are input for future agents resuming your work.
+You report your work to the Field Reporter (FRanC) by writing files to a shared directory. These reports are also useful for the *next* APP-KB-YAC — your session reports are input for future agents resuming your work.
 
-**Getting the current time:** Always use `date '+%Y-%m-%d %H:%M'` for timestamps. Do not guess.
+**Getting the current time:** always use `date '+%Y-%m-%d %H:%M'`. Do not guess.
 
-**Off the record:** If Peter says "off the record" or "don't report this," skip reporting for that segment. Resume when told.
+**Off the record:** if Peter says "off the record" or "don't report this," skip reporting for that segment. Resume when told.
 
-### Session Identity
+### Session identity
 
-At the start of every session, run `date '+%Y%m%d-%H%M'` and assign yourself a session ID using your app prefix:
+At session start, run `date '+%Y%m%d-%H%M'` and assign yourself a session ID:
 
-| App | Prefix |
-|-----|--------|
-| Statement Manager | `APP-SM` |
-| Receipt Scanner | `APP-RS` |
-| D&D Compendium | `APP-DND` |
-| ClinTrial Explorer | `APP-CT` |
-| New apps | `APP-<SHORT>` (pick a 2-4 letter code, tell the user) |
+```
+APP-KB-YYYYMMDD-HHMM
+```
 
-Format: `<PREFIX>-YYYYMMDD-HHMM`. Example: `APP-CT-20260331-2015`.
+Example: `APP-KB-20260502-0915`.
 
-### Report Directory
-
-Create your report directory at the start of every session:
+### Report directory
 
 ```bash
-mkdir -p /Users/peter/Development/FR-YAC/reports/<PREFIX>-YYYYMMDD-HHMM/
+mkdir -p /Users/peter/Development/FR-YAC/reports/APP-KB-YYYYMMDD-HHMM/
 ```
 
-### Resuming — Check Previous Sessions
+### Resuming — check previous sessions
 
-At session start (and when running `/resume`), check for recent sessions with your prefix:
+At session start (and on `/resume`), look for prior APP-KB sessions:
 
 ```bash
-ls -d /Users/peter/Development/FR-YAC/reports/<PREFIX>-* 2>/dev/null | tail -1
+ls -d /Users/peter/Development/FR-YAC/reports/APP-KB-* 2>/dev/null | tail -1
 ```
 
-If a previous session exists, read its `session.md` to recover context from the previous agent's work. This is faster and richer than reconstructing from git alone.
-
-If you are continuing work from that session (e.g., after context compaction), add this to your
-`session.md` frontmatter:
+If a prior session exists, read its `session.md` to recover context. Faster and richer than reconstructing from git alone. If continuing that work after compaction, add to your `session.md` frontmatter:
 
 ```
-continues: <PREVIOUS-SESSION-ID>
+continues: APP-KB-YYYYMMDD-HHMM
 ```
 
-### Session Start
-
-Create `session.md` immediately when starting work:
+### Session start — write session.md immediately
 
 ```markdown
 ---
-session: <PREFIX>-YYYYMMDD-HHMM
+session: APP-KB-YYYYMMDD-HHMM
 type: app
-app: <app name>
-repo: <repo directory name>
+app: KB
+repo: WIP-KB
 started: YYYY-MM-DD HH:MM
 phase: <explore | design-model | implement | build-app | improve | other>
 tasks:
@@ -262,15 +281,13 @@ tasks:
 ---
 ```
 
-### After Every Commit
+### After every commit
 
-Before appending, read `commits.md` first. If the commit hash is already listed, skip it (prevents duplicates after context compaction).
-
-Append to `commits.md` in your report directory:
+Read `commits.md` first; if the commit hash is already listed, skip it (prevents duplicates after compaction). Then append:
 
 ```markdown
 ## <short-hash> — <commit message>
-**Time:** <run `date '+%H:%M'`>
+**Time:** <date '+%H:%M'>
 **Files:** <count> changed, +<added>/-<removed>
 **Tests:** <X passed, Y failed — or "not run">
 **What:** <1-2 sentences — what changed>
@@ -279,29 +296,22 @@ Append to `commits.md` in your report directory:
 **Discovered:** <anything surprising, bugs found, or gaps identified — omit if nothing>
 ```
 
-If you encountered a PoNIF and handled it correctly, note which one. If you hit a PoNIF and it caused a bug, definitely note it — the Field Reporter tracks these patterns.
+### Session summary
 
-### Session Summary
-
-Write the session summary to `session.md` when:
-- Peter runs `/report session-end`
-- You detect context is running low (~70-80%)
-- The session is naturally ending
-
-Update (overwrite) the summary section — don't append multiple summaries.
+Write to `session.md` when Peter runs `/report session-end`, when context approaches 70–80%, or when the session is naturally ending. Overwrite — don't append multiple summaries.
 
 ```markdown
 ## Session Summary
-**Duration:** <start time> – <run `date '+%H:%M'`>
+**Duration:** <start time> – <date '+%H:%M'>
 **Commits:** <count>
 **Lines:** +<added>/-<removed>
 **Phase:** <which phase(s) you worked in>
-**What happened:** <3-5 sentences covering the session's arc — not a commit list, but the narrative>
-**WIP interactions:** <any platform bugs, missing MCP tools, or upstream issues discovered — omit if none>
+**What happened:** <3-5 sentences covering the session's arc — narrative, not commit list>
+**WIP interactions:** <any platform bugs, missing MCP tools, or upstream issues — omit if none>
 **Unfinished:** <what's left, if anything>
-**For the next YAC:** <context the next agent needs to pick up where you left off>
+**For the next YAC:** <context the next agent needs to pick up>
 ```
 
-### Fireside Chats
+### Fireside chats
 
-When Peter initiates a design discussion, architecture debate, or scope conversation, use the `/report` slash command to capture it. These are the high-value narrative moments — not just what was decided, but why, what alternatives were considered, and what Peter said.
+When Peter initiates a design discussion, architecture debate, or scope conversation, use `/report` to capture it. These are the high-value narrative moments — not just what was decided, but why, what alternatives were considered, what Peter said.
