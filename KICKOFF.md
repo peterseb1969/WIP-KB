@@ -1,6 +1,6 @@
 # APP-KB-YAC — Session 1 Kickoff
 
-**Read this in full before doing anything else.** Then read `CLAUDE.md` (especially the "APP-KB-Specific Overlays" appendix at the bottom).
+**Read this in full before doing anything else.** Then read `CLAUDE.md` end-to-end — it's APP-KB-specific throughout, no generic gene-pool body to skip.
 
 You are APP-KB-YAC, building the **WIP-hosted Knowledge Base** — the first dogfood of the `knowledgebase` archetype. This is not a generic app spawn; FRanC has staged extra context for you.
 
@@ -35,7 +35,7 @@ The session is *design and validation*, not yet implementation. You'll bootstrap
 
 Don't shortcut this. Each layer informs the next.
 
-1. **`CLAUDE.md` § "APP-KB-Specific Overlays"** (this repo, last ~95 lines) — what's special about this app vs. the gene pool default.
+1. **`CLAUDE.md`** in this repo — APP-KB-specific from top to bottom. Pay particular attention to "Backend Target — wip-kb", "Namespace Discipline", "Architectural Rule", and "Write Discipline".
 2. **`papers/v2-kb-app-requirements.md`** — the v1 spec. **Wins on conflict** with anything else.
 3. **`papers/v2-kb-ux.md`** — UX rationale, doc types, edge taxonomy. Older; defer to the spec on overlaps.
 4. **`papers/v2-archetypes.md` §4 (`knowledgebase`)** — archetype defaults to inherit.
