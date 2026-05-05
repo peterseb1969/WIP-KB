@@ -1,0 +1,14 @@
+{
+  "value": "DECIDED_BY",
+  "label": "Decided By",
+  "description": "Decision decided in a fireside chat (DESIGN.md §6).",
+  "usage": "relationship",
+  "versioned": false,
+  "identity_fields": ["source_ref", "target_ref"],
+  "source_templates": ["DESIGN_DECISION"],
+  "target_templates": ["FIRESIDE"],
+  "fields": [
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["DESIGN_DECISION"] },
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["FIRESIDE"] }
+  ]
+}

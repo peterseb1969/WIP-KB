@@ -1,0 +1,16 @@
+{
+  "value": "KB_TARGET_YAC",
+  "label": "KB Flag Target YAC",
+  "description": "Targets for the flag-for-YAC modal (per DESIGN.md §3.2). USER1 is the human owner — multi-user-future-proof per Q15. AGENT_IDENTITY records seeded post-bootstrap by APP-KB-YAC follow this same value scheme.",
+  "mutable": true,
+  "terms": [
+    { "value": "USER1",   "label": "Peter",                      "sort_order": 10, "description": "The human owner of this WIP-KB instance. Display label is 'Peter' but data layer is multi-user-future-proof." },
+    { "value": "BE-YAC",  "label": "BE-YAC",                     "sort_order": 20, "description": "Backend YAC — owns the WIP platform." },
+    { "value": "APP-RC",  "label": "APP-RC",                     "sort_order": 30, "description": "React Console YAC." },
+    { "value": "APP-CT",  "label": "APP-CT",                     "sort_order": 40, "description": "Clinical Trials app YAC." },
+    { "value": "APP-KB",  "label": "APP-KB-YAC",                 "sort_order": 50, "description": "KB app YAC (this app's authoring agent)." },
+    { "value": "BUG-YAC", "label": "BUG-YAC",                    "sort_order": 60, "description": "Bug-hunting YAC." },
+    { "value": "FRanC",   "label": "FRanC",                      "sort_order": 70, "description": "Field Reporter — captures sessions, synthesizes, owns design papers." },
+    { "value": "any",     "label": "Any (no specific target)",   "sort_order": 80, "description": "Open flag — any agent can pick it up." }
+  ]
+}

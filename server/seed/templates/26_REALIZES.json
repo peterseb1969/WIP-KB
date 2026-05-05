@@ -1,0 +1,14 @@
+{
+  "value": "REALIZES",
+  "label": "Realizes",
+  "description": "Implementation work realizes a decision (DESIGN.md §6, Q10: KB has no 'code/feature' doc type, narrowed to docs that can describe implementation).",
+  "usage": "relationship",
+  "versioned": false,
+  "identity_fields": ["source_ref", "target_ref"],
+  "source_templates": ["CASE_RECORD", "DESIGN_DECISION", "JOURNEY_ENTRY"],
+  "target_templates": ["DESIGN_DECISION"],
+  "fields": [
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "JOURNEY_ENTRY"] },
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["DESIGN_DECISION"] }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "value": "GIT_STATS_SNAPSHOT",
+  "label": "Git Stats Snapshot",
+  "description": "Per-day git activity snapshot (DESIGN.md §5.6). Structured-only — no body. Identity = (snapshot_date, repo) so re-running /stats for the same day overwrites.",
+  "usage": "entity",
+  "identity_fields": ["snapshot_date", "repo"],
+  "fields": [
+    { "name": "title",         "label": "Title",          "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "authored_by",   "label": "Authored By",    "type": "string",  "mandatory": true },
+    { "name": "doc_status",    "label": "Doc Status",     "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "draft" },
+    { "name": "tags",          "label": "Tags",           "type": "array",   "array_item_type": "string" },
+    { "name": "root",          "label": "Root",           "type": "boolean", "default_value": false },
+    { "name": "snapshot_date", "label": "Snapshot Date",  "type": "date",    "mandatory": true },
+    { "name": "repo",          "label": "Repo",           "type": "string",  "mandatory": true },
+    { "name": "commits",       "label": "Commits",        "type": "integer" },
+    { "name": "lines_added",   "label": "Lines Added",    "type": "integer" },
+    { "name": "lines_removed", "label": "Lines Removed",  "type": "integer" },
+    { "name": "files_changed", "label": "Files Changed",  "type": "integer" },
+    { "name": "contributors",  "label": "Contributors",   "type": "integer" }
+  ]
+}

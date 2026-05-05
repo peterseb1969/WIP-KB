@@ -1,0 +1,13 @@
+{
+  "value": "KB_DOC_STATUS",
+  "label": "KB Document Status",
+  "description": "Lifecycle states for KB entity documents (per DESIGN.md §3.1). FLAG_RECORD and BOOTSTRAP_RECORD override the default to 'published' on create.",
+  "mutable": true,
+  "terms": [
+    { "value": "draft",      "label": "Draft",      "sort_order": 10, "description": "Newly captured; not yet reviewed." },
+    { "value": "reviewed",   "label": "Reviewed",   "sort_order": 20, "description": "Reviewed by a human or YAC; ready for publication or use." },
+    { "value": "published",  "label": "Published",  "sort_order": 30, "description": "Visible as canonical KB content. FLAG_RECORD and BOOTSTRAP_RECORD default here." },
+    { "value": "deprecated", "label": "Deprecated", "sort_order": 40, "description": "Superseded but still resolvable; kept for historical reference." },
+    { "value": "archived",   "label": "Archived",   "sort_order": 50, "description": "Hidden from default views; remains in storage." }
+  ]
+}

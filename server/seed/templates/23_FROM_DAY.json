@@ -1,0 +1,14 @@
+{
+  "value": "FROM_DAY",
+  "label": "From Day",
+  "description": "A git-stats snapshot belongs to a specific journey day (DESIGN.md §6, Q16: kept narrow — created_at provides temporal context for any other doc).",
+  "usage": "relationship",
+  "versioned": false,
+  "identity_fields": ["source_ref", "target_ref"],
+  "source_templates": ["GIT_STATS_SNAPSHOT"],
+  "target_templates": ["JOURNEY_ENTRY"],
+  "fields": [
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["GIT_STATS_SNAPSHOT"] },
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["JOURNEY_ENTRY"] }
+  ]
+}

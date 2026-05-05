@@ -1,0 +1,17 @@
+{
+  "value": "FIRESIDE",
+  "label": "Fireside",
+  "description": "Design-chat / fireside transcripts (DESIGN.md §5.4). topic gets FTS weight A for topic-page aggregation. chat_date separates when-the-chat-happened from when-it-was-persisted.",
+  "usage": "entity",
+  "identity_fields": ["title"],
+  "fields": [
+    { "name": "title",       "label": "Title",       "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "body",        "label": "Body",        "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "authored_by", "label": "Authored By", "type": "string",  "mandatory": true },
+    { "name": "doc_status",  "label": "Doc Status",  "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "draft" },
+    { "name": "tags",        "label": "Tags",        "type": "array",   "array_item_type": "string" },
+    { "name": "root",        "label": "Root",        "type": "boolean", "default_value": false },
+    { "name": "topic",       "label": "Topic",       "type": "string",  "full_text_indexed": true },
+    { "name": "chat_date",   "label": "Chat Date",   "type": "date" }
+  ]
+}

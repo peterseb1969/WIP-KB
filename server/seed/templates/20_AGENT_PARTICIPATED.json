@@ -1,0 +1,14 @@
+{
+  "value": "AGENT_PARTICIPATED",
+  "label": "Agent Participated",
+  "description": "Agent participated in this doc's creation/discussion (DESIGN.md §6, Q11: broadened beyond firesides).",
+  "usage": "relationship",
+  "versioned": false,
+  "identity_fields": ["source_ref", "target_ref"],
+  "source_templates": ["FIRESIDE", "CASE_RECORD", "DESIGN_DECISION", "JOURNEY_ENTRY"],
+  "target_templates": ["AGENT_IDENTITY"],
+  "fields": [
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["FIRESIDE", "CASE_RECORD", "DESIGN_DECISION", "JOURNEY_ENTRY"] },
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["AGENT_IDENTITY"] }
+  ]
+}

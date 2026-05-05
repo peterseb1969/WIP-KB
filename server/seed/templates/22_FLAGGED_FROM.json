@@ -1,0 +1,14 @@
+{
+  "value": "FLAGGED_FROM",
+  "label": "Flagged From",
+  "description": "FLAG_RECORD points back at the source doc the user flagged (DESIGN.md §6). Spec §9 mandates source = FLAG_RECORD (resolved Q9 against the kb-ux paper's stale 'Case → any doc' wording).",
+  "usage": "relationship",
+  "versioned": false,
+  "identity_fields": ["source_ref", "target_ref"],
+  "source_templates": ["FLAG_RECORD"],
+  "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "FLAG_RECORD", "BOOTSTRAP_RECORD"],
+  "fields": [
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["FLAG_RECORD"] },
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "FLAG_RECORD", "BOOTSTRAP_RECORD"] }
+  ]
+}

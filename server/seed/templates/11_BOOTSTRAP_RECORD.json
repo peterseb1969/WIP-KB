@@ -1,0 +1,22 @@
+{
+  "value": "BOOTSTRAP_RECORD",
+  "label": "Bootstrap Record",
+  "description": "Audit doc per spec §3.4 (DESIGN.md §5.9). One per user-initiated bootstrap. Structured-only (no body); root:true by default — bootstrap audit docs are intentional graph entry points.",
+  "usage": "entity",
+  "identity_fields": ["bootstrap_id"],
+  "fields": [
+    { "name": "title",                   "label": "Title",                  "type": "string",   "mandatory": true, "full_text_indexed": true },
+    { "name": "authored_by",             "label": "Authored By",            "type": "string",   "mandatory": true },
+    { "name": "doc_status",              "label": "Doc Status",             "type": "term",     "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "published" },
+    { "name": "tags",                    "label": "Tags",                   "type": "array",    "array_item_type": "string" },
+    { "name": "root",                    "label": "Root",                   "type": "boolean",  "default_value": true },
+    { "name": "bootstrap_id",            "label": "Bootstrap ID",           "type": "string",   "mandatory": true },
+    { "name": "app_version",             "label": "App Version",            "type": "string",   "mandatory": true },
+    { "name": "commit_sha",              "label": "Commit SHA",             "type": "string",   "mandatory": true },
+    { "name": "bootstrapped_at",         "label": "Bootstrapped At",        "type": "datetime", "mandatory": true },
+    { "name": "templates_created",       "label": "Templates Created",      "type": "array",    "mandatory": true, "array_item_type": "string" },
+    { "name": "edge_types_created",      "label": "Edge Types Created",     "type": "array",    "mandatory": true, "array_item_type": "string" },
+    { "name": "terminologies_created",   "label": "Terminologies Created",  "type": "array",    "mandatory": true, "array_item_type": "string" },
+    { "name": "agent_identities_seeded", "label": "Agent Identities Seeded","type": "array",    "array_item_type": "string" }
+  ]
+}

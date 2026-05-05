@@ -1,0 +1,15 @@
+{
+  "value": "DESIGN_DECISION",
+  "label": "Design Decision",
+  "description": "Architectural decision documents (DESIGN.md §5.2). Examples: archetypes paper, FTS fireside outcomes. Identity by title — re-filing under the same title creates a new version.",
+  "usage": "entity",
+  "identity_fields": ["title"],
+  "fields": [
+    { "name": "title",       "label": "Title",       "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "body",        "label": "Body",        "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "authored_by", "label": "Authored By", "type": "string",  "mandatory": true },
+    { "name": "doc_status",  "label": "Doc Status",  "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "draft" },
+    { "name": "tags",        "label": "Tags",        "type": "array",   "array_item_type": "string" },
+    { "name": "root",        "label": "Root",        "type": "boolean", "default_value": false }
+  ]
+}
