@@ -469,4 +469,33 @@ When Peter signs off:
 
 ---
 
+## 11. Phase 3 Verification (`dev-kb`, 2026-05-05)
+
+Persisted the model to `dev-kb` per §10 and ran the smoke. Status: **clean**.
+
+| Layer | Persisted | Verified |
+|---|---|---|
+| Terminologies | 2 (`KB_DOC_STATUS`, `KB_TARGET_YAC`) | term resolution on `doc_status: "draft"`/`"published"`, `target_yac: "BE-YAC"`/`"APP-KB"`, `source_yac: "APP-KB"` |
+| Terms | 13 (5 + 8) | listing returns expected `value`/`label`/`sort_order` |
+| Entity templates | 9 | `create_templates_bulk` returned 9× `created`; identity_fields per §5 |
+| Edge types | 10 (all `versioned: false`, `identity_fields: ["source_ref", "target_ref"]`) | `get_template_fields IMPACTS` confirms identity defaults applied |
+| Smoke docs | 10 (one per entity template; D1+D2 for IMPACTS/SUPERSEDES) | per-template doc tables auto-created in reporting-sync |
+| Smoke edges | 10 (one per edge type) | `identity_hash` non-null on all 10; `get_document_relationships(D1)` returns 6 edges with inline reference resolution |
+| FTS | per-field `full_text_indexed: true` on title (A), body (B), topic, description | `search("smoketestmagic42")` returns 10/10 docs with `ts_rank` scores + `<b>…</b>` snippets; title-weight A > body-weight B |
+| PoNIF #8 dedup | edge identity = `[source_ref, target_ref]`, `versioned: false` | re-write of `IMPACTS(D1→D2)` returns `status: "skipped"`, `is_new: false`, same `document_id` — overwrite-in-place works as designed |
+
+### Issue surfaced and resolved
+
+`create_edge_type` was not applying its documented default `identity_fields=["source_ref", "target_ref"]`; edge types were landing with `identity_fields: []`, breaking the PoNIF #8 contract for duplicate-write dedup. Filed as **CASE-288** (BE-YAC, mcp-server). BE-YAC patched the wrapper boundary at `wip_mcp/server.py:1842-1845`, bumped manifest to `v1.2.6`. After `/mcp` reconnect, the `dev-kb` namespace was nuked (`PUT /api/registry/namespaces/dev-kb {deletion_mode:'full'}` → `delete_namespace` → `create_namespace`) and Phase 3 re-run cleanly. Verified: `IMPACTS` now reports `identity_fields: ["source_ref","target_ref"]` and re-writes correctly skip.
+
+### Tooling note for future-you
+
+`mcp__wip-kb__create_namespace` is POST-only (409 on existing). The PUT-upsert documented in `wip://conventions` is not surfaced as an MCP tool yet, so flipping `deletion_mode` requires direct REST. Worth filing as a tooling gap if it bites again.
+
+### Next step
+
+§10 step 6 — translate the persisted definitions into `server/seed/templates/` for BootstrapGate to replay into `kb` at runtime. The dev-kb model is the source of truth for that translation.
+
+---
+
 *Discipline summary in one paragraph (post-Q1–Q17 resolution 2026-05-05): nine doc-type templates (seven entity + AGENT_IDENTITY reference + BOOTSTRAP_RECORD audit), two KB-local terminologies (`KB_DOC_STATUS`, `KB_TARGET_YAC` — `KB_AGENT_KIND` dropped per Q17), ten relationship templates with `versioned: false` and `[source_ref, target_ref]` identity. Common entity fields: title (FTS-A), body (FTS-B), authored_by (string per Q13, with the noted string-drift caveat), doc_status (term ref to `KB_DOC_STATUS`, default `draft`), tags (array<string>, universal per Q12), root (bool). Identity-field choices bias to `[title]` for narrative docs, `[date,...]` for time-keyed docs (JOURNEY_ENTRY, GIT_STATS_SNAPSHOT), zero (append-only) for FLAG_RECORD and CASE_RECORD. FLAG_RECORD's `doc_status` defaults to `published` per Q6 (override of the common-field default); BOOTSTRAP_RECORD ships with `doc_status: published` per §5.9. FTS bias: title (A) + body (B) on every entity that has them; structured-only types (GIT_STATS_SNAPSHOT, BOOTSTRAP_RECORD) carry only title FTS. AGENT_IDENTITY ships with eight bootstrap-seeded records — the human owner is `USER1` (display title "Peter") per Q15; the seven YACs are FRanC, BE-YAC, APP-RC, APP-CT, APP-KB, BUG-YAC, DOC-YAC. Doc deep-link format is `/apps/kb/doc/<wip-id>` (Q2). askBar citations render in a side panel (Q3). FLAG_RECORD title auto-derives with override (Q14). REALIZES source = `[CASE_RECORD, DESIGN_DECISION, JOURNEY_ENTRY]` (Q10); AGENT_PARTICIPATED source = `[FIRESIDE, CASE_RECORD, DESIGN_DECISION, JOURNEY_ENTRY]` (Q11); FROM_DAY stays narrow at `GIT_STATS_SNAPSHOT → JOURNEY_ENTRY` (Q16). Empty-state UX = single message "a YAC needs to write a doc before the UI is activated" (Q1). ARCHITECTURAL_PATTERN and GLOSSARY_ENTRY surfaced as v2 candidates per spec/archetype divergence (spec wins). Persistence happens only after Peter approves; first stop is `dev-kb`, then BootstrapGate seed files, then `kb` at runtime.*
