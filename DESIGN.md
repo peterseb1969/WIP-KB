@@ -49,7 +49,9 @@ Identity choices below balance two failure modes:
 
 ---
 
-## 3. Terminologies (3)
+## 3. Terminologies (2)
+
+> **Resolved 2026-05-05:** Q17 dropped `KB_AGENT_KIND` from v1. AGENT_IDENTITY launches with `agent_value` + `title` + `description` only. The 3-value LOV (human/yac/system) didn't unlock anything in v1; add later if filtering needs reveal.
 
 All KB-local; live in the `kb` namespace. Per archetype default: `mutable: true, extensible: true` (knowledge grows).
 
@@ -75,7 +77,7 @@ Dropdown values for "Flag for YAC" modal target. Mutable+extensible per archetyp
 
 | value | label |
 |---|---|
-| `peter` | Peter |
+| `USER1` | Peter |
 | `BE-YAC` | BE-YAC |
 | `APP-RC` | APP-RC |
 | `APP-CT` | APP-CT |
@@ -84,19 +86,7 @@ Dropdown values for "Flag for YAC" modal target. Mutable+extensible per archetyp
 | `FRanC` | FRanC |
 | `any` | Any (no specific target) |
 
-**[CALL]** Seeded with the spec §9.1 list (`BE-YAC, APP-RC, BUG-YAC, FRanC, "any"`) plus APP-CT, APP-KB-YAC, peter. Mutable per archetype, so YACs can extend.
-
-### 3.3 `KB_AGENT_KIND`
-
-Used by `AGENT_IDENTITY.kind`. Distinguishes person/agent/imported. Optional but useful for filtering.
-
-| value | label |
-|---|---|
-| `human` | Human |
-| `yac` | YAC (cross-agent worker) |
-| `system` | System |
-
-**[CALL]** Defer if Peter wants to push back on JIRA-creep. AGENT_IDENTITY can launch with just `agent_value` + `label` + `description` and add `kind` later. See §5.7.
+**Resolved 2026-05-05 (Q15):** the human owner is `USER1` (not `peter`) so the LOV is multi-user-future-proof. Display label stays "Peter" — UI shows readable name, data layer is multi-user-ready. Future deploys assign their own USER1 (single-tenant per WIP-KB instance) or use USER1/USER2/... when multi-user mechanics ship in v1.5+.
 
 ---
 
@@ -145,7 +135,9 @@ Cross-agent cases filed by YACs. v1 ships KB-native (no migration of `yac-discus
 
 **Identity rationale:** filing the same case twice is unusual; when it happens, two records is more honest than silent merge. Each `/case file` invocation = one new doc.
 
-**Spec §15.5 note:** I'm holding the line at `source_yac` + `target_yac` and rejecting `severity`, `assignee`, `priority`, `status_machine`. Surfaced in §9.
+**Resolved 2026-05-05 (Q5):** KB-CASE_RECORD is a knowledge artifact (write-once breadcrumb), not a live work tracker. The `yac-discussions/` filesystem stays the live medium for in-flight cases with their status changes and rename cycles. KB-CASE_RECORD captures "this case existed and what it was about"; CASE evolution (responses, comments, status flips) is not modeled here in v1.
+
+**Spec §15.5 note (resolved):** Held at `source_yac` + `target_yac`. `severity`, `assignee`, `priority`, `status_machine` rejected per Q5. Same JIRA-creep argument as Q4.
 
 ### 5.2 `DESIGN_DECISION` — entity
 
@@ -241,27 +233,28 @@ YAC personas (FRanC, BE-YAC, APP-RC, etc.). `usage: reference` = LOV record (spe
 | `versioned` | `true` |
 | `identity_fields` | `[agent_value]` |
 | Custom fields | `agent_value` (string, mandatory) — canonical name, e.g., `BE-YAC` |
-|  | `kind` (term ref → `KB_AGENT_KIND`, optional — see §3.3 [CALL]) |
 |  | `description` (string, optional, FTS B) — what this agent does |
 | Common fields | title (= agent display name), authored_by, doc_status, tags, root — **no body** |
 | FTS | title (A), description (B) |
+
+**Resolved 2026-05-05 (Q17):** `kind` field dropped. AGENT_IDENTITY launches with `agent_value` + `title` (display name) + `description`. The `human` vs `yac` distinction is implicit in the name pattern (`USER1`, `USER2` look unmistakably different from `BE-YAC`, `FRanC`, `APP-KB`).
 
 **Identity rationale:** one record per canonical agent name. `agent_value: "BE-YAC"` is the dedup key.
 
 **Bootstrap-seeded (per spec §5 "Bootstrap-seeded for known YACs"):**
 
-| agent_value | kind | description |
+| agent_value | title (display) | description |
 |---|---|---|
-| `peter` | human | Peter — owner, reader, flag-er |
-| `FRanC` | yac | Field Reporter — captures sessions, synthesizes, owns design papers |
-| `BE-YAC` | yac | Backend YAC — owns WIP platform |
-| `APP-RC` | yac | React Console YAC |
-| `APP-CT` | yac | Clinical Trials app YAC |
-| `APP-KB` | yac | KB app YAC (this app's authoring agent) |
-| `BUG-YAC` | yac | Bug-hunting YAC |
-| `DOC-YAC` | yac | Documentation auditor YAC |
+| `USER1` | Peter | The human owner — reader, flagger, decider |
+| `FRanC` | FRanC | Field Reporter — captures sessions, synthesizes, owns design papers |
+| `BE-YAC` | BE-YAC | Backend YAC — owns WIP platform |
+| `APP-RC` | APP-RC | React Console YAC |
+| `APP-CT` | APP-CT | Clinical Trials app YAC |
+| `APP-KB` | APP-KB-YAC | KB app YAC (this app's authoring agent) |
+| `BUG-YAC` | BUG-YAC | Bug-hunting YAC |
+| `DOC-YAC` | DOC-YAC | Documentation auditor YAC |
 
-**[CALL]** Bootstrap seeds these eight as initial AGENT_IDENTITY records. New YACs add themselves on first `/kb-persist`.
+**Resolved 2026-05-05 (Q15):** the human owner's `agent_value` is `USER1` (not `peter`). Display title stays "Peter" — UI shows readable name, data layer is multi-user-ready. Future deploys assign their own `USER1` per WIP-KB instance. Bootstrap seeds these eight as initial AGENT_IDENTITY records. New YACs add themselves on first `/kb-persist`.
 
 ### 5.8 `FLAG_RECORD` — entity
 
@@ -273,7 +266,7 @@ The single UI write surface. Created on flag-for-YAC modal confirm (spec §9.1).
 | `versioned` | `true` |
 | `identity_fields` | **zero** (append-only — every flag is its own event) |
 | Custom fields | `target_yac` (term ref → `KB_TARGET_YAC`, mandatory) |
-| Common fields | title, body, authored_by, doc_status, tags, root |
+| Common fields | title, body, authored_by, doc_status (defaults to `published` — see below), tags, root |
 | FTS | title (A), body (B) |
 
 **Identity rationale:** zero identity. Re-flagging the same source doc to the same YAC = a new flag (not "update the previous"). Matches "every flag is a fresh dispatch event" semantics in spec §9.
@@ -284,9 +277,13 @@ The single UI write surface. Created on flag-for-YAC modal confirm (spec §9.1).
 - Source doc exists at write time
 - One `FLAGGED_FROM` relationship written atomically with the FLAG_RECORD (mandatory; NOT optional)
 
-**Title generation:** UI auto-derives title as `Flag for <target_yac>: <first 60 chars of body>` if user didn't type one. Stored as a real string field; user can override in the modal. **[CALL]** — alternative is to require the user to type a title. Defer.
+**Title generation:** UI auto-derives title as `Flag for <target_yac>: <first 60 chars of body>` if user didn't type one. Stored as a real string field; user can override in the modal.
 
-**doc_status default:** `draft` per common-field default. Spec §15.6 calls out this is open. **[CALL]** to confirm; FLAG_RECORD-specific lifecycle parked.
+**Resolved 2026-05-05 (Q14):** auto-derive with override. Friction reduction matters for the "flag and move on" pattern; required title would slow every flag and produce throw-away titles when users hurry.
+
+**Resolved 2026-05-05 (Q4):** held at minimum (`target_yac` + `body` + `title`). No `priority`, no `acknowledged_at`. JIRA-creep risk.
+
+**Resolved 2026-05-05 (Q6):** `doc_status` defaults to **`published`** (not `draft` from common-field default). Flags are dispatched events, not drafts. Inheriting `draft` was misleading — same pattern as BOOTSTRAP_RECORD overrides to `published` in §5.9. Reuses `KB_DOC_STATUS`; no new terminology in v1. If flag-handling-via-`/kb` patterns reveal their own lifecycle in v2, define `KB_FLAG_STATUS` (`open | acknowledged | resolved | dismissed`) then.
 
 ### 5.9 `BOOTSTRAP_RECORD` — entity, structured-only
 
@@ -367,10 +364,10 @@ The shape of the audit doc written on user-initiated bootstrap. Already defined 
     "RELATES_TO"
   ],
   "terminologies_created": [
-    "KB_DOC_STATUS", "KB_TARGET_YAC", "KB_AGENT_KIND"
+    "KB_DOC_STATUS", "KB_TARGET_YAC"
   ],
   "agent_identities_seeded": [
-    "peter", "FRanC", "BE-YAC", "APP-RC", "APP-CT",
+    "USER1", "FRanC", "BE-YAC", "APP-RC", "APP-CT",
     "APP-KB", "BUG-YAC", "DOC-YAC"
   ],
   "authored_by": "app:APP-KB",
@@ -396,37 +393,62 @@ Surfaced here as candidates for v2 promotion if use reveals the need:
 
 ## 9. Open Questions for FRanC (Spec §15 + new)
 
+**All 17 resolved 2026-05-05** in conversation between Peter and FRanC. Resolutions inline below.
+
 **Spec §15:**
 
 1. **Empty-state UX.** v1 launches with zero docs (other than the `BOOTSTRAP_RECORD`). What does day-1 KB show — "ask a YAC to write the first doc" prompt? A skeleton of doc-type cards? Walkthrough? UX call.
-2. **Doc deep-link format.** `/apps/kb/doc/<wip-id>` vs `/apps/kb/<type>/<slug>`? Affects search-result links, prepared-prompt strings, and the FLAG_RECORD's prepared prompt referencing the source doc.
+   **Resolved:** v1 empty state = single message "a YAC needs to write a doc before the UI is activated". No cards, no walkthrough, no facets — the UI is not activated until docs exist. v1.5 adds a documentation link.
+
+2. **Doc deep-link format.** `/apps/kb/doc/<wip-id>` vs `/apps/kb/<type>/<slug>`?
+   **Resolved:** `/apps/kb/doc/<wip-id>`. Stable, opaque IDs; no slug-uniqueness design needed.
+
 3. **Citation rendering in askBar answers.** Inline footnote vs side panel.
-4. **FLAG_RECORD structured fields beyond minimum.** I'm holding at `target_yac` + `body` + `title`. Add `priority`? `acknowledged_at`? My lean: no — JIRA-creep risk.
-5. **CASE_RECORD structured fields.** I'm holding at `source_yac` + `target_yac`. Add `severity`? `assignee`? My lean: no.
-6. **doc_status semantics for FLAG_RECORD.** v1 reuses `KB_DOC_STATUS` (`draft`/etc.). Define `KB_FLAG_STATUS` (`open`/`acknowledged`/`resolved`/`dismissed`) instead? My lean: reuse for v1; revisit when flag-handling-via-`/kb` patterns are observed.
-7. **Schema-drift detection (deferred).** Confirmed deferred to v2 per spec.
+   **Resolved:** side panel. KB queries routinely cite 5+ docs; side panel scales where inline gets noisy. WIP-KB is not a mobile app, not even in v2.
+
+4. **FLAG_RECORD structured fields beyond minimum.**
+   **Resolved:** minimum (`target_yac` + `body` + `title`). No `priority`, no `acknowledged_at`. JIRA-creep avoided.
+
+5. **CASE_RECORD structured fields.**
+   **Resolved:** minimum (`source_yac` + `target_yac`). KB-CASE_RECORD is a knowledge artifact, not a live tracker — `yac-discussions/` filesystem stays the live medium for in-flight cases. See §5.1.
+
+6. **doc_status semantics for FLAG_RECORD.**
+   **Resolved:** Option A — keep `KB_DOC_STATUS` but FLAG_RECORD's `doc_status` defaults to `published` (not the inherited `draft`). Mirrors BOOTSTRAP_RECORD's pattern in §5.9. Flags are dispatched events, not drafts. No new terminology in v1; if flag-handling-via-`/kb` patterns reveal their own lifecycle in v2, define `KB_FLAG_STATUS` then. See §5.8.
+
+7. **Schema-drift detection (deferred).**
+   **Resolved:** confirmed deferred to v2 per spec. Nothing to do in v1.
 
 **New questions surfaced during this session:**
 
-8. **kb-ux paper has FLAG_RECORD/CASE_RECORD inconsistency.** kb-ux line 82 says "Flag-for-YAC modal — Creates CASE_RECORD"; spec §9.1 says FLAG_RECORD. Resolved per spec §0 (spec wins). FRanC may want to update the kb-ux paper for future readers, since the conflict will trip up anyone who reads kb-ux without knowing the spec-wins rule.
+8. **kb-ux paper has FLAG_RECORD/CASE_RECORD inconsistency.**
+   **Resolved:** kb-ux paper updated to match spec — `FLAG_RECORD` (not CASE_RECORD) is what the flag modal creates. Three lines fixed (paper lines 82, 96, 178). Plus the kb-ux Doc Types table gained a FLAG_RECORD row (was missing entirely) and the CASE_RECORD row dropped its "migrated wholesale from yac-discussions/" claim (contradicted spec §4 — v1 is KB-native, no migration).
 
-9. **kb-ux relationships table line 234 has FLAGGED_FROM = "Case → (any doc)".** Should be `FLAG_RECORD → (any doc)` per spec. Same root cause as Q8.
+9. **kb-ux relationships table line 234 had FLAGGED_FROM = "Case → (any doc)".**
+   **Resolved:** changed to `FLAG_RECORD → (any doc)` (paper line 124).
 
-10. **REALIZES source.** kb-ux says "Code/feature → Decision". KB has no "code/feature" doc type (code lives outside the KB). I narrowed source_templates to `[CASE_RECORD, DESIGN_DECISION, JOURNEY_ENTRY]`. Confirm or override.
+10. **REALIZES source.** kb-ux said "Code/feature → Decision".
+    **Resolved:** confirm APP-KB's narrowing — REALIZES source = `[CASE_RECORD, DESIGN_DECISION, JOURNEY_ENTRY]`. KB has no "code/feature" doc type; APP-KB's pick covers docs that can describe implementation work.
 
-11. **AGENT_PARTICIPATED source breadth.** kb-ux says "Fireside → AgentIdentity". I broadened to `[FIRESIDE, CASE_RECORD, DESIGN_DECISION, JOURNEY_ENTRY]` — agents participate in more than firesides. Confirm or narrow back.
+11. **AGENT_PARTICIPATED source breadth.**
+    **Resolved:** confirm APP-KB's broadening — AGENT_PARTICIPATED source = `[FIRESIDE, CASE_RECORD, DESIGN_DECISION, JOURNEY_ENTRY]`. Agents participate in more than firesides.
 
-12. **`tags` on every entity template.** v1 default; alternative is LESSON-only. Topic page §7.3 aggregates by "keyword + tag match" across types, which argues universal. Confirm.
+12. **`tags` on every entity template.**
+    **Resolved:** universal. Topic page aggregates by "keyword + tag match" across types — universal is the smaller-blast-radius default.
 
-13. **`authored_by` as string vs reference to AGENT_IDENTITY.** v1 string per spec §5 / kb-ux. AGENT_PARTICIPATED relationship handles typed-agent linkage. Upgrade to reference if Peter prefers stronger typing.
+13. **`authored_by` as string vs reference to AGENT_IDENTITY.**
+    **Resolved:** string for v1. AGENT_PARTICIPATED edge handles typed linkage when needed. **Concern noted:** strings + grepping create matching ambiguity; the bet is YACs follow playbooks so values stay disciplined. Future-watch item if string drift surfaces.
 
-14. **FLAG_RECORD title generation.** Auto-derive from body (`Flag for X: <first 60 chars>`) vs require user to type. v1 default = auto-derive with override. Confirm.
+14. **FLAG_RECORD title generation.**
+    **Resolved:** auto-derive with override. Friction reduction matters for the "flag and move on" pattern; required title would slow every flag and produce throw-away titles when users hurry.
 
-15. **Bootstrap-seeded AGENT_IDENTITY records.** Eight proposed in §5.7. Add/remove? `peter` as `kind: human` — should `peter` be in this LOV at all, or only YACs? Spec §5 says "Bootstrap-seeded for known YACs", which arguably excludes the human user.
+15. **Bootstrap-seeded AGENT_IDENTITY records.**
+    **Resolved:** human owner is `USER1` (not `peter`). `USER1` everywhere — AGENT_IDENTITY `agent_value`, `KB_TARGET_YAC` value, and `authored_by` string when referring to the human. Display title stays "Peter" — UI shows readable name, data layer is multi-user-ready. Future deploys assign their own `USER1` per WIP-KB instance. Bootstrap seeds 8 records (`USER1`, FRanC, BE-YAC, APP-RC, APP-CT, APP-KB, BUG-YAC, DOC-YAC).
 
-16. **FROM_DAY scope.** Currently narrow (`GIT_STATS_SNAPSHOT → JOURNEY_ENTRY`). Should it broaden to "any doc → JOURNEY_ENTRY" so YACs can attach firesides/cases to a day? My lean: no — `created_at` already gives temporal context, and edge-explosion is a real cost.
+16. **FROM_DAY scope.**
+    **Resolved:** keep narrow. FROM_DAY only `GIT_STATS_SNAPSHOT → JOURNEY_ENTRY`. `created_at` provides temporal context for any doc; broadening creates edge explosion. `RELATES_TO` covers explicit cross-doc linkage when needed.
 
-17. **KB_AGENT_KIND terminology.** Defining a 3-value LOV (human/yac/system) for AGENT_IDENTITY.kind. Lean toward minimal; could drop if Peter sees over-specification.
+17. **KB_AGENT_KIND terminology.**
+    **Resolved:** drop. The 3-value LOV (human/yac/system) didn't unlock anything in v1; the human/YAC distinction is implicit in the name pattern (`USER1` vs `BE-YAC` vs `FRanC`). AGENT_IDENTITY launches with `agent_value` + `title` + `description`. Add `kind` later if filtering needs reveal. v1 terminology count drops from 3 to 2.
 
 *(Q16 from this session's draft — about the missing "APP-KB-Specific Overlays" appendix in CLAUDE.md — was resolved by FRanC in commit `930fb8d` while this draft was being written. Removed.)*
 
@@ -436,7 +458,7 @@ Surfaced here as candidates for v2 promotion if use reveals the need:
 
 When Peter signs off:
 
-1. Create the 3 terminologies in `dev-kb` via `mcp__wip-kb__create_terminology` + `create_terms`.
+1. Create the 2 terminologies in `dev-kb` via `mcp__wip-kb__create_terminology` + `create_terms` (`KB_DOC_STATUS`, `KB_TARGET_YAC` — `KB_AGENT_KIND` dropped per Q17).
 2. Create the 9 templates in `dev-kb` via `create_templates_bulk` (use draft mode per `wip://development-guide` if circular references — likely none here).
 3. Create the 10 edge types in `dev-kb` via `create_edge_type` (PoNIF #7 — this tool surfaces the `usage: relationship` distinction at the API ingress).
 4. Smoke-test: create one document of each type; create one of each edge type; verify FTS via `/api/reporting-sync/search`; verify orphan query returns expected.
@@ -447,4 +469,4 @@ When Peter signs off:
 
 ---
 
-*Discipline summary in one paragraph: nine doc-type templates (seven entity + AGENT_IDENTITY reference + BOOTSTRAP_RECORD audit), three KB-local terminologies (KB_DOC_STATUS, KB_TARGET_YAC, KB_AGENT_KIND), ten relationship templates with `versioned: false` and `[source_ref, target_ref]` identity. Common entity fields: title (FTS-A), body (FTS-B), authored_by (string), doc_status (term ref to KB_DOC_STATUS, default 'draft'), tags (array<string>), root (bool). Identity-field choices bias to `[title]` for narrative docs, `[date,...]` for time-keyed docs (JOURNEY_ENTRY, GIT_STATS_SNAPSHOT), zero (append-only) for FLAG_RECORD and CASE_RECORD. FLAG_RECORD reuses KB_DOC_STATUS for v1 (open question §9 #6); BOOTSTRAP_RECORD ships with `doc_status: published`. FTS bias: title (A) + body (B) on every entity that has them; structured-only types (GIT_STATS_SNAPSHOT, BOOTSTRAP_RECORD) carry only title FTS. AGENT_IDENTITY ships with eight bootstrap-seeded records. ARCHITECTURAL_PATTERN and GLOSSARY_ENTRY surfaced as v2 candidates per spec/archetype divergence (spec wins). Persistence happens only after Peter approves; first stop is `dev-kb`, then BootstrapGate seed files, then `kb` at runtime.*
+*Discipline summary in one paragraph (post-Q1–Q17 resolution 2026-05-05): nine doc-type templates (seven entity + AGENT_IDENTITY reference + BOOTSTRAP_RECORD audit), two KB-local terminologies (`KB_DOC_STATUS`, `KB_TARGET_YAC` — `KB_AGENT_KIND` dropped per Q17), ten relationship templates with `versioned: false` and `[source_ref, target_ref]` identity. Common entity fields: title (FTS-A), body (FTS-B), authored_by (string per Q13, with the noted string-drift caveat), doc_status (term ref to `KB_DOC_STATUS`, default `draft`), tags (array<string>, universal per Q12), root (bool). Identity-field choices bias to `[title]` for narrative docs, `[date,...]` for time-keyed docs (JOURNEY_ENTRY, GIT_STATS_SNAPSHOT), zero (append-only) for FLAG_RECORD and CASE_RECORD. FLAG_RECORD's `doc_status` defaults to `published` per Q6 (override of the common-field default); BOOTSTRAP_RECORD ships with `doc_status: published` per §5.9. FTS bias: title (A) + body (B) on every entity that has them; structured-only types (GIT_STATS_SNAPSHOT, BOOTSTRAP_RECORD) carry only title FTS. AGENT_IDENTITY ships with eight bootstrap-seeded records — the human owner is `USER1` (display title "Peter") per Q15; the seven YACs are FRanC, BE-YAC, APP-RC, APP-CT, APP-KB, BUG-YAC, DOC-YAC. Doc deep-link format is `/apps/kb/doc/<wip-id>` (Q2). askBar citations render in a side panel (Q3). FLAG_RECORD title auto-derives with override (Q14). REALIZES source = `[CASE_RECORD, DESIGN_DECISION, JOURNEY_ENTRY]` (Q10); AGENT_PARTICIPATED source = `[FIRESIDE, CASE_RECORD, DESIGN_DECISION, JOURNEY_ENTRY]` (Q11); FROM_DAY stays narrow at `GIT_STATS_SNAPSHOT → JOURNEY_ENTRY` (Q16). Empty-state UX = single message "a YAC needs to write a doc before the UI is activated" (Q1). ARCHITECTURAL_PATTERN and GLOSSARY_ENTRY surfaced as v2 candidates per spec/archetype divergence (spec wins). Persistence happens only after Peter approves; first stop is `dev-kb`, then BootstrapGate seed files, then `kb` at runtime.*
