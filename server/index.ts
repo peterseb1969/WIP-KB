@@ -2,6 +2,7 @@ import 'dotenv/config'  // Must be first — loads .env before any other module 
 import express from 'express'
 import cors from 'cors'
 import session from 'express-session'
+import { wipProxy } from '@wip/proxy'
 import { initAgent, ask } from './agent.js'
 import { initAuth, requireAuth, handleCallback, handleLogout } from './auth.js'
 import bootstrapRoutes from './bootstrap.routes.js'
@@ -10,7 +11,6 @@ const PORT = parseInt(process.env.PORT || '3001')
 const app = express()
 
 app.use(cors())
-app.use(express.json())
 
 // --- Session (required for OIDC auth) ---
 app.use(session({
@@ -30,6 +30,18 @@ app.get('/auth/logout', handleLogout)
 
 // --- Auth middleware (no-op when OIDC_ISSUER is not set) ---
 app.use(requireAuth())
+
+// --- WIP REST proxy: /wip/* → upstream WIP cluster with API key injected.
+// MUST come before express.json() — wipProxy uses express.raw() to forward
+// request bodies unchanged; a json parser upstream of it would consume the
+// stream first.
+app.use('/wip', wipProxy({
+  baseUrl: process.env.WIP_BASE_URL || 'https://wip-kb.local',
+  apiKey: process.env.WIP_API_KEY || '',
+}))
+
+// --- JSON body parsing for our own server routes ---
+app.use(express.json())
 
 // --- Bootstrap (offer-on-empty / use-on-exists for the kb namespace) ---
 app.use('/server-api', bootstrapRoutes)
