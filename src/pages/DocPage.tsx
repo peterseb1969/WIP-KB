@@ -1,9 +1,11 @@
-import { Fragment } from 'react'
+import { Fragment, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useDocument, useTemplate } from '@wip/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { PrepareButtons } from '../components/PrepareButtons'
+import { FlagModal } from '../components/FlagModal'
 
 const COMMON_FIELDS = new Set(['title', 'authored_by', 'doc_status', 'tags', 'root', 'body'])
 
@@ -24,6 +26,7 @@ interface TemplateField {
 
 export default function DocPage() {
   const { id = '' } = useParams<{ id: string }>()
+  const [flagOpen, setFlagOpen] = useState(false)
   const { data: doc, isLoading: docLoading, error: docError } = useDocument(id)
   const { data: template } = useTemplate(doc?.template_id ?? '')
 
@@ -83,6 +86,17 @@ export default function DocPage() {
           )}
         </header>
 
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setFlagOpen(true)}
+            className="rounded bg-amber-100 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-200"
+          >
+            Flag for YAC
+          </button>
+          <PrepareButtons docId={id} docTitle={(data.title as string) || '(untitled)'} />
+        </div>
+
         {structured.length > 0 && (
           <dl className="mb-6 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
             {structured.map((f) => (
@@ -114,6 +128,14 @@ export default function DocPage() {
         <RelationshipList label="Incoming" items={incoming} selfId={id} />
         <RelationshipList label="Outgoing" items={outgoing} selfId={id} />
       </aside>
+
+      {flagOpen && (
+        <FlagModal
+          sourceDocId={id}
+          sourceDocTitle={(data.title as string) || '(untitled)'}
+          onClose={() => setFlagOpen(false)}
+        />
+      )}
     </div>
   )
 }
