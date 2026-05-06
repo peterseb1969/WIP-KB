@@ -8,6 +8,7 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:3001',
       '/wip': 'http://localhost:3001',
+      '/server-api': 'http://localhost:3001',
     },
   },
 })

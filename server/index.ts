@@ -4,6 +4,7 @@ import cors from 'cors'
 import session from 'express-session'
 import { initAgent, ask } from './agent.js'
 import { initAuth, requireAuth, handleCallback, handleLogout } from './auth.js'
+import bootstrapRoutes from './bootstrap.routes.js'
 
 const PORT = parseInt(process.env.PORT || '3001')
 const app = express()
@@ -29,6 +30,9 @@ app.get('/auth/logout', handleLogout)
 
 // --- Auth middleware (no-op when OIDC_ISSUER is not set) ---
 app.use(requireAuth())
+
+// --- Bootstrap (offer-on-empty / use-on-exists for the kb namespace) ---
+app.use('/server-api', bootstrapRoutes)
 
 // --- Health ---
 app.get('/api/health', (_req, res) => {
