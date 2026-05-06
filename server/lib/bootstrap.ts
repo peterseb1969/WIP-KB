@@ -37,6 +37,34 @@ const NAMESPACE = 'kb'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObj = Record<string, any>
 
+interface BulkItemResult {
+  index?: number
+  status?: string
+  id?: string
+  error?: string
+  error_code?: string
+}
+
+/**
+ * Throw if any item in a bulk-write response has status='error'.
+ *
+ * Per PoNIF #4 (Bulk-First — 200 OK Always), WIP write APIs return HTTP
+ * 200 even when individual items fail; the per-item status is in
+ * `results[].status`. wipPost only validates HTTP status, so without
+ * this check, per-item errors are silently dropped.
+ */
+function assertBulkSuccess(response: unknown, context: string): void {
+  const r = response as { results?: BulkItemResult[] } | BulkItemResult[]
+  const items = Array.isArray(r) ? r : r.results || []
+  const errors = items.filter((i) => i.status === 'error')
+  if (errors.length) {
+    const summary = errors
+      .map((e) => `[${e.index ?? '?'}] ${e.error_code || ''} ${e.error || 'unknown'}`.trim())
+      .join('; ')
+    throw new Error(`${context}: ${errors.length}/${items.length} items failed — ${summary}`)
+  }
+}
+
 export type BootstrapStatus = 'unknown' | 'wip_unreachable' | 'needs_bootstrap' | 'ready'
 
 export interface BootstrapProgress {
@@ -108,6 +136,7 @@ export async function runBootstrap(
     const termResult = (await wipPost('/api/def-store/terminologies', termBulk)) as {
       results: Array<{ status: string; id: string; error?: string }>
     }
+    assertBulkSuccess(termResult, 'terminologies create')
 
     // Build value → terminology_id map
     const termIdMap = new Map<string, string>()
@@ -129,7 +158,8 @@ export async function runBootstrap(
       if (!termId) continue
 
       progress('terms', `Creating ${terms.length} terms for ${termData.value}...`)
-      await wipPost(`/api/def-store/terminologies/${termId}/terms`, terms)
+      const termsResult = await wipPost(`/api/def-store/terminologies/${termId}/terms`, terms)
+      assertBulkSuccess(termsResult, `terms for ${termData.value}`)
       totalTerms += terms.length
     }
     progress('terms', `Created ${totalTerms} terms across ${terminologies.length} terminologies`)
@@ -150,10 +180,11 @@ export async function runBootstrap(
 
     if (allRelations.length) {
       progress('term-relations', `Creating ${allRelations.length} ontology term-relations...`)
-      await wipPost(
+      const relResult = await wipPost(
         `/api/def-store/ontology/term-relations?namespace=${NAMESPACE}`,
         allRelations,
       )
+      assertBulkSuccess(relResult, 'ontology term-relations')
     }
 
     // Step 5: Create templates (sorted by filename prefix for dependency order)
@@ -183,7 +214,11 @@ export async function runBootstrap(
 
       if (data.reporting) template.reporting = data.reporting
 
-      await wipPost('/api/template-store/templates?on_conflict=validate', [template])
+      const tmplResult = await wipPost(
+        '/api/template-store/templates?on_conflict=validate',
+        [template],
+      )
+      assertBulkSuccess(tmplResult, `template ${data.value}`)
 
       if (data.usage === 'relationship') edgeTypesCreated.push(data.value)
       else templatesCreated.push(data.value)
@@ -233,14 +268,25 @@ async function writeBootstrapRecord(meta: {
   edgeTypesCreated: string[]
   terminologiesCreated: string[]
 }): Promise<void> {
+  // Resolve BOOTSTRAP_RECORD's template_id (and version) first. The
+  // /api/document-store/documents endpoint requires template_id —
+  // template_value is not auto-resolved at this surface. Per PoNIF #6,
+  // pass an explicit template_version so the document validates against
+  // the version we just created, not "latest" from cache.
+  const tmpl = (await wipGet(
+    `/api/template-store/templates/by-value/BOOTSTRAP_RECORD?namespace=${NAMESPACE}`,
+  )) as { template_id: string; version: number }
+
   const bootstrapId = `bootstrap-${meta.startedAt.replace(/[:.]/g, '-')}`
   const doc = {
-    template_value: 'BOOTSTRAP_RECORD',
+    template_id: tmpl.template_id,
+    template_version: tmpl.version,
     namespace: NAMESPACE,
     data: {
       bootstrap_id: bootstrapId,
       title: `KB bootstrap ${meta.startedAt.slice(0, 16).replace('T', ' ')}`,
       authored_by: 'app:APP-KB',
+      doc_status: 'published',
       app_version: process.env.APP_VERSION || 'unknown',
       bootstrapped_at: meta.startedAt,
       commit_sha: process.env.GIT_COMMIT_SHA || 'unknown',
@@ -249,7 +295,8 @@ async function writeBootstrapRecord(meta: {
       terminologies_created: meta.terminologiesCreated,
     },
   }
-  await wipPost('/api/document-store/documents', [doc])
+  const result = await wipPost('/api/document-store/documents', [doc])
+  assertBulkSuccess(result, 'BOOTSTRAP_RECORD write')
 }
 
 
