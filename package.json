@@ -27,6 +27,9 @@
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.0"
   },
+  "overrides": {
+    "ip-address": "^10.2.0"
+  },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.2",
