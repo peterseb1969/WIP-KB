@@ -1,9 +1,9 @@
 {
   "value": "CASE_RECORD",
   "label": "Case Record",
-  "description": "Cross-agent case filed by a YAC (DESIGN.md §5.1). Knowledge artifact / write-once breadcrumb (Q5). Live status lives in yac-discussions/, not here. identity_fields=[] makes every /case file invocation its own document.",
+  "description": "Cross-agent case filed by a YAC (DESIGN.md §5.1). Knowledge artifact / write-once breadcrumb. Identity by case_number — atomically claimed via case-helper.sh per CASE-306 (CASE-310 / CASE-318 design rule).",
   "usage": "entity",
-  "identity_fields": [],
+  "identity_fields": ["data.case_number"],
   "fields": [
     { "name": "title",       "label": "Title",        "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "body",        "label": "Body",         "type": "string",  "mandatory": true, "full_text_indexed": true },
@@ -12,6 +12,7 @@
     { "name": "tags",        "label": "Tags",         "type": "array",   "array_item_type": "string" },
     { "name": "root",        "label": "Root",         "type": "boolean", "default_value": false },
     { "name": "source_yac",  "label": "Source YAC",   "type": "string" },
-    { "name": "target_yac",  "label": "Target YAC",   "type": "term",    "reference_type": "term", "terminology_ref": "KB_TARGET_YAC" }
+    { "name": "target_yac",  "label": "Target YAC",   "type": "term",    "reference_type": "term", "terminology_ref": "KB_TARGET_YAC" },
+    { "name": "case_number", "label": "Case Number",  "type": "integer", "mandatory": true }
   ]
 }
