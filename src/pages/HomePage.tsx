@@ -15,6 +15,9 @@ interface DocItem {
 interface ListResponse {
   items: DocItem[]
   total: number
+  page: number
+  page_size: number
+  pages: number
 }
 
 interface TemplateInfo {
@@ -47,13 +50,25 @@ function groupAndSort(items: DocItem[]): Group[] {
   return groups
 }
 
+async function fetchAllDocs(namespace: string): Promise<DocItem[]> {
+  const all: DocItem[] = []
+  const pageSize = 100
+  let page = 1
+  while (true) {
+    const res = await wipFetchJson<ListResponse>(
+      `/api/document-store/documents?namespace=${namespace}&page_size=${pageSize}&latest_only=true&page=${page}`,
+    )
+    all.push(...res.items)
+    if (page >= res.pages || res.items.length === 0) break
+    page++
+  }
+  return all
+}
+
 export default function HomePage() {
-  const { data, isLoading, error } = useQuery<ListResponse>({
-    queryKey: ['kb-docs', NAMESPACE],
-    queryFn: () =>
-      wipFetchJson<ListResponse>(
-        `/api/document-store/documents?namespace=${NAMESPACE}&page_size=100&latest_only=true`,
-      ),
+  const { data, isLoading, error } = useQuery<DocItem[]>({
+    queryKey: ['kb-docs-all', NAMESPACE],
+    queryFn: () => fetchAllDocs(NAMESPACE),
     staleTime: 30_000,
   })
 
@@ -73,7 +88,7 @@ export default function HomePage() {
     (templates?.items ?? []).filter((t) => t.usage === 'relationship').map((t) => t.value),
   )
 
-  const allItems = data?.items ?? []
+  const allItems = data ?? []
   const items = allItems.filter((d) => !edgeTypes.has(d.template_value))
   const userContent = items.filter((d) => d.template_value !== 'BOOTSTRAP_RECORD')
 
