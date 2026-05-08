@@ -4,10 +4,10 @@ import { WipFooter } from '@wip/react'
 
 export function Layout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
-      <header className="border-b border-gray-200 bg-white">
+    <div className="flex min-h-screen flex-col bg-background">
+      <header className="border-b border-gray-200 bg-surface">
         <div className="mx-auto flex max-w-6xl items-center px-6 py-4">
-          <Link to="/" className="text-xl font-semibold tracking-tight text-gray-900">
+          <Link to="/" className="text-xl font-semibold tracking-tight text-text">
             KB
           </Link>
         </div>

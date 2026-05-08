@@ -134,23 +134,23 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
+        className="w-full max-w-lg rounded-lg bg-surface p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {!created ? (
           <form onSubmit={handleSubmit}>
-            <h2 className="mb-1 text-lg font-semibold text-gray-900">Flag for YAC</h2>
-            <p className="mb-4 text-sm text-gray-600">
+            <h2 className="mb-1 text-lg font-semibold text-text">Flag for YAC</h2>
+            <p className="mb-4 text-sm text-text-muted">
               Source: <span className="font-mono">{sourceDocTitle}</span>
             </p>
 
             <label className="mb-3 block">
-              <span className="mb-1 block text-sm font-medium text-gray-700">Target YAC</span>
+              <span className="mb-1 block text-sm font-medium text-text">Target YAC</span>
               <select
                 value={targetYac}
                 onChange={(e) => setTargetYac(e.target.value)}
                 disabled={yacsLoading}
-                className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-md border border-gray-300 bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
               >
                 <option value="">{yacsLoading ? 'Loading…' : 'Pick a YAC…'}</option>
                 {yacs?.map((y) => (
@@ -162,7 +162,7 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
             </label>
 
             <label className="mb-3 block">
-              <span className="mb-1 block text-sm font-medium text-gray-700">
+              <span className="mb-1 block text-sm font-medium text-text">
                 Reason / question
               </span>
               <textarea
@@ -170,24 +170,24 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
                 onChange={(e) => setReason(e.target.value)}
                 rows={5}
                 placeholder="Why does this need a YAC's attention? Markdown allowed."
-                className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-md border border-gray-300 bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
               />
             </label>
 
-            {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+            {error && <p className="mb-3 text-sm text-danger">{error}</p>}
 
             <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded px-4 py-2 text-sm text-gray-600 hover:bg-gray-100"
+                className="rounded-md px-4 py-2 text-sm text-text-muted hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={submitting}
-                className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:bg-blue-300"
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {submitting ? 'Creating…' : 'Create flag'}
               </button>
@@ -195,26 +195,26 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
           </form>
         ) : (
           <div>
-            <h2 className="mb-1 text-lg font-semibold text-gray-900">Flag created</h2>
-            <p className="mb-3 text-sm text-gray-600">
+            <h2 className="mb-1 text-lg font-semibold text-text">Flag created</h2>
+            <p className="mb-3 text-sm text-text-muted">
               FLAG_RECORD <span className="font-mono text-xs">{created.flagId}</span> with a
               FLAGGED_FROM edge to the source doc. Prompt to dispatch:
             </p>
-            <pre className="mb-3 overflow-x-auto rounded bg-gray-100 p-3 text-xs text-gray-800">
+            <pre className="mb-3 overflow-x-auto rounded bg-background p-3 text-xs text-text">
               {DEFAULT_INTENT.generate(created.flagId, created.flagTitle)}
             </pre>
             <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={handleCopyPrompt}
-                className="rounded border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                className="rounded-md border border-primary px-4 py-2 text-sm font-medium text-primary hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-primary/40"
               >
                 Copy prompt
               </button>
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/40"
               >
                 Done
               </button>

@@ -30,7 +30,7 @@ export function PrepareButtons({ docId, docTitle }: Props) {
             key={intent.id}
             type="button"
             onClick={() => handleCopy(intent.id, text)}
-            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+            className="rounded-md border border-primary/30 bg-surface px-3 py-1 text-xs font-medium text-primary hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-primary/40"
             title={text}
           >
             {copied ? 'copied!' : intent.label}

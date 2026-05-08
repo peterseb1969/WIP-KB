@@ -59,9 +59,9 @@ export default function DocPage() {
   const outgoing = (rels?.items ?? []).filter((r) => r.data.source_ref === id)
 
   if (!id) return null
-  if (docLoading) return <p className="text-gray-500">Loading…</p>
-  if (docError) return <p className="text-red-600">Failed to load doc: {(docError as Error).message}</p>
-  if (!doc) return <p className="text-gray-500">Not found.</p>
+  if (docLoading) return <p className="text-text-muted">Loading…</p>
+  if (docError) return <p className="text-danger">Failed to load doc: {(docError as Error).message}</p>
+  if (!doc) return <p className="text-text-muted">Not found.</p>
 
   const data = (doc.data ?? {}) as Record<string, unknown>
   const fields: TemplateField[] = (template?.fields as TemplateField[] | undefined) ?? []
@@ -83,20 +83,20 @@ export default function DocPage() {
       <article className="min-w-0">
         <header className="mb-6">
           <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider">
-            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600">
+            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-text-muted">
               {doc.template_value}
             </span>
             {isRoot && (
-              <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">root</span>
+              <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">root</span>
             )}
             {orphan && (
-              <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">orphan</span>
+              <span className="rounded bg-accent/10 px-1.5 py-0.5 text-accent">orphan</span>
             )}
           </div>
-          <h1 className="mt-2 text-2xl font-medium tracking-tight text-gray-900">
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-text">
             {(data.title as string) || '(untitled)'}
           </h1>
-          <p className="mt-1.5 text-xs text-gray-500">
+          <p className="mt-1.5 text-xs text-text-muted">
             {[
               typeof data.authored_by === 'string' && data.authored_by,
               typeof data.doc_status === 'string' && data.doc_status,
@@ -111,7 +111,7 @@ export default function DocPage() {
           {Array.isArray(data.tags) && data.tags.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {(data.tags as string[]).map((t) => (
-                <span key={t} className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                <span key={t} className="rounded bg-gray-100 px-2 py-0.5 text-xs text-text-muted">
                   {t}
                 </span>
               ))}
@@ -123,7 +123,7 @@ export default function DocPage() {
           <button
             type="button"
             onClick={() => setFlagOpen(true)}
-            className="rounded border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
+            className="rounded-md border border-accent/20 bg-accent/5 px-3 py-1 text-xs font-medium text-accent hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-accent/40"
           >
             Flag for YAC
           </button>
@@ -134,8 +134,8 @@ export default function DocPage() {
           <dl className="mb-8 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
             {structured.map((f) => (
               <Fragment key={f.name}>
-                <dt className="text-gray-500">{f.label || f.name}</dt>
-                <dd className="text-gray-900">
+                <dt className="text-text-muted">{f.label || f.name}</dt>
+                <dd className="text-text">
                   <FieldValue value={data[f.name]} />
                 </dd>
               </Fragment>
@@ -150,13 +150,13 @@ export default function DocPage() {
         )}
 
         {!body && structured.length === 0 && (
-          <p className="text-sm text-gray-500">(no content)</p>
+          <p className="text-sm text-text-muted">(no content)</p>
         )}
       </article>
 
       {hasEdges && (
         <aside>
-          <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+          <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
             Relationships
           </h2>
           <RelationshipList label="Incoming" items={incoming} selfId={id} />
@@ -201,11 +201,11 @@ function RelationshipList({
   selfId: string
 }) {
   if (items.length === 0) {
-    return <p className="mb-4 text-sm text-gray-500">No {label.toLowerCase()} edges.</p>
+    return <p className="mb-4 text-sm text-text-muted">No {label.toLowerCase()} edges.</p>
   }
   return (
     <div className="mb-4">
-      <h3 className="mb-1 text-xs font-semibold text-gray-600">{label}</h3>
+      <h3 className="mb-1 text-xs font-semibold text-text-muted">{label}</h3>
       <ul className="space-y-2 text-sm">
         {items.map((r) => {
           const peerId = r.data.target_ref === selfId ? r.data.source_ref : r.data.target_ref
@@ -215,33 +215,33 @@ function RelationshipList({
           const isInactive = peer?.status === 'inactive'
           return (
             <li key={r.document_id}>
-              <Link to={`/doc/${peerId}`} className="block rounded px-1 py-0.5 hover:bg-gray-50">
+              <Link to={`/doc/${peerId}`} className="block rounded px-1 py-0.5 hover:bg-background">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-600">
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
                     {r.template_value}
                   </span>
                   {peer && (
-                    <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
+                    <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
                       {peer.template_value}
                     </span>
                   )}
                   {isInactive && (
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
                       inactive
                     </span>
                   )}
                   {errorCode && (
-                    <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                    <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
                       {errorCode}
                     </span>
                   )}
                 </div>
                 <div
-                  className={`mt-0.5 truncate text-sm ${isInactive ? 'text-gray-400' : 'text-gray-900'}`}
+                  className={`mt-0.5 truncate text-sm ${isInactive ? 'text-text-muted' : 'text-text'}`}
                   title={peer?.data?.title || peerId}
                 >
                   {peer?.data?.title || (
-                    <span className="font-mono text-xs text-gray-400">{peerId}</span>
+                    <span className="font-mono text-xs text-text-muted">{peerId}</span>
                   )}
                 </div>
               </Link>
