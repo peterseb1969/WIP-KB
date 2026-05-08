@@ -3,7 +3,7 @@
   "label": "Case Record",
   "description": "Cross-agent case filed by a YAC (DESIGN.md §5.1). Knowledge artifact / write-once breadcrumb. Identity by case_number — atomically claimed via case-helper.sh per CASE-306 (CASE-310 / CASE-318 design rule).",
   "usage": "entity",
-  "identity_fields": ["data.case_number"],
+  "identity_fields": ["case_number"],
   "fields": [
     { "name": "title",       "label": "Title",        "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "body",        "label": "Body",         "type": "string",  "mandatory": true, "full_text_indexed": true },
