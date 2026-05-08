@@ -23,8 +23,9 @@ const env = () => ({
   MCP_CWD: process.env.MCP_CWD || '',
   MCP_MODULE: process.env.MCP_MODULE || 'wip_mcp',
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
-  CLAUDE_MODEL: process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001',
+  CLAUDE_MODEL: process.env.CLAUDE_MODEL || 'claude-haiku-4-5',
   WIP_NAMESPACE: process.env.WIP_NAMESPACE || '',
+  WIP_API_KEY: process.env.WIP_API_KEY || '',
   MAX_TURNS: parseInt(process.env.MAX_TURNS || '15'),
   SESSION_TTL_MS: parseInt(process.env.SESSION_TTL_MINUTES || '30') * 60_000,
 })
@@ -82,11 +83,18 @@ function createTransport() {
   const e = env()
   if (e.MCP_URL) {
     const url = new URL(e.MCP_URL)
+    // Inject WIP_API_KEY on every request so the MCP server's auth check passes.
+    // The MCP SDK's transports don't carry any auth on their own — caller responsibility.
+    const headers: Record<string, string> = {}
+    if (e.WIP_API_KEY) headers['X-API-Key'] = e.WIP_API_KEY
     if (e.MCP_TRANSPORT === 'sse' || e.MCP_URL.endsWith('/sse')) {
-      return new SSEClientTransport(url)
+      return new SSEClientTransport(url, {
+        requestInit: { headers },
+        eventSourceInit: { fetch: (u, init) => fetch(u, { ...init, headers: { ...init?.headers, ...headers } }) },
+      })
     }
     // Default to Streamable HTTP for remote URLs
-    return new StreamableHTTPClientTransport(url)
+    return new StreamableHTTPClientTransport(url, { requestInit: { headers } })
   }
 
   // Stdio: spawn local MCP server process
@@ -173,12 +181,24 @@ export async function ask(
   const anthropic = new Anthropic({ apiKey: e.ANTHROPIC_API_KEY })
   let totalToolCalls = 0
 
+  // Prompt-caching: system prompt + tool definitions are static across all askBar
+  // requests in a session. Marking the last tool with cache_control extends the
+  // cache breakpoint over the entire tools array, so multi-turn tool-loop
+  // conversations within the 5-minute TTL hit cache from turn 2 onward.
+  const cachedTools: Anthropic.Tool[] =
+    mcpTools.length > 0
+      ? [
+          ...mcpTools.slice(0, -1),
+          { ...mcpTools[mcpTools.length - 1]!, cache_control: { type: 'ephemeral' } },
+        ]
+      : mcpTools
+
   for (let turn = 0; turn < e.MAX_TURNS; turn++) {
     const response = await anthropic.messages.create({
       model: e.CLAUDE_MODEL,
       max_tokens: 4096,
-      system: systemPrompt,
-      tools: mcpTools,
+      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+      tools: cachedTools,
       messages: session.messages,
     })
 

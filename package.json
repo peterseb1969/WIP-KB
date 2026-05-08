@@ -11,8 +11,8 @@
     "start": "tsx server/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@anthropic-ai/sdk": "^0.95.1",
+    "@modelcontextprotocol/sdk": "^1.20.1",
     "@tanstack/react-query": "^5.62.7",
     "@wip/client": "file:./libs/wip-client-0.16.0.tgz",
     "@wip/proxy": "file:./libs/wip-proxy-0.2.0.tgz",
