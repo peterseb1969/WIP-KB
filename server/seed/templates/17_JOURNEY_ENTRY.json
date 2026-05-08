@@ -1,16 +1,18 @@
 {
   "value": "JOURNEY_ENTRY",
   "label": "Journey Entry",
-  "description": "Day-journal entries persisted by FRanC via /kb-persist journey (DESIGN.md §5.5). Identity by journey_date — one journal per day. Title is not the identity because it iterates as the day's narrative develops.",
+  "description": "Day-journal entries persisted by FRanC via /kb-persist journey (DESIGN.md §5.5). Identity by flat_file_mirror — the source filename is the natural identity for flat-file-mirror templates (CASE-309). journey_date and day_number are non-identity fields used for sort/filter only — Peter's convention is 'a journey is a session, not a date', so two distinct sessions on the same calendar day are two distinct entries.",
   "usage": "entity",
-  "identity_fields": ["journey_date"],
+  "identity_fields": ["flat_file_mirror"],
   "fields": [
-    { "name": "title",        "label": "Title",         "type": "string",  "mandatory": true, "full_text_indexed": true },
-    { "name": "body",         "label": "Body",          "type": "string",  "mandatory": true, "full_text_indexed": true },
-    { "name": "authored_by",  "label": "Authored By",   "type": "string",  "mandatory": true },
-    { "name": "doc_status",   "label": "Doc Status",    "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "draft" },
-    { "name": "tags",         "label": "Tags",          "type": "array",   "array_item_type": "string" },
-    { "name": "root",         "label": "Root",          "type": "boolean", "default_value": false },
-    { "name": "journey_date", "label": "Journey Date",  "type": "date",    "mandatory": true }
+    { "name": "title",            "label": "Title",             "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "body",             "label": "Body",              "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "authored_by",      "label": "Authored By",       "type": "string",  "mandatory": true },
+    { "name": "doc_status",       "label": "Doc Status",        "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "draft" },
+    { "name": "tags",             "label": "Tags",              "type": "array",   "array_item_type": "string" },
+    { "name": "root",             "label": "Root",              "type": "boolean", "default_value": false },
+    { "name": "flat_file_mirror", "label": "Flat File Mirror",  "type": "string",  "mandatory": true, "max_length": 200, "pattern": "^[a-zA-Z0-9_/.-]+$" },
+    { "name": "journey_date",     "label": "Journey Date",      "type": "date",    "mandatory": true },
+    { "name": "day_number",       "label": "Day Number",        "type": "number" }
   ]
 }
