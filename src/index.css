@@ -1,3 +1,35 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  .prose pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .prose table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .prose th,
+  .prose td {
+    padding: 0.5rem 0.75rem;
+    vertical-align: top;
+    word-break: normal;
+    overflow-wrap: break-word;
+    border-bottom: 1px solid theme('colors.gray.200');
+    border-right: 1px solid theme('colors.gray.100');
+  }
+  .prose th:last-child,
+  .prose td:last-child {
+    border-right: none;
+  }
+  .prose thead th {
+    border-bottom: 2px solid theme('colors.gray.300');
+    background-color: theme('colors.gray.50');
+    font-weight: 600;
+  }
+  .prose tbody tr:last-child td {
+    border-bottom: 0;
+  }
+}
