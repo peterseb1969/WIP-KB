@@ -107,9 +107,11 @@ async function fetchAllDocs(namespace: string): Promise<DocItem[]> {
 }
 
 async function fetchSearch(namespace: string, query: string, mode: string): Promise<FtsResponse> {
+  // limit capped at 100 by the reporting-sync endpoint per CASE-328 / wip://conventions
+  // platform-wide pagination max. For >100 hits, CASE-329 tracks proper pagination on /search.
   return wipFetchJson<FtsResponse>(`/api/reporting-sync/search?namespace=${namespace}`, {
     method: 'POST',
-    body: JSON.stringify({ query, mode, types: ['document'], limit: 500 }),
+    body: JSON.stringify({ query, mode, types: ['document'], limit: 100 }),
   })
 }
 
