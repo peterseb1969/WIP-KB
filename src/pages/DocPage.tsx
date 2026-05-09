@@ -87,10 +87,10 @@ export default function DocPage() {
   const orphan = !isRoot && incoming.length === 0 && outgoing.length === 0
 
   // Surface metadata.custom alongside template-defined data fields. Render
-  // every key (no hide list) in insertion order from the API response — once
-  // CASE-322's underscore convention lands at the loader, every renderer can
-  // add a one-line `_`-prefix filter and the bookkeeping clutter disappears
-  // for free. Until then we just live with the noise.
+  // every key (no hide list) in insertion order from the API response —
+  // Peter explicitly wants the full audit trail visible (CASE-322, closed).
+  // The loader (FRanC's `tools/kb-bulk-mirror.py` + `tools/add-to-kb.py`)
+  // owns field order; current order is provenance → workflow → origin.
   const metaCustom = (doc.metadata as { custom?: Record<string, unknown> } | undefined)?.custom ?? {}
   const metaEntries = Object.entries(metaCustom).filter(
     ([, v]) => v !== '' && v !== null && v !== undefined,
