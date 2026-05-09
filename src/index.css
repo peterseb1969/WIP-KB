@@ -32,4 +32,11 @@
   .prose tbody tr:last-child td {
     border-bottom: 0;
   }
+  .fts-snippet b {
+    background-color: rgb(237 125 49 / 0.18);
+    color: theme('colors.text.DEFAULT');
+    font-weight: inherit;
+    padding: 0 2px;
+    border-radius: 2px;
+  }
 }

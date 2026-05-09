@@ -1,13 +1,19 @@
 import { Fragment, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useDocument, useTemplate } from '@wip/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkFrontmatter from 'remark-frontmatter'
+import { ArrowLeft } from 'lucide-react'
 import { PrepareButtons } from '../components/PrepareButtons'
 import { FlagModal } from '../components/FlagModal'
 
 const COMMON_FIELDS = new Set(['title', 'authored_by', 'doc_status', 'tags', 'root', 'body'])
+
+function metaLabel(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
 
 interface PeerProjection {
   document_id: string
@@ -36,9 +42,19 @@ interface TemplateField {
 
 export default function DocPage() {
   const { id = '' } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [flagOpen, setFlagOpen] = useState(false)
   const { data: doc, isLoading: docLoading, error: docError } = useDocument(id)
   const { data: template } = useTemplate(doc?.template_id ?? '')
+
+  // location.key === 'default' means the user landed directly on this URL
+  // with no prior history (deep-link / refresh) — navigate(-1) would leave
+  // the app, so fall back to the start page.
+  function goBack() {
+    if (location.key === 'default') navigate('/')
+    else navigate(-1)
+  }
 
   // CASE-303: ?include=peers embeds the peer doc in each relationship item,
   // collapsing what was a 1+N round-trip waterfall into a single REST call.
@@ -70,6 +86,16 @@ export default function DocPage() {
   const isRoot = data.root === true
   const orphan = !isRoot && incoming.length === 0 && outgoing.length === 0
 
+  // Surface metadata.custom alongside template-defined data fields. Render
+  // every key (no hide list) in insertion order from the API response — once
+  // CASE-322's underscore convention lands at the loader, every renderer can
+  // add a one-line `_`-prefix filter and the bookkeeping clutter disappears
+  // for free. Until then we just live with the noise.
+  const metaCustom = (doc.metadata as { custom?: Record<string, unknown> } | undefined)?.custom ?? {}
+  const metaEntries = Object.entries(metaCustom).filter(
+    ([, v]) => v !== '' && v !== null && v !== undefined,
+  )
+
   const hasEdges = incoming.length > 0 || outgoing.length > 0
 
   return (
@@ -82,18 +108,28 @@ export default function DocPage() {
     >
       <article className="min-w-0">
         <header className="mb-6">
-          <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider">
-            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-text-muted">
-              {doc.template_value}
-            </span>
-            {isRoot && (
-              <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">root</span>
-            )}
-            {orphan && (
-              <span className="rounded bg-accent/10 px-1.5 py-0.5 text-accent">orphan</span>
-            )}
+          <div className="mb-3 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={goBack}
+              className="-ml-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-muted hover:bg-background hover:text-text focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back
+            </button>
+            <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider">
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-text-muted">
+                {doc.template_value}
+              </span>
+              {isRoot && (
+                <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">root</span>
+              )}
+              {orphan && (
+                <span className="rounded bg-accent/10 px-1.5 py-0.5 text-accent">orphan</span>
+              )}
+            </div>
           </div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-text">
+          <h1 className="text-2xl font-semibold tracking-tight text-text">
             {(data.title as string) || '(untitled)'}
           </h1>
           <p className="mt-1.5 text-xs text-text-muted">
@@ -130,7 +166,7 @@ export default function DocPage() {
           <PrepareButtons docId={id} docTitle={(data.title as string) || '(untitled)'} />
         </div>
 
-        {structured.length > 0 && (
+        {(structured.length > 0 || metaEntries.length > 0) && (
           <dl className="mb-8 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
             {structured.map((f) => (
               <Fragment key={f.name}>
@@ -140,12 +176,20 @@ export default function DocPage() {
                 </dd>
               </Fragment>
             ))}
+            {metaEntries.map(([k, v]) => (
+              <Fragment key={`meta:${k}`}>
+                <dt className="text-text-muted">{metaLabel(k)}</dt>
+                <dd className="text-text">
+                  <FieldValue value={v} />
+                </dd>
+              </Fragment>
+            ))}
           </dl>
         )}
 
         {body && (
           <div className="prose prose-gray prose-sm max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkFrontmatter]}>{body}</ReactMarkdown>
           </div>
         )}
 

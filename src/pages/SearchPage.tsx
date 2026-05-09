@@ -1,0 +1,621 @@
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Search as SearchIcon, X } from 'lucide-react'
+import { wipFetchJson } from '../lib/wipBulk'
+import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
+
+const NAMESPACE = 'kb'
+
+interface DocItem {
+  document_id: string
+  template_value: string
+  data: {
+    title?: string
+    authored_by?: string
+    doc_status?: string
+    case_number?: number
+    [k: string]: unknown
+  }
+  metadata?: {
+    custom?: {
+      case_status?: string
+      [k: string]: unknown
+    }
+  }
+  created_at: string
+  updated_at: string
+}
+
+// Workflow status lives in metadata.custom.case_status (open, implemented,
+// responded, closed, ...). data.doc_status is the WIP lifecycle (always
+// "published" for cases) — not what the user means by "status".
+function workflowStatus(doc: DocItem): string | undefined {
+  return doc.metadata?.custom?.case_status
+}
+
+interface ListResponse {
+  items: DocItem[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+interface TemplateInfo {
+  value: string
+  usage?: string
+}
+interface TemplateListResponse {
+  items: TemplateInfo[]
+}
+
+interface FtsHit {
+  type: string
+  id: string
+  value: string
+  score: number | null
+  snippet: string | null
+  description?: string
+  updated_at?: string
+}
+
+interface FtsResponse {
+  query: string
+  results: FtsHit[]
+  counts: Record<string, number>
+  total: number
+}
+
+const SORT_OPTIONS = [
+  { key: 'relevance', label: 'Relevance' },
+  { key: 'case_asc', label: 'Case # · ascending' },
+  { key: 'case_desc', label: 'Case # · descending' },
+  { key: 'updated_desc', label: 'Updated · newest' },
+  { key: 'updated_asc', label: 'Updated · oldest' },
+  { key: 'title_asc', label: 'Title · A→Z' },
+  { key: 'title_desc', label: 'Title · Z→A' },
+] as const
+type SortKey = (typeof SORT_OPTIONS)[number]['key']
+
+// Sort docs without a case_number to the end regardless of direction,
+// so the option is meaningful on mixed-template result sets.
+function compareCaseNumber(a: DocItem, b: DocItem, dir: 'asc' | 'desc'): number {
+  const aN = typeof a.data.case_number === 'number' ? a.data.case_number : null
+  const bN = typeof b.data.case_number === 'number' ? b.data.case_number : null
+  if (aN === null && bN === null) return 0
+  if (aN === null) return 1
+  if (bN === null) return -1
+  return dir === 'asc' ? aN - bN : bN - aN
+}
+
+const PAGE_SIZE = 25
+
+async function fetchAllDocs(namespace: string): Promise<DocItem[]> {
+  const all: DocItem[] = []
+  const pageSize = 100
+  let page = 1
+  while (true) {
+    const res = await wipFetchJson<ListResponse>(
+      `/api/document-store/documents?namespace=${namespace}&page_size=${pageSize}&latest_only=true&page=${page}`,
+    )
+    all.push(...res.items)
+    if (page >= res.pages || res.items.length === 0) break
+    page++
+  }
+  return all
+}
+
+async function fetchSearch(namespace: string, query: string, mode: string): Promise<FtsResponse> {
+  return wipFetchJson<FtsResponse>(`/api/reporting-sync/search?namespace=${namespace}`, {
+    method: 'POST',
+    body: JSON.stringify({ query, mode, types: ['document'], limit: 500 }),
+  })
+}
+
+function csvSet(s: string | null): Set<string> {
+  return new Set((s ?? '').split(',').filter(Boolean))
+}
+
+// Author IDs carry a session suffix: "-YYYYMMDD-HHMM" (most YACs) or just
+// "-YYYYMMDD" (FRanC); some entries are bare ("FRanC"). Strip whichever form
+// is present so all sessions land in one facet bucket per YAC root.
+function rootAuthor(s: string | undefined | null): string {
+  if (!s) return ''
+  return s.replace(/-\d{8}(?:-\d{2,4})?$/, '')
+}
+
+export default function SearchPage() {
+  const [params, setParams] = useSearchParams()
+  const query = params.get('q') ?? ''
+  const mode = (params.get('mode') ?? 'auto') as 'auto' | 'fts' | 'substring'
+  const sort = ((params.get('sort') ?? (query ? 'relevance' : 'updated_desc')) as SortKey)
+  const tFilter = useMemo(() => csvSet(params.get('t')), [params])
+  const sFilter = useMemo(() => csvSet(params.get('s')), [params])
+  const aFilter = useMemo(() => csvSet(params.get('a')), [params])
+  const [page, setPage] = useState(1)
+
+  const [draft, setDraft] = useState(query)
+  useEffect(() => setDraft(query), [query])
+
+  const allDocsQ = useQuery<DocItem[]>({
+    queryKey: ['kb-docs-all', NAMESPACE],
+    queryFn: () => fetchAllDocs(NAMESPACE),
+    staleTime: 30_000,
+  })
+
+  const templatesQ = useQuery<TemplateListResponse>({
+    queryKey: ['templates', NAMESPACE],
+    queryFn: () =>
+      wipFetchJson<TemplateListResponse>(
+        `/api/template-store/templates?namespace=${NAMESPACE}&latest_only=true&page_size=100`,
+      ),
+    staleTime: 5 * 60_000,
+  })
+
+  const searchQ = useQuery<FtsResponse>({
+    queryKey: ['fts-search', NAMESPACE, query, mode],
+    queryFn: () => fetchSearch(NAMESPACE, query, mode),
+    enabled: query.trim().length > 0,
+    staleTime: 30_000,
+  })
+
+  const edgeTypes = useMemo(
+    () =>
+      new Set(
+        (templatesQ.data?.items ?? [])
+          .filter((t) => t.usage === 'relationship')
+          .map((t) => t.value),
+      ),
+    [templatesQ.data],
+  )
+
+  const docsById = useMemo(() => {
+    const m = new Map<string, DocItem>()
+    for (const d of allDocsQ.data ?? []) m.set(d.document_id, d)
+    return m
+  }, [allDocsQ.data])
+
+  const filterableDocs = useMemo(
+    () =>
+      (allDocsQ.data ?? []).filter(
+        (d) => !edgeTypes.has(d.template_value) && d.template_value !== 'BOOTSTRAP_RECORD',
+      ),
+    [allDocsQ.data, edgeTypes],
+  )
+
+  const allTemplates = useMemo(
+    () => Array.from(new Set(filterableDocs.map((d) => d.template_value))).sort(),
+    [filterableDocs],
+  )
+  // Status scope respects the current type filter: when the user filters to
+  // types that have no workflow status (journeys, firesides), the rail's
+  // Status section's option list is empty and FacetSection hides itself.
+  const docsInTypeScope = useMemo(
+    () =>
+      tFilter.size === 0
+        ? filterableDocs
+        : filterableDocs.filter((d) => tFilter.has(d.template_value)),
+    [filterableDocs, tFilter],
+  )
+  const allStatuses = useMemo(
+    () =>
+      Array.from(
+        new Set(docsInTypeScope.map(workflowStatus).filter((s): s is string => Boolean(s))),
+      ).sort(),
+    [docsInTypeScope],
+  )
+  const allAuthors = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          filterableDocs
+            .map((d) => rootAuthor(d.data.authored_by))
+            .filter((s) => s.length > 0),
+        ),
+      ).sort(),
+    [filterableDocs],
+  )
+
+  type Hit = { doc: DocItem; score: number | null; snippet: string | null }
+  const hits: Hit[] = useMemo(() => {
+    if (query.trim()) {
+      const ftsHits = searchQ.data?.results ?? []
+      const seen = new Set<string>()
+      const result: Hit[] = []
+      for (const h of ftsHits) {
+        if (h.type !== 'document') continue
+        if (seen.has(h.id)) continue
+        seen.add(h.id)
+        const doc = docsById.get(h.id)
+        if (!doc) continue
+        if (edgeTypes.has(doc.template_value) || doc.template_value === 'BOOTSTRAP_RECORD') continue
+        result.push({ doc, score: h.score, snippet: h.snippet })
+      }
+      return result
+    }
+    return filterableDocs.map((d) => ({ doc: d, score: null, snippet: null }))
+  }, [query, searchQ.data, docsById, edgeTypes, filterableDocs])
+
+  const filtered = useMemo(
+    () =>
+      hits.filter(({ doc }) => {
+        if (tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
+        if (sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
+        if (aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false
+        return true
+      }),
+    [hits, tFilter, sFilter, aFilter],
+  )
+
+  const hasCaseInScope = useMemo(
+    () => filtered.some((h) => typeof h.doc.data.case_number === 'number'),
+    [filtered],
+  )
+
+  const sorted = useMemo(() => {
+    const arr = [...filtered]
+    arr.sort((a, b) => {
+      switch (sort) {
+        case 'relevance':
+          return (b.score ?? 0) - (a.score ?? 0)
+        case 'case_asc':
+          return compareCaseNumber(a.doc, b.doc, 'asc')
+        case 'case_desc':
+          return compareCaseNumber(a.doc, b.doc, 'desc')
+        case 'updated_desc':
+          return b.doc.updated_at.localeCompare(a.doc.updated_at)
+        case 'updated_asc':
+          return a.doc.updated_at.localeCompare(b.doc.updated_at)
+        case 'title_asc':
+          return (a.doc.data.title ?? '').localeCompare(b.doc.data.title ?? '')
+        case 'title_desc':
+          return (b.doc.data.title ?? '').localeCompare(a.doc.data.title ?? '')
+      }
+    })
+    return arr
+  }, [filtered, sort])
+
+  useEffect(() => {
+    setPage(1)
+  }, [query, mode, sort, params])
+
+  const total = sorted.length
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const safePage = Math.min(page, pageCount)
+  const visible = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
+  function setParam(key: string, value: string | null) {
+    const next = new URLSearchParams(params)
+    if (value === null || value === '') next.delete(key)
+    else next.set(key, value)
+    setParams(next, { replace: true })
+  }
+  function toggleSet(key: string, current: Set<string>, value: string) {
+    const next = new Set(current)
+    if (next.has(value)) next.delete(value)
+    else next.add(value)
+    setParam(key, Array.from(next).join(','))
+  }
+  function clearAll() {
+    setParams(new URLSearchParams(), { replace: true })
+    setDraft('')
+  }
+
+  function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setParam('q', draft.trim() || null)
+  }
+
+  const activeFilterCount = tFilter.size + sFilter.size + aFilter.size
+  const isLoading =
+    allDocsQ.isLoading || templatesQ.isLoading || (query.trim() && searchQ.isLoading)
+  const error = allDocsQ.error ?? templatesQ.error ?? searchQ.error
+
+  return (
+    <div className="flex gap-6">
+      {/* Facet rail */}
+      <aside className="hidden w-60 shrink-0 lg:block">
+        <div className="sticky top-4 space-y-5">
+          <FacetSection title="Type" allOptions={allTemplates}>
+            {allTemplates.map((t) => (
+              <FacetCheckbox
+                key={t}
+                label={t}
+                checked={tFilter.has(t)}
+                onChange={() => toggleSet('t', tFilter, t)}
+              />
+            ))}
+          </FacetSection>
+          <FacetSection title="Status" allOptions={allStatuses}>
+            {allStatuses.map((s) => (
+              <FacetCheckbox
+                key={s}
+                label={s}
+                checked={sFilter.has(s)}
+                onChange={() => toggleSet('s', sFilter, s)}
+              />
+            ))}
+          </FacetSection>
+          <FacetSection title="Author" allOptions={allAuthors}>
+            {allAuthors.map((a) => (
+              <FacetCheckbox
+                key={a}
+                label={a}
+                checked={aFilter.has(a)}
+                onChange={() => toggleSet('a', aFilter, a)}
+              />
+            ))}
+          </FacetSection>
+          {activeFilterCount > 0 && (
+            <button
+              type="button"
+              onClick={clearAll}
+              className="rounded-md border border-primary/30 px-3 py-1 text-xs text-primary hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              Clear all filters
+            </button>
+          )}
+        </div>
+      </aside>
+
+      {/* Results column */}
+      <div className="min-w-0 flex-1">
+        <form onSubmit={onSubmit} className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+            <input
+              type="search"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Search title, body, snippets…"
+              autoFocus
+              className="w-full rounded-md border border-gray-200 py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+          </div>
+          <select
+            value={mode}
+            onChange={(e) => setParam('mode', e.target.value)}
+            aria-label="Search mode"
+            className="rounded-md border border-gray-200 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+          >
+            <option value="auto">Auto</option>
+            <option value="fts">FTS</option>
+            <option value="substring">Substring</option>
+          </select>
+          <select
+            value={sort}
+            onChange={(e) => setParam('sort', e.target.value)}
+            aria-label="Sort"
+            className="rounded-md border border-gray-200 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+          >
+            {SORT_OPTIONS.map((o) => {
+              const isDisabled =
+                (o.key === 'relevance' && !query.trim()) ||
+                ((o.key === 'case_asc' || o.key === 'case_desc') && !hasCaseInScope)
+              return (
+                <option key={o.key} value={o.key} disabled={isDisabled}>
+                  {o.label}
+                </option>
+              )
+            })}
+          </select>
+          <button
+            type="submit"
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/40"
+          >
+            Search
+          </button>
+        </form>
+
+        {/* Active filter chips */}
+        {activeFilterCount > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-text-muted">Filters:</span>
+            {[...tFilter].map((v) => (
+              <FilterChip key={`t:${v}`} label={v} onRemove={() => toggleSet('t', tFilter, v)} />
+            ))}
+            {[...sFilter].map((v) => (
+              <FilterChip key={`s:${v}`} label={v} onRemove={() => toggleSet('s', sFilter, v)} />
+            ))}
+            {[...aFilter].map((v) => (
+              <FilterChip key={`a:${v}`} label={v} onRemove={() => toggleSet('a', aFilter, v)} />
+            ))}
+          </div>
+        )}
+
+        {/* Results meta */}
+        <div className="mb-3 flex items-center justify-between text-xs text-text-muted">
+          <span>
+            {isLoading
+              ? 'Loading…'
+              : error
+                ? 'Error'
+                : `${total} result${total === 1 ? '' : 's'}${query.trim() ? ` for "${query.trim()}"` : ''}`}
+          </span>
+          {pageCount > 1 && (
+            <span>
+              Page {safePage} of {pageCount}
+            </span>
+          )}
+        </div>
+
+        {/* Empty / error / list */}
+        {error ? (
+          <p className="rounded-lg border border-danger/20 bg-danger/5 p-4 text-sm text-danger">
+            Failed to load: {(error as Error).message}
+          </p>
+        ) : !isLoading && total === 0 ? (
+          <EmptyState query={query} onBrowse={(t) => toggleSet('t', new Set(), t)} templates={allTemplates} />
+        ) : (
+          <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-surface">
+            {visible.map(({ doc, score, snippet }) => (
+              <li key={doc.document_id}>
+                <Link
+                  to={`/doc/${doc.document_id}`}
+                  className="block px-4 py-3 transition hover:bg-background"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className="text-sm font-medium text-text">
+                          {doc.data.title || (
+                            <span className="italic text-text-muted">(untitled)</span>
+                          )}
+                        </span>
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                          {doc.template_value}
+                        </span>
+                        {workflowStatus(doc) && (
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-text-muted">
+                            {workflowStatus(doc)}
+                          </span>
+                        )}
+                      </div>
+                      {snippet && (
+                        <p
+                          className="fts-snippet mt-1.5 text-sm text-text-muted"
+                          dangerouslySetInnerHTML={{ __html: sanitiseFtsSnippet(snippet) }}
+                        />
+                      )}
+                      <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-text-muted">
+                        {doc.data.authored_by && <span>{doc.data.authored_by}</span>}
+                        <span>{new Date(doc.updated_at).toLocaleString()}</span>
+                        {score !== null && score !== undefined && (
+                          <span className="ml-auto">score {score.toFixed(2)}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* Pager */}
+        {pageCount > 1 && (
+          <div className="mt-4 flex items-center justify-center gap-1 text-xs">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={safePage === 1}
+              className="rounded-md border border-gray-200 px-2 py-1 hover:bg-background disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <span className="px-2 text-text-muted">
+              {safePage} / {pageCount}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              disabled={safePage === pageCount}
+              className="rounded-md border border-gray-200 px-2 py-1 hover:bg-background disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function FacetSection({
+  title,
+  allOptions,
+  children,
+}: {
+  title: string
+  allOptions: string[]
+  children: ReactNode
+}) {
+  if (allOptions.length === 0) return null
+  return (
+    <div>
+      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-text-muted">{title}</h3>
+      <div className="max-h-60 space-y-1 overflow-y-auto pr-1">{children}</div>
+    </div>
+  )
+}
+
+function FacetCheckbox({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  onChange: () => void
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-background">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary/40"
+      />
+      <span className={`min-w-0 flex-1 truncate ${checked ? 'font-medium text-text' : 'text-text'}`}>
+        {label}
+      </span>
+    </label>
+  )
+}
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary">
+      <span className="font-medium">{label}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove filter ${label}`}
+        className="rounded-full p-0.5 hover:bg-primary/20"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  )
+}
+
+function EmptyState({
+  query,
+  templates,
+  onBrowse,
+}: {
+  query: string
+  templates: string[]
+  onBrowse: (t: string) => void
+}) {
+  if (query.trim()) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-surface px-6 py-12 text-center">
+        <p className="text-sm font-medium text-text">No results for "{query.trim()}"</p>
+        <p className="mt-1 text-sm text-text-muted">
+          Try a shorter query, or switch the search mode to Substring.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="rounded-lg border border-gray-200 bg-surface px-6 py-10">
+      <p className="text-sm text-text-muted">
+        Type a query above, or browse by type:
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {templates.map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => onBrowse(t)}
+            className="rounded-full border border-gray-200 bg-surface px-3 py-1 text-xs text-text hover:border-primary/30 hover:text-primary"
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
