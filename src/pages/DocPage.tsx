@@ -8,6 +8,8 @@ import remarkFrontmatter from 'remark-frontmatter'
 import { ArrowLeft } from 'lucide-react'
 import { PrepareButtons } from '../components/PrepareButtons'
 import { FlagModal } from '../components/FlagModal'
+import { RelationshipGraph } from '../components/RelationshipGraph'
+import { parseCaseTitle } from '../lib/casePrefix'
 
 const COMMON_FIELDS = new Set(['title', 'authored_by', 'doc_status', 'tags', 'root', 'body'])
 
@@ -99,7 +101,17 @@ export default function DocPage() {
   const hasEdges = incoming.length > 0 || outgoing.length > 0
 
   return (
-    <div
+    <>
+      {hasEdges && (
+        <RelationshipGraph
+          selfId={id}
+          selfTitle={(data.title as string) || ''}
+          selfTemplate={doc.template_value ?? ''}
+          incoming={incoming}
+          outgoing={outgoing}
+        />
+      )}
+      <div
       className={
         hasEdges
           ? 'grid gap-10 md:grid-cols-[minmax(0,1fr)_16rem]'
@@ -216,6 +228,7 @@ export default function DocPage() {
         />
       )}
     </div>
+    </>
   )
 }
 
@@ -257,15 +270,37 @@ function RelationshipList({
           const peer = r.peer
           const errorCode = r.peer_error_code
           const isInactive = peer?.status === 'inactive'
+          const parsed = parseCaseTitle(peer?.data?.title)
+          const fullTitle = peer?.data?.title || peerId
           return (
             <li key={r.document_id}>
-              <Link to={`/doc/${peerId}`} className="block rounded px-1 py-0.5 hover:bg-background">
-                <div className="flex flex-wrap items-center gap-1.5">
+              <Link
+                to={`/doc/${peerId}`}
+                className="block rounded px-1 py-1 hover:bg-background"
+                title={fullTitle}
+              >
+                {/* Top row: case-number chip + slug title */}
+                <div className="flex items-baseline gap-1.5">
+                  {parsed.caseNumber !== null && (
+                    <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-primary">
+                      CASE-{parsed.caseNumber}
+                    </span>
+                  )}
+                  <span
+                    className={`min-w-0 truncate text-sm ${isInactive ? 'text-text-muted' : 'text-text'}`}
+                  >
+                    {parsed.slug || (
+                      <span className="font-mono text-xs text-text-muted">{peerId}</span>
+                    )}
+                  </span>
+                </div>
+                {/* Bottom row: edge-type + peer-template + status pills */}
+                <div className="mt-1 flex flex-wrap items-center gap-1">
                   <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
                     {r.template_value}
                   </span>
-                  {peer && (
-                    <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                  {peer && peer.template_value !== 'CASE_RECORD' && (
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
                       {peer.template_value}
                     </span>
                   )}
@@ -278,14 +313,6 @@ function RelationshipList({
                     <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
                       {errorCode}
                     </span>
-                  )}
-                </div>
-                <div
-                  className={`mt-0.5 truncate text-sm ${isInactive ? 'text-text-muted' : 'text-text'}`}
-                  title={peer?.data?.title || peerId}
-                >
-                  {peer?.data?.title || (
-                    <span className="font-mono text-xs text-text-muted">{peerId}</span>
                   )}
                 </div>
               </Link>
