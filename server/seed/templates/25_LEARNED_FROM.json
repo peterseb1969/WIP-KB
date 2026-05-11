@@ -6,9 +6,9 @@
   "versioned": false,
   "identity_fields": ["source_ref", "target_ref"],
   "source_templates": ["LESSON"],
-  "target_templates": ["CASE_RECORD"],
+  "target_templates": ["CASE_RECORD", "DOCUMENT"],
   "fields": [
     { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["LESSON"] },
-    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD"] }
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD", "DOCUMENT"] }
   ]
 }

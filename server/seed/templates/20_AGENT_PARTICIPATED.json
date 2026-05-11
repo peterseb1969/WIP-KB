@@ -5,10 +5,10 @@
   "usage": "relationship",
   "versioned": false,
   "identity_fields": ["source_ref", "target_ref"],
-  "source_templates": ["FIRESIDE", "CASE_RECORD", "DESIGN_DECISION", "JOURNEY_ENTRY"],
+  "source_templates": ["FIRESIDE", "CASE_RECORD", "DESIGN_DECISION", "JOURNEY_ENTRY", "DOCUMENT"],
   "target_templates": ["AGENT_IDENTITY"],
   "fields": [
-    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["FIRESIDE", "CASE_RECORD", "DESIGN_DECISION", "JOURNEY_ENTRY"] },
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["FIRESIDE", "CASE_RECORD", "DESIGN_DECISION", "JOURNEY_ENTRY", "DOCUMENT"] },
     { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["AGENT_IDENTITY"] }
   ]
 }

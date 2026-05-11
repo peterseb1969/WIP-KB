@@ -5,10 +5,10 @@
   "usage": "relationship",
   "versioned": false,
   "identity_fields": ["source_ref", "target_ref"],
-  "source_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "FLAG_RECORD", "BOOTSTRAP_RECORD"],
-  "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "FLAG_RECORD", "BOOTSTRAP_RECORD"],
+  "source_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "FLAG_RECORD", "BOOTSTRAP_RECORD", "DOCUMENT"],
+  "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "FLAG_RECORD", "BOOTSTRAP_RECORD", "DOCUMENT"],
   "fields": [
-    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "FLAG_RECORD", "BOOTSTRAP_RECORD"] },
-    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "FLAG_RECORD", "BOOTSTRAP_RECORD"] }
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "FLAG_RECORD", "BOOTSTRAP_RECORD", "DOCUMENT"] },
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "FLAG_RECORD", "BOOTSTRAP_RECORD", "DOCUMENT"] }
   ]
 }

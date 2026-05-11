@@ -5,10 +5,10 @@
   "usage": "relationship",
   "versioned": false,
   "identity_fields": ["source_ref", "target_ref"],
-  "source_templates": ["DESIGN_DECISION"],
-  "target_templates": ["DESIGN_DECISION"],
+  "source_templates": ["DESIGN_DECISION", "DOCUMENT"],
+  "target_templates": ["DESIGN_DECISION", "DOCUMENT"],
   "fields": [
-    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["DESIGN_DECISION"] },
-    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["DESIGN_DECISION"] }
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["DESIGN_DECISION", "DOCUMENT"] },
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["DESIGN_DECISION", "DOCUMENT"] }
   ]
 }
