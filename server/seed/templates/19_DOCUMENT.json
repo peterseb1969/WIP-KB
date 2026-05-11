@@ -1,0 +1,18 @@
+{
+  "value": "DOCUMENT",
+  "label": "Document",
+  "description": "Mirror of a human-targeted markdown file from a source repo (CASE-346). Source-of-truth lives at `path` in the originating repo; this record is the kb-resident copy for FTS / cross-reference / graph traversal. Generic — discriminated per-instance by `kind`. Distinct from the entity templates (DESIGN_DECISION, FIRESIDE, LESSON) which are written-from-YAC via slash commands and carry their own structured fields.",
+  "usage": "entity",
+  "identity_fields": ["path"],
+  "fields": [
+    { "name": "path",            "label": "Path",            "type": "string",  "mandatory": true,  "full_text_indexed": true },
+    { "name": "repo_origin",     "label": "Repo Origin",     "type": "string",  "mandatory": true },
+    { "name": "title",           "label": "Title",           "type": "string",  "mandatory": true,  "full_text_indexed": true },
+    { "name": "body",            "label": "Body",            "type": "string",  "mandatory": true,  "full_text_indexed": true },
+    { "name": "kind",            "label": "Kind",            "type": "term",    "mandatory": true,  "reference_type": "term", "terminology_ref": "KB_DOC_KIND" },
+    { "name": "authored_by",     "label": "Authored By",     "type": "string",  "mandatory": false },
+    { "name": "tags",            "label": "Tags",            "type": "array",   "array_item_type": "string" },
+    { "name": "synced_from_sha", "label": "Synced From SHA", "type": "string",  "mandatory": false },
+    { "name": "doc_status",      "label": "Doc Status",      "type": "term",    "mandatory": true,  "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "published" }
+  ]
+}

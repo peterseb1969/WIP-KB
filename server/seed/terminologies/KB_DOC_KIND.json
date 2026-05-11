@@ -1,0 +1,11 @@
+{
+  "value": "KB_DOC_KIND",
+  "label": "KB Document Kind",
+  "description": "Discriminates DOCUMENT instances by their conceptual role (CASE-346). Term-backed so values are constrained, discoverable via list_terms, and extendable via term-relations. Starter set is paper/playbook/guide; add more terms as the corpus reveals them. Distinct from the entity-shaped templates (DESIGN_DECISION, FIRESIDE, LESSON) which exist for YAC-written structured records, not markdown mirrors.",
+  "mutable": true,
+  "terms": [
+    { "value": "paper",    "label": "Paper",    "sort_order": 10, "description": "Long-form essay / survey / design discussion. Typically authored in flow; evolves over time. Examples: langgraph-survey, fts-architecture-fireside, ui-guidance." },
+    { "value": "playbook", "label": "Playbook", "sort_order": 20, "description": "Operational procedure / workflow handler reference. Examples: case-workflow, bootstrap, build-app." },
+    { "value": "guide",    "label": "Guide",    "sort_order": 30, "description": "How-to / reference manual for a specific reader. Examples: technology-stack, wip-guide." }
+  ]
+}
