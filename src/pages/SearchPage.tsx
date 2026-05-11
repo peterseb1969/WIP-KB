@@ -15,6 +15,7 @@ interface DocItem {
     authored_by?: string
     doc_status?: string
     case_number?: number
+    kind?: string
     [k: string]: unknown
   }
   metadata?: {
@@ -135,6 +136,7 @@ export default function SearchPage() {
   const tFilter = useMemo(() => csvSet(params.get('t')), [params])
   const sFilter = useMemo(() => csvSet(params.get('s')), [params])
   const aFilter = useMemo(() => csvSet(params.get('a')), [params])
+  const kFilter = useMemo(() => csvSet(params.get('k')), [params])
   const [page, setPage] = useState(1)
 
   const [draft, setDraft] = useState(query)
@@ -207,6 +209,20 @@ export default function SearchPage() {
       ).sort(),
     [docsInTypeScope],
   )
+  // Kind scope respects the type filter — same pattern as Status. Only DOCUMENT
+  // instances carry `data.kind`, so the section auto-hides when the type filter
+  // excludes DOCUMENT (FacetSection returns null on empty option list).
+  const allKinds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          docsInTypeScope
+            .map((d) => d.data.kind)
+            .filter((k): k is string => typeof k === 'string' && k.length > 0),
+        ),
+      ).sort(),
+    [docsInTypeScope],
+  )
   const allAuthors = useMemo(
     () =>
       Array.from(
@@ -245,9 +261,10 @@ export default function SearchPage() {
         if (tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
         if (sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
         if (aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false
+        if (kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
         return true
       }),
-    [hits, tFilter, sFilter, aFilter],
+    [hits, tFilter, sFilter, aFilter, kFilter],
   )
 
   const hasCaseInScope = useMemo(
@@ -309,7 +326,7 @@ export default function SearchPage() {
     setParam('q', draft.trim() || null)
   }
 
-  const activeFilterCount = tFilter.size + sFilter.size + aFilter.size
+  const activeFilterCount = tFilter.size + sFilter.size + aFilter.size + kFilter.size
   const isLoading =
     allDocsQ.isLoading || templatesQ.isLoading || (query.trim() && searchQ.isLoading)
   const error = allDocsQ.error ?? templatesQ.error ?? searchQ.error
@@ -336,6 +353,16 @@ export default function SearchPage() {
                 label={s}
                 checked={sFilter.has(s)}
                 onChange={() => toggleSet('s', sFilter, s)}
+              />
+            ))}
+          </FacetSection>
+          <FacetSection title="Kind" allOptions={allKinds}>
+            {allKinds.map((k) => (
+              <FacetCheckbox
+                key={k}
+                label={k}
+                checked={kFilter.has(k)}
+                onChange={() => toggleSet('k', kFilter, k)}
               />
             ))}
           </FacetSection>
@@ -419,6 +446,9 @@ export default function SearchPage() {
             ))}
             {[...sFilter].map((v) => (
               <FilterChip key={`s:${v}`} label={v} onRemove={() => toggleSet('s', sFilter, v)} />
+            ))}
+            {[...kFilter].map((v) => (
+              <FilterChip key={`k:${v}`} label={v} onRemove={() => toggleSet('k', kFilter, v)} />
             ))}
             {[...aFilter].map((v) => (
               <FilterChip key={`a:${v}`} label={v} onRemove={() => toggleSet('a', aFilter, v)} />
