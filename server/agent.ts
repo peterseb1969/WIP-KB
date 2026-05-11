@@ -135,6 +135,13 @@ export async function initAgent() {
     }))
   console.log(`✓ ${mcpTools.length} tools available (filtered from ${toolsResult.tools.length})`)
 
+  const realNames = new Set(toolsResult.tools.map(t => t.name))
+  const stale = [...ALLOWED_TOOLS].filter(n => !realNames.has(n))
+  if (stale.length > 0) {
+    console.warn(`⚠ ${stale.length} whitelisted tool(s) not found on MCP surface (likely renamed upstream):`)
+    for (const n of stale) console.warn(`    - ${n}`)
+  }
+
   // Read the query assistant prompt resource for system prompt
   try {
     const resource = await mcpClient.readResource({ uri: 'wip://query-assistant-prompt' })
