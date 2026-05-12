@@ -212,6 +212,7 @@ export async function runBootstrap(
       if (data.target_templates) template.target_templates = data.target_templates
       if (data.versioned === false) template.versioned = false
 
+      if (data.header_fields) template.header_fields = data.header_fields
       if (data.reporting) template.reporting = data.reporting
 
       const tmplResult = await wipPost(

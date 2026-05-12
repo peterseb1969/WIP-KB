@@ -4,6 +4,7 @@
   "description": "Per-day git activity snapshot (DESIGN.md §5.6). Structured-only — no body. Identity = (snapshot_date, repo) so re-running /stats for the same day overwrites.",
   "usage": "entity",
   "identity_fields": ["snapshot_date", "repo"],
+  "header_fields": ["title"],
   "fields": [
     { "name": "title",         "label": "Title",          "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "authored_by",   "label": "Authored By",    "type": "string",  "mandatory": true },

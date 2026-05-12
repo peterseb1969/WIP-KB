@@ -4,6 +4,7 @@
   "description": "Mirror of a human-targeted markdown file from a source repo (CASE-346). Source-of-truth lives at `path` in the originating repo; this record is the kb-resident copy for FTS / cross-reference / graph traversal. Generic — discriminated per-instance by `kind`. Distinct from the entity templates (DESIGN_DECISION, FIRESIDE, LESSON) which are written-from-YAC via slash commands and carry their own structured fields.",
   "usage": "entity",
   "identity_fields": ["path"],
+  "header_fields": ["title", "kind"],
   "fields": [
     { "name": "path",            "label": "Path",            "type": "string",  "mandatory": true,  "full_text_indexed": true },
     { "name": "repo_origin",     "label": "Repo Origin",     "type": "string",  "mandatory": true },
