@@ -61,11 +61,17 @@ interface FtsHit {
   updated_at?: string
 }
 
+interface FtsTypeBucket {
+  items: FtsHit[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
 interface FtsResponse {
   query: string
-  results: FtsHit[]
-  counts: Record<string, number>
-  total: number
+  mode: string
+  results: Record<string, FtsTypeBucket>
 }
 
 const SORT_OPTIONS = [
@@ -108,11 +114,9 @@ async function fetchAllDocs(namespace: string): Promise<DocItem[]> {
 }
 
 async function fetchSearch(namespace: string, query: string, mode: string): Promise<FtsResponse> {
-  // limit capped at 100 by the reporting-sync endpoint per CASE-328 / wip://conventions
-  // platform-wide pagination max. For >100 hits, CASE-329 tracks proper pagination on /search.
   return wipFetchJson<FtsResponse>(`/api/reporting-sync/search?namespace=${namespace}`, {
     method: 'POST',
-    body: JSON.stringify({ query, mode, types: ['document'], limit: 100 }),
+    body: JSON.stringify({ query, mode, types: ['document'], page_size: 100 }),
   })
 }
 
@@ -238,7 +242,7 @@ export default function SearchPage() {
   type Hit = { doc: DocItem; score: number | null; snippet: string | null }
   const hits: Hit[] = useMemo(() => {
     if (query.trim()) {
-      const ftsHits = searchQ.data?.results ?? []
+      const ftsHits = Object.values(searchQ.data?.results ?? {}).flatMap((b) => b.items)
       const seen = new Set<string>()
       const result: Hit[] = []
       for (const h of ftsHits) {
