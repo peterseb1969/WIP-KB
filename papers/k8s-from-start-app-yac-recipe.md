@@ -163,6 +163,12 @@ This is why WIP-KB's auth on local dev is essentially off (`OIDC_ISSUER not set 
 | Standalone prod | set | not present | the app, via OIDC |
 | Gateway prod | unset | present (`X-WIP-User`) | wip-router; app trusts headers |
 
+**When "auth doesn't work end-to-end on k8s" — three failure modes to check, in order:**
+
+1. **Gateway isn't setting the headers.** `kubectl logs` on the wip-router pod for the request; if `X-WIP-User`/`X-WIP-Groups` aren't injected, the app falls through to OIDC (probably off in gateway mode) and `/api/me` returns `anonymous: true`. Likely cause: router's auth-mode config for this route is wrong, or OIDC verification failed silently upstream.
+2. **NetworkPolicy isn't enforcing gateway-only ingress.** Test from a different pod: `curl -H 'X-WIP-User: anyone' http://<svc>:<port>${APP_BASE_PATH}/api/me`. If that returns `method: gateway`, the trust boundary is wide open and header forgery is trivial. Fix: a NetworkPolicy that allows ingress only from the wip-router namespace/labels.
+3. **OIDC discovery / redirect URL not BASE_PATH-aware.** Only matters in standalone-prod mode. The redirect URL registered with the OIDC issuer must be `https://<host>${APP_BASE_PATH}/auth/callback`, not the bare host. If issuer config was built without the prefix, the callback comes back to `/auth/callback` (no prefix) and the ingress 404s it, OR the session cookie ends up on the wrong path and silently drops on subsequent requests. Symptom: post-login 404 from the ingress, or the user logs in repeatedly without the session sticking.
+
 ### 8. `Dockerfile` + `.dockerignore`
 
 Two-stage build, server runs via `tsx` (no TypeScript compile step for the server).
