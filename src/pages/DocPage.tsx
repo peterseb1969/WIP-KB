@@ -64,7 +64,7 @@ export default function DocPage() {
     queryKey: ['relationships', id],
     queryFn: async () => {
       const res = await fetch(
-        `/wip/api/document-store/documents/${id}/relationships?include=peers`,
+        `${import.meta.env.BASE_URL}wip/api/document-store/documents/${id}/relationships?include=peers`,
       )
       if (!res.ok) throw new Error(`relationships ${res.status}`)
       return res.json()

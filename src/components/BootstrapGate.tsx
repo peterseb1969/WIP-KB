@@ -16,8 +16,10 @@
  * destroy data the user actually meant to restore.
  *
  * Adapted from templates/bootstrap/BootstrapGate.tsx.template:
- *   - serverApiUrl() helper inlined as plain '/server-api/...' paths
- *     (vite proxy handles dev forwarding to :3001).
+ *   - serverApiUrl() helper inlined; paths are prefixed with Vite's
+ *     `import.meta.env.BASE_URL` so they resolve correctly both in
+ *     local dev (`/server-api/...`) and behind an ingress prefix
+ *     (`/apps/kb/server-api/...`).
  *   - NAMESPACE_LABEL = 'kb', APP_TITLE = 'KB'.
  */
 
@@ -26,6 +28,11 @@ import { Database, AlertTriangle, RefreshCw, Loader2, ServerCrash } from 'lucide
 
 const NAMESPACE_LABEL = 'kb'
 const APP_TITLE = 'KB'
+
+// Vite BASE_URL always ends in `/`. In dev it's `/`; in prod (behind
+// ingress) it's `/apps/kb/`. Concatenating without a leading slash
+// gives the right URL in both contexts.
+const SERVER_API = `${import.meta.env.BASE_URL}server-api`
 
 type AppStatus = 'checking' | 'wip_unreachable' | 'needs_bootstrap' | 'bootstrapping' | 'ready' | 'error'
 
@@ -45,7 +52,7 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
     setStatus('checking')
     setError(null)
     try {
-      const res = await fetch('/server-api/bootstrap/status')
+      const res = await fetch(`${SERVER_API}/bootstrap/status`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setStatus(data.status as AppStatus)
@@ -62,7 +69,7 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
     setError(null)
 
     try {
-      const response = await fetch('/server-api/bootstrap/run', { method: 'POST' })
+      const response = await fetch(`${SERVER_API}/bootstrap/run`, { method: 'POST' })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       if (!response.body) throw new Error('No response body')
 

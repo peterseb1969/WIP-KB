@@ -23,8 +23,13 @@ export function assertBulkSuccess(response: unknown, context: string): BulkItemR
   return items
 }
 
+// Vite BASE_URL always ends in `/`. In dev it's `/`; in prod (behind
+// ingress) it's `/apps/kb/`. Concatenating without a leading slash on
+// `wip` gives the right URL in both contexts.
+const WIP_BASE = `${import.meta.env.BASE_URL}wip`
+
 export async function wipFetchJson<T = unknown>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/wip${path}`, {
+  const res = await fetch(`${WIP_BASE}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   })

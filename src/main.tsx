@@ -8,8 +8,11 @@ import './index.css'
 
 const queryClient = new QueryClient()
 
+// `import.meta.env.BASE_URL` is Vite's mirror of `config.base` (always
+// ends in `/`). Concatenated with `wip` it becomes `/wip` in local dev
+// and `/apps/kb/wip` when the app is served behind the ingress prefix.
 const wipClient = createWipClient({
-  baseUrl: '/wip',
+  baseUrl: `${import.meta.env.BASE_URL}wip`,
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
