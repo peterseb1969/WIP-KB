@@ -4,7 +4,6 @@
   "description": "Audit doc per spec §3.4 (DESIGN.md §5.9). One per user-initiated bootstrap. Structured-only (no body); root:true by default — bootstrap audit docs are intentional graph entry points.",
   "usage": "entity",
   "identity_fields": ["bootstrap_id"],
-  "header_fields": ["title"],
   "fields": [
     { "name": "title",                   "label": "Title",                  "type": "string",   "mandatory": true, "full_text_indexed": true },
     { "name": "authored_by",             "label": "Authored By",            "type": "string",   "mandatory": true },

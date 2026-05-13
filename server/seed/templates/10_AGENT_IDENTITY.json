@@ -4,7 +4,6 @@
   "description": "YAC / human-owner persona record (DESIGN.md §5.7). usage:reference (LOV). Bootstrap-seeds 8 records (USER1 + 7 YACs) — seeding is APP-KB-YAC's responsibility post-bootstrap, not BootstrapGate's.",
   "usage": "reference",
   "identity_fields": ["agent_value"],
-  "header_fields": ["title"],
   "fields": [
     { "name": "title",        "label": "Display Name", "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "authored_by",  "label": "Authored By",  "type": "string",  "mandatory": true },
