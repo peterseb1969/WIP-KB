@@ -19,6 +19,9 @@ export default defineConfig({
   base: BASE_WITH_SLASH,
   plugins: [react()],
   server: {
+    // 0.0.0.0 lets Vite accept connections from outside the container
+    // (wip-deploy --target dev with --app-source). Harmless on host.
+    host: '0.0.0.0',
     port: 5173,
     proxy: {
       [`${BASE_PATH}/api`]: 'http://localhost:3001',
