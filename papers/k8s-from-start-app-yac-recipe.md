@@ -6,7 +6,7 @@
 
 ## Why this exists
 
-WIP-KB was built as a standalone Vite + Express app for ~10 days before being onto k8s. The integration was a single afternoon's work for the YAC who did it, but it *touched eight surfaces* — each one of which would have been a one-line scaffold decision at day 1, and instead required understanding the running app well enough to refactor without breakage.
+WIP-KB was built as a standalone Vite + Express app for ~10 days before being onto k8s. The integration was a single afternoon's work for the YAC who did it, but it *touched nine surfaces* — each one of which would have been a one-line scaffold decision at day 1, and instead required understanding the running app well enough to refactor without breakage. (Eight discovered during the 2026-05-13 retrofit; a ninth — Vite's `server.host: '0.0.0.0'` — surfaced 2026-05-14 when CASE-375 tried `wip-deploy add-app --app-source` and Caddy couldn't reach the dev server inside the container.)
 
 The retrofit pattern is the same every time:
 
@@ -38,7 +38,7 @@ At build time (Vite stage of the Docker build), the deployer passes:
 |---|---|
 | `VITE_BASE_PATH` | Same value as `APP_BASE_PATH`, baked into the static assets. The Vite build emits asset URLs prefixed with this; the server has no opportunity to rewrite them later. |
 
-## The eight surfaces — what to ship from day 1
+## The nine surfaces — what to ship from day 1
 
 ### 1. `server/index.ts` — Express Router mounted at `APP_BASE_PATH`
 
@@ -97,6 +97,9 @@ export default defineConfig({
   base: BASE_WITH_SLASH,
   plugins: [react()],
   server: {
+    // 0.0.0.0 lets Vite accept connections from outside the container
+    // (wip-deploy --target dev with --app-source). Harmless on host.
+    host: '0.0.0.0',
     port: 5173,
     proxy: {
       [`${BASE_PATH}/api`]: 'http://localhost:3001',
@@ -108,6 +111,8 @@ export default defineConfig({
 ```
 
 **Resolution order matters.** Build (Dockerfile) sets `VITE_BASE_PATH`; runtime dev (wip-deploy `--target dev`) sets `APP_BASE_PATH` but not `VITE_BASE_PATH`. Reading both lets the same config work in both modes.
+
+**The `server.host: '0.0.0.0'` line is the ninth surface.** Vite's default `host` is `localhost`, which only accepts loopback connections inside the container — Caddy/ingress proxying to `<container>:5173` will get ECONNREFUSED. Binding to `0.0.0.0` listens on all interfaces, which is what every containerized dev server needs. On host (non-container) dev it's harmless: Vite still accepts localhost connections, and the OS firewall normally still gates external access. Surfaced by CASE-375 when `wip-deploy add-app wip-kb --app-source` couldn't reach the dev server.
 
 ### 3–6. Every client fetch — use `import.meta.env.BASE_URL`
 
@@ -238,7 +243,7 @@ What the `--preset query` scaffold ships today vs what this paper recommends:
 | Surface | Scaffold today | Recommended |
 |---|---|---|
 | `server/index.ts` | Routes on `app`, no BASE_PATH | Router-mounted under `APP_BASE_PATH` |
-| `vite.config.ts` | No `base`; raw dev proxy paths | `base: VITE_BASE_PATH || APP_BASE_PATH || '/'`, prefixed dev proxy |
+| `vite.config.ts` | No `base`; raw dev proxy paths; default `localhost` host binding | `base: VITE_BASE_PATH || APP_BASE_PATH || '/'`, prefixed dev proxy, `server.host: '0.0.0.0'` |
 | `src/main.tsx` (WipClient) | `baseUrl: '/wip'` | `baseUrl: ${BASE_URL}wip` |
 | `src/lib/wipBulk.ts` | `fetch('/wip' + path)` | `fetch(${BASE_URL}wip + path)` |
 | `src/components/BootstrapGate.tsx` | `fetch('/server-api/...')` | `fetch(${BASE_URL}server-api/...)` |
@@ -254,7 +259,7 @@ These are mechanical scaffold edits; none of them require an architectural chang
 If you're a new APP-YAC reading this:
 
 1. Run the scaffold (`--preset query`).
-2. Before you write a single feature, do the eight changes above. They take 30 minutes.
+2. Before you write a single feature, do the nine changes above. They take 30 minutes.
 3. Add `Dockerfile` and `.dockerignore`. Test with `docker build .` once locally.
 4. File a `wip-app.yaml` in the wip-deploy repo's `apps/<name>/` so the deployer recognises your app from day 1.
 5. Use `wip-deploy install --target dev --app <name> --app-source <name>=<your-repo>` to test the integrated flow at least once early. The next time you do it should be at week 2, not week 6.
