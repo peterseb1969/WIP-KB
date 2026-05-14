@@ -9,7 +9,7 @@ import { initAgent, ask } from './agent.js'
 import { initAuth, requireAuth, handleCallback, handleLogout } from './auth.js'
 import bootstrapRoutes from './bootstrap.routes.js'
 
-const PORT = parseInt(process.env.PORT || '3001')
+const PORT = parseInt(process.env.PORT || '3012')
 
 // APP_BASE_PATH — external path prefix when behind a reverse proxy.
 // E.g. /apps/kb when nginx routes https://host/apps/kb/* to this app.

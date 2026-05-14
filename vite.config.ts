@@ -24,9 +24,9 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     proxy: {
-      [`${BASE_PATH}/api`]: 'http://localhost:3001',
-      [`${BASE_PATH}/wip`]: 'http://localhost:3001',
-      [`${BASE_PATH}/server-api`]: 'http://localhost:3001',
+      [`${BASE_PATH}/api`]: 'http://localhost:3012',
+      [`${BASE_PATH}/wip`]: 'http://localhost:3012',
+      [`${BASE_PATH}/server-api`]: 'http://localhost:3012',
     },
   },
 })
