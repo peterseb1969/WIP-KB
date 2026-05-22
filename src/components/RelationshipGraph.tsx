@@ -15,13 +15,36 @@ interface EdgeItem {
   peer?: PeerProjection | null
 }
 
+interface PeerEnrichment {
+  caseStatus?: string
+  hasMoreNeighbors: boolean
+}
+
 interface Props {
   selfId: string
   selfTitle: string
   selfTemplate: string
   incoming: EdgeItem[]
   outgoing: EdgeItem[]
+  enrichment?: Record<string, PeerEnrichment>
 }
+
+// Case-status → border-color override for CASE_RECORD peers. Keeps the fill
+// color (template_value) intact so doc-type recognition stays; uses the
+// stroke as an orthogonal status channel.
+function statusStroke(caseStatus: string | undefined): string | null {
+  switch (caseStatus) {
+    case 'open': return '#ED7D31' // accent orange — needs attention
+    case 'responded': return '#5B9BD5' // primary light blue — awaiting
+    case 'implemented': return '#2E8B57' // success green — done
+    case 'closed': return '#9CA3AF' // gray-400 — terminal
+    default: return null // fall back to template-derived stroke
+  }
+}
+
+// Status values that mean "this case is no longer waiting for action."
+// Used to italicize the label so open cases stand out at a glance.
+const TERMINAL_STATUSES = new Set(['implemented', 'closed'])
 
 // Layout constants in SVG user units.
 const NODE_W = 120
@@ -62,6 +85,8 @@ interface HoverState {
   title: string
   template: string
   status?: string
+  caseStatus?: string
+  hasMoreNeighbors?: boolean
 }
 
 const TOOLTIP_W = 280
@@ -74,6 +99,7 @@ export function RelationshipGraph({
   selfTemplate,
   incoming,
   outgoing,
+  enrichment = {},
 }: Props) {
   const navigate = useNavigate()
   const [hover, setHover] = useState<HoverState | null>(null)
@@ -173,6 +199,9 @@ export function RelationshipGraph({
           const label = shortLabel(peer.data?.title, peer.document_id)
           const fullTitle = peer.data?.title || peer.document_id
           const inactive = peer.status === 'inactive'
+          const enr = enrichment[peer.document_id]
+          const stroke = statusStroke(enr?.caseStatus) ?? c.stroke
+          const labelItalic = enr?.caseStatus !== undefined && TERMINAL_STATUSES.has(enr.caseStatus)
           return (
             <g
               key={`in-node-${peer.document_id}`}
@@ -184,6 +213,8 @@ export function RelationshipGraph({
                   title: fullTitle,
                   template: peer.template_value,
                   status: peer.status,
+                  caseStatus: enr?.caseStatus,
+                  hasMoreNeighbors: enr?.hasMoreNeighbors,
                 })
               }
               onMouseLeave={() => setHover(null)}
@@ -199,8 +230,8 @@ export function RelationshipGraph({
                 rx="6"
                 ry="6"
                 fill={c.fill}
-                stroke={c.stroke}
-                strokeWidth="1.2"
+                stroke={stroke}
+                strokeWidth={enr?.caseStatus ? 1.8 : 1.2}
               />
               <text
                 x={leftX + NODE_W / 2}
@@ -208,10 +239,21 @@ export function RelationshipGraph({
                 textAnchor="middle"
                 fontSize="12"
                 fontFamily="ui-monospace, SFMono-Regular, monospace"
+                fontStyle={labelItalic ? 'italic' : 'normal'}
                 fill={c.text}
               >
                 {label}
               </text>
+              {enr?.hasMoreNeighbors && (
+                <circle
+                  cx={leftX + NODE_W - 6}
+                  cy={y + 6}
+                  r="3"
+                  fill="#2B579A"
+                  stroke="#1E3F6F"
+                  strokeWidth="0.6"
+                />
+              )}
             </g>
           )
         })}
@@ -225,6 +267,9 @@ export function RelationshipGraph({
           const label = shortLabel(peer.data?.title, peer.document_id)
           const fullTitle = peer.data?.title || peer.document_id
           const inactive = peer.status === 'inactive'
+          const enr = enrichment[peer.document_id]
+          const stroke = statusStroke(enr?.caseStatus) ?? c.stroke
+          const labelItalic = enr?.caseStatus !== undefined && TERMINAL_STATUSES.has(enr.caseStatus)
           return (
             <g
               key={`out-node-${peer.document_id}`}
@@ -236,6 +281,8 @@ export function RelationshipGraph({
                   title: fullTitle,
                   template: peer.template_value,
                   status: peer.status,
+                  caseStatus: enr?.caseStatus,
+                  hasMoreNeighbors: enr?.hasMoreNeighbors,
                 })
               }
               onMouseLeave={() => setHover(null)}
@@ -251,8 +298,8 @@ export function RelationshipGraph({
                 rx="6"
                 ry="6"
                 fill={c.fill}
-                stroke={c.stroke}
-                strokeWidth="1.2"
+                stroke={stroke}
+                strokeWidth={enr?.caseStatus ? 1.8 : 1.2}
               />
               <text
                 x={rightX + NODE_W / 2}
@@ -260,10 +307,21 @@ export function RelationshipGraph({
                 textAnchor="middle"
                 fontSize="12"
                 fontFamily="ui-monospace, SFMono-Regular, monospace"
+                fontStyle={labelItalic ? 'italic' : 'normal'}
                 fill={c.text}
               >
                 {label}
               </text>
+              {enr?.hasMoreNeighbors && (
+                <circle
+                  cx={rightX + NODE_W - 6}
+                  cy={y + 6}
+                  r="3"
+                  fill="#2B579A"
+                  stroke="#1E3F6F"
+                  strokeWidth="0.6"
+                />
+              )}
             </g>
           )
         })}
@@ -361,7 +419,9 @@ export function RelationshipGraph({
                 <div className="line-clamp-2 font-medium text-text">{hover.title}</div>
                 <div className="mt-0.5 text-[10px] uppercase tracking-wide text-text-muted">
                   {hover.template}
+                  {hover.caseStatus && ` · ${hover.caseStatus}`}
                   {hover.status === 'inactive' && ' · inactive'}
+                  {hover.hasMoreNeighbors && ' · has more connections'}
                 </div>
               </div>
             </foreignObject>
