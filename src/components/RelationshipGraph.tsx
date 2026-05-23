@@ -149,13 +149,16 @@ export function RelationshipGraph({
           </marker>
         </defs>
 
-        {/* Edges first so nodes overlay them */}
+        {/* Edges first so nodes overlay them. SUPERSEDES gets a dashed,
+            slightly darker line so it reads as "the obsolete version" rather
+            than just a peer reference (CASE-350 AC#3). */}
         {incoming.map((e, i) => {
           const y = colY(i, incoming.length)
           const x1 = leftX + NODE_W
           const y1 = y + NODE_H / 2
           const x2 = selfX
           const y2 = selfY + NODE_H / 2
+          const supersedes = e.template_value === 'SUPERSEDES'
           return (
             <line
               key={`in-${e.document_id}`}
@@ -163,8 +166,9 @@ export function RelationshipGraph({
               y1={y1}
               x2={x2}
               y2={y2}
-              stroke="#9CA3AF"
+              stroke={supersedes ? '#6B7280' : '#9CA3AF'}
               strokeWidth="1.2"
+              strokeDasharray={supersedes ? '5 3' : undefined}
               markerEnd="url(#arrow)"
             />
           )
@@ -175,6 +179,7 @@ export function RelationshipGraph({
           const y1 = selfY + NODE_H / 2
           const x2 = rightX
           const y2 = y + NODE_H / 2
+          const supersedes = e.template_value === 'SUPERSEDES'
           return (
             <line
               key={`out-${e.document_id}`}
@@ -182,8 +187,9 @@ export function RelationshipGraph({
               y1={y1}
               x2={x2}
               y2={y2}
-              stroke="#9CA3AF"
+              stroke={supersedes ? '#6B7280' : '#9CA3AF'}
               strokeWidth="1.2"
+              strokeDasharray={supersedes ? '5 3' : undefined}
               markerEnd="url(#arrow)"
             />
           )

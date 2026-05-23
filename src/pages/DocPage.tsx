@@ -76,6 +76,10 @@ export default function DocPage() {
   const incoming = (rels?.items ?? []).filter((r) => r.data.target_ref === id)
   const outgoing = (rels?.items ?? []).filter((r) => r.data.source_ref === id)
 
+  // CASE-350: incoming SUPERSEDES = something newer replaces this doc.
+  // Edge direction is newer→older, so source = replacing doc, target = this.
+  const supersededBy = incoming.filter((r) => r.template_value === 'SUPERSEDES')
+
   // Per-peer degree fetch for the "more-neighbors" badge in the neighborhood
   // graph. Case-status now rides along in peer.data.status (CASE-408 migrated
   // CASE_RECORD's header_fields from `metadata.custom.case_status` to top-level
@@ -155,6 +159,49 @@ export default function DocPage() {
       }
     >
       <article className="min-w-0">
+        {supersededBy.length > 0 && (
+          <div className="mb-4 rounded-md border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm text-primary">
+            <span className="font-medium">
+              {supersededBy.length === 1 ? 'Superseded by' : 'Superseded by:'}
+            </span>{' '}
+            {supersededBy.map((r, i) => {
+              const peerId = r.data.source_ref as string | undefined
+              if (!peerId) return null
+              const parsed = parseCaseTitle(r.peer?.data?.title)
+              const labelChip =
+                parsed.caseNumber !== null ? `CASE-${parsed.caseNumber}` : null
+              const slug = parsed.slug || r.peer?.data?.title || peerId
+              return (
+                <Fragment key={r.document_id}>
+                  {i > 0 && <span className="text-text-muted">, </span>}
+                  <Link
+                    to={`/doc/${peerId}`}
+                    className="underline-offset-2 hover:underline"
+                    title={r.peer?.data?.title || peerId}
+                  >
+                    {labelChip ? (
+                      <>
+                        <span className="font-mono">{labelChip}</span>
+                        {parsed.slug && <span className="text-text-muted"> · {parsed.slug}</span>}
+                      </>
+                    ) : (
+                      <span>{slug}</span>
+                    )}
+                  </Link>
+                </Fragment>
+              )
+            })}
+            <span className="ml-1 text-text-muted">→</span>
+          </div>
+        )}
+        {data.doc_status === 'deprecated' && (
+          <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+            <span className="font-medium">This document is deprecated.</span>{' '}
+            <span className="text-amber-800/80">
+              No longer authoritative; reader discretion advised.
+            </span>
+          </div>
+        )}
         <header className="mb-6">
           <div className="mb-3 flex items-center gap-3">
             <button
