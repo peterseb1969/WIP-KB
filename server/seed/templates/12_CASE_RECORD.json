@@ -14,6 +14,12 @@
     { "name": "root",        "label": "Root",         "type": "boolean", "default_value": false },
     { "name": "source_yac",  "label": "Source YAC",   "type": "string" },
     { "name": "target_yac",  "label": "Target YAC",   "type": "term",    "reference_type": "term", "terminology_ref": "KB_TARGET_YAC" },
-    { "name": "case_number", "label": "Case Number",  "type": "integer", "mandatory": true }
+    { "name": "case_number", "label": "Case Number",  "type": "integer", "mandatory": true },
+    { "name": "status",      "label": "Status",       "type": "string",  "mandatory": false },
+    { "name": "severity",    "label": "Severity",     "type": "string",  "mandatory": false },
+    { "name": "type",        "label": "Type",         "type": "string",  "mandatory": false },
+    { "name": "component",   "label": "Component",    "type": "string",  "mandatory": false },
+    { "name": "filed_by",    "label": "Filed By",     "type": "string",  "mandatory": false },
+    { "name": "app",         "label": "App",          "type": "string",  "mandatory": false }
   ]
 }
