@@ -1,0 +1,14 @@
+{
+  "value": "CONTINUES_FROM",
+  "label": "Continues From",
+  "description": "Lineage edge between two SESSION records (CASE-389 §D). Direction: source = newer session (the one whose continues_from frontmatter was set), target = prior session. Recursive outbound traversal walks the chain back to root; inbound shows descendants. `versioned: false` matches the REFERENCES/SUPERSEDES platform convention — edges are written once at mirror time; correction is delete-and-recreate.",
+  "usage": "relationship",
+  "versioned": false,
+  "identity_fields": ["source_ref", "target_ref"],
+  "source_templates": ["SESSION"],
+  "target_templates": ["SESSION"],
+  "fields": [
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["SESSION"] },
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["SESSION"] }
+  ]
+}

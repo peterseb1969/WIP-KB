@@ -1,0 +1,17 @@
+{
+  "value": "SESSION",
+  "label": "Session",
+  "description": "One Claude Code context-window's worth of work for a YAC (CASE-389). One record per session; identity_fields scoped to session_id so re-mirroring an existing session updates its body in place. Default entity versioning (PoNIF #2) retains snapshots as the body grows. `body` is the merged content of all *.md files in reports/<session-id>/ — composed role-agnostically by add-to-kb.py per §E (session.md first, then the rest alphabetically, with editor backups filtered).",
+  "usage": "entity",
+  "identity_fields": ["session_id"],
+  "header_fields": ["session_id", "role", "status"],
+  "fields": [
+    { "name": "session_id",     "label": "Session ID",     "type": "string",   "mandatory": true,  "full_text_indexed": true,  "description": "`<ROLE>-YYYYMMDD-HHMMSS` (seconds precision; eliminates same-minute collision by construction)." },
+    { "name": "role",           "label": "Role",           "type": "term",     "mandatory": true,  "reference_type": "term", "terminology_ref": "SESSION_ROLE" },
+    { "name": "started_at",     "label": "Started At",     "type": "datetime", "mandatory": true,  "description": "Denormalized from the YYYYMMDD-HHMMSS portion of session_id for sort/filter ergonomics. Read-only — do not write." },
+    { "name": "ended_at",       "label": "Ended At",       "type": "datetime", "mandatory": false, "description": "Set when /report session-end or /wake's auto-close closes the session." },
+    { "name": "continues_from", "label": "Continues From", "type": "string",   "mandatory": false, "description": "Prior session_id if this session was reached via /wake. Materialized as a CONTINUES_FROM edge by add-to-kb.py at mirror time." },
+    { "name": "status",         "label": "Status",         "type": "term",     "mandatory": true,  "reference_type": "term", "terminology_ref": "SESSION_STATUS" },
+    { "name": "body",           "label": "Body",           "type": "string",   "mandatory": true,  "full_text_indexed": true,  "description": "Merged content of all *.md files in reports/<session-id>/ with session.md first then the rest alphabetically; each prefixed with '## <filename>' (CASE-389 §E)." }
+  ]
+}

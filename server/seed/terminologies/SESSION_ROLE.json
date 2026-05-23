@@ -1,0 +1,17 @@
+{
+  "value": "SESSION_ROLE",
+  "label": "Session Role",
+  "description": "Discriminates SESSION instances by the YAC role that owns the session (CASE-389). Term-backed so values are constrained + discoverable via list_terms. Mutable — new roles added additively when new YAC types come online.",
+  "mutable": true,
+  "terms": [
+    { "value": "BE-YAC",  "label": "BE-YAC",  "sort_order": 10, "description": "Backend YAC working in World-in-a-Pie." },
+    { "value": "APP-RC",  "label": "APP-RC",  "sort_order": 20, "description": "App YAC building React Console (WIP-ReactConsole)." },
+    { "value": "APP-CT",  "label": "APP-CT",  "sort_order": 30, "description": "App YAC building ClinTrial (WIP-ClinTrial)." },
+    { "value": "APP-KB",  "label": "APP-KB",  "sort_order": 40, "description": "App YAC building the Knowledge Base (WIP-KB)." },
+    { "value": "APP-AA",  "label": "APP-AA",  "sort_order": 50, "description": "App YAC building AuthorAssist (WIP-AA)." },
+    { "value": "APP-DND", "label": "APP-DND", "sort_order": 60, "description": "App YAC building the DnD compendium (WIP-DnD)." },
+    { "value": "FRanC",   "label": "FRanC",   "sort_order": 70, "description": "Field Reporter — captures session reports, papers, firesides." },
+    { "value": "BUG-YAC", "label": "BUG-YAC", "sort_order": 80, "description": "Bug-triage YAC; per-task focus, not adopting the SESSION model in Phase 1 but the role exists for completeness." },
+    { "value": "DOC-YAC", "label": "DOC-YAC", "sort_order": 90, "description": "Documentation YAC; same Phase-1 deferral as BUG-YAC." }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "value": "SESSION_STATUS",
+  "label": "Session Status",
+  "description": "Lifecycle state of a SESSION instance (CASE-389). Two states only — the CONTINUES_FROM edge captures the supersession relationship between sessions; a third 'superseded' state would duplicate that information.",
+  "mutable": true,
+  "terms": [
+    { "value": "active", "label": "Active", "sort_order": 10, "description": "Session is currently in progress. Set on /setup or /wake." },
+    { "value": "closed", "label": "Closed", "sort_order": 20, "description": "Session has ended. Set by /report session-end (manual close) or /wake's auto-close step (CASE-389 §A)." }
+  ]
+}
