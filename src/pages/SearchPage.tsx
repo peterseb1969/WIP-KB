@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Search as SearchIcon, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 
@@ -456,7 +456,7 @@ export default function SearchPage() {
       {/* Facet rail */}
       <aside className="hidden w-60 shrink-0 lg:block">
         <div className="sticky top-4 space-y-5">
-          <FacetSection title="Type" allOptions={allTemplates}>
+          <FacetSection title="Type" allOptions={allTemplates} defaultOpen>
             {allTemplates.map((t) => (
               <FacetCheckbox
                 key={t}
@@ -466,7 +466,7 @@ export default function SearchPage() {
               />
             ))}
           </FacetSection>
-          <FacetSection title="Status" allOptions={allStatuses}>
+          <FacetSection title="Status" allOptions={allStatuses} defaultOpen>
             {allStatuses.map((s) => (
               <FacetCheckbox
                 key={s}
@@ -703,17 +703,32 @@ export default function SearchPage() {
 function FacetSection({
   title,
   allOptions,
+  defaultOpen = false,
   children,
 }: {
   title: string
   allOptions: string[]
+  defaultOpen?: boolean
   children: ReactNode
 }) {
+  const [open, setOpen] = useState(defaultOpen)
   if (allOptions.length === 0) return null
   return (
     <div>
-      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-text-muted">{title}</h3>
-      <div className="max-h-60 space-y-1 overflow-y-auto pr-1">{children}</div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mb-2 flex w-full items-center gap-1 text-xs font-medium uppercase tracking-wide text-text-muted hover:text-text"
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="h-3 w-3" aria-hidden="true" />
+        )}
+        <span>{title}</span>
+        <span className="ml-1 text-[10px] tabular-nums text-text-muted/70">({allOptions.length})</span>
+      </button>
+      {open && <div className="max-h-60 space-y-1 overflow-y-auto pr-1">{children}</div>}
     </div>
   )
 }
