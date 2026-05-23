@@ -378,6 +378,41 @@ export default function SearchPage() {
     [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter],
   )
 
+  // Per-option counts for each facet. "What would the result count be if I
+  // added THIS value to the filter set, given all OTHER active filters?" —
+  // standard faceted-search semantics. Zero-counts stay visible (rendered
+  // muted by FacetCheckbox) so the operator sees the "no current match"
+  // signal without having to click.
+  type FacetKey = 't' | 's' | 'a' | 'k' | 'v' | 'p'
+  const facetCounts = useMemo(() => {
+    function passes(doc: DocItem, skip: FacetKey): boolean {
+      if (skip !== 't' && tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
+      if (skip !== 's' && sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
+      if (skip !== 'a' && aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false
+      if (skip !== 'k' && kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
+      if (skip !== 'v' && vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
+      if (skip !== 'p' && pFilter.size > 0 && !pFilter.has(canonicalApp(doc.data.app) ?? '')) return false
+      return true
+    }
+    function bucket(skip: FacetKey, get: (d: DocItem) => string | undefined): Map<string, number> {
+      const m = new Map<string, number>()
+      for (const h of hits) {
+        if (!passes(h.doc, skip)) continue
+        const v = get(h.doc)
+        if (typeof v === 'string' && v.length > 0) m.set(v, (m.get(v) ?? 0) + 1)
+      }
+      return m
+    }
+    return {
+      t: bucket('t', (d) => d.template_value),
+      s: bucket('s', (d) => workflowStatus(d)),
+      a: bucket('a', (d) => rootAuthor(d.data.authored_by) || undefined),
+      k: bucket('k', (d) => d.data.kind),
+      v: bucket('v', (d) => d.data.severity),
+      p: bucket('p', (d) => canonicalApp(d.data.app)),
+    }
+  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter])
+
   const hasCaseInScope = useMemo(
     () => filtered.some((h) => typeof h.doc.data.case_number === 'number'),
     [filtered],
@@ -461,6 +496,7 @@ export default function SearchPage() {
               <FacetCheckbox
                 key={t}
                 label={t}
+                count={facetCounts.t.get(t) ?? 0}
                 checked={tFilter.has(t)}
                 onChange={() => toggleSet('t', tFilter, t)}
               />
@@ -471,6 +507,7 @@ export default function SearchPage() {
               <FacetCheckbox
                 key={s}
                 label={s}
+                count={facetCounts.s.get(s) ?? 0}
                 checked={sFilter.has(s)}
                 onChange={() => toggleSet('s', sFilter, s)}
               />
@@ -481,6 +518,7 @@ export default function SearchPage() {
               <FacetCheckbox
                 key={v}
                 label={v}
+                count={facetCounts.v.get(v) ?? 0}
                 checked={vFilter.has(v)}
                 onChange={() => toggleSet('v', vFilter, v)}
               />
@@ -491,6 +529,7 @@ export default function SearchPage() {
               <FacetCheckbox
                 key={p}
                 label={p}
+                count={facetCounts.p.get(p) ?? 0}
                 checked={pFilter.has(p)}
                 onChange={() => toggleSet('p', pFilter, p)}
               />
@@ -501,6 +540,7 @@ export default function SearchPage() {
               <FacetCheckbox
                 key={k}
                 label={k}
+                count={facetCounts.k.get(k) ?? 0}
                 checked={kFilter.has(k)}
                 onChange={() => toggleSet('k', kFilter, k)}
               />
@@ -511,6 +551,7 @@ export default function SearchPage() {
               <FacetCheckbox
                 key={a}
                 label={a}
+                count={facetCounts.a.get(a) ?? 0}
                 checked={aFilter.has(a)}
                 onChange={() => toggleSet('a', aFilter, a)}
               />
@@ -735,13 +776,17 @@ function FacetSection({
 
 function FacetCheckbox({
   label,
+  count,
   checked,
   onChange,
 }: {
   label: string
+  count?: number
   checked: boolean
   onChange: () => void
 }) {
+  // count === 0 → muted, so "blocks-me (0)" signals "no current match" at a glance
+  const countMuted = count === 0
   return (
     <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-background">
       <input
@@ -753,6 +798,11 @@ function FacetCheckbox({
       <span className={`min-w-0 flex-1 truncate ${checked ? 'font-medium text-text' : 'text-text'}`}>
         {label}
       </span>
+      {count !== undefined && (
+        <span className={`tabular-nums text-[11px] ${countMuted ? 'text-text-muted/50' : 'text-text-muted'}`}>
+          {count}
+        </span>
+      )}
     </label>
   )
 }
