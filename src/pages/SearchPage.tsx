@@ -16,6 +16,7 @@ interface DocItem {
     doc_status?: string
     case_number?: number
     kind?: string
+    severity?: string
     [k: string]: unknown
   }
   metadata?: {
@@ -141,6 +142,7 @@ export default function SearchPage() {
   const sFilter = useMemo(() => csvSet(params.get('s')), [params])
   const aFilter = useMemo(() => csvSet(params.get('a')), [params])
   const kFilter = useMemo(() => csvSet(params.get('k')), [params])
+  const vFilter = useMemo(() => csvSet(params.get('v')), [params])
   const [page, setPage] = useState(1)
 
   const [draft, setDraft] = useState(query)
@@ -227,6 +229,20 @@ export default function SearchPage() {
       ).sort(),
     [docsInTypeScope],
   )
+  // Severity lives on CASE_RECORD.data.severity (CASE-404 schema extension).
+  // Scope respects the type filter, same pattern as Status/Kind — auto-hides
+  // when the type filter excludes CASE_RECORD.
+  const allSeverities = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          docsInTypeScope
+            .map((d) => d.data.severity)
+            .filter((s): s is string => typeof s === 'string' && s.length > 0),
+        ),
+      ).sort(),
+    [docsInTypeScope],
+  )
   const allAuthors = useMemo(
     () =>
       Array.from(
@@ -266,9 +282,10 @@ export default function SearchPage() {
         if (sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
         if (aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false
         if (kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
+        if (vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
         return true
       }),
-    [hits, tFilter, sFilter, aFilter, kFilter],
+    [hits, tFilter, sFilter, aFilter, kFilter, vFilter],
   )
 
   const hasCaseInScope = useMemo(
@@ -330,7 +347,7 @@ export default function SearchPage() {
     setParam('q', draft.trim() || null)
   }
 
-  const activeFilterCount = tFilter.size + sFilter.size + aFilter.size + kFilter.size
+  const activeFilterCount = tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size
   const isLoading =
     allDocsQ.isLoading || templatesQ.isLoading || (query.trim() && searchQ.isLoading)
   const error = allDocsQ.error ?? templatesQ.error ?? searchQ.error
@@ -357,6 +374,16 @@ export default function SearchPage() {
                 label={s}
                 checked={sFilter.has(s)}
                 onChange={() => toggleSet('s', sFilter, s)}
+              />
+            ))}
+          </FacetSection>
+          <FacetSection title="Severity" allOptions={allSeverities}>
+            {allSeverities.map((v) => (
+              <FacetCheckbox
+                key={v}
+                label={v}
+                checked={vFilter.has(v)}
+                onChange={() => toggleSet('v', vFilter, v)}
               />
             ))}
           </FacetSection>
@@ -450,6 +477,9 @@ export default function SearchPage() {
             ))}
             {[...sFilter].map((v) => (
               <FilterChip key={`s:${v}`} label={v} onRemove={() => toggleSet('s', sFilter, v)} />
+            ))}
+            {[...vFilter].map((v) => (
+              <FilterChip key={`v:${v}`} label={v} onRemove={() => toggleSet('v', vFilter, v)} />
             ))}
             {[...kFilter].map((v) => (
               <FilterChip key={`k:${v}`} label={v} onRemove={() => toggleSet('k', kFilter, v)} />
