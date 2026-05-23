@@ -22,7 +22,7 @@ interface PeerProjection {
   namespace: string
   template_value: string
   status?: string
-  data?: { title?: string; doc_status?: string }
+  data?: { title?: string; doc_status?: string; status?: string; case_number?: number }
 }
 interface RelationshipItem {
   document_id: string
@@ -76,13 +76,12 @@ export default function DocPage() {
   const incoming = (rels?.items ?? []).filter((r) => r.data.target_ref === id)
   const outgoing = (rels?.items ?? []).filter((r) => r.data.source_ref === id)
 
-  // Per-peer enrichment for the neighborhood graph: case_status (the projection
-  // only carries title + case_number for CASE_RECORD peers per CASE-343/CASE-354
-  // — dotted-path header_fields like `metadata.custom.case_status` don't make
-  // it into peer.data) and degree (how many edges the peer has in total — if
-  // > 1, the peer has neighbors beyond the link we're showing, so the graph
-  // renders a small "more connections" badge). N extra fetches per peer; OK
-  // for v1 per Peter's explicit call.
+  // Per-peer degree fetch for the "more-neighbors" badge in the neighborhood
+  // graph. Case-status now rides along in peer.data.status (CASE-408 migrated
+  // CASE_RECORD's header_fields from `metadata.custom.case_status` to top-level
+  // `status` after CASE-404 populated the field). Degree still needs a per-peer
+  // round-trip because the peer projection doesn't carry relationship counts —
+  // that'd be a separate platform request.
   const peerIds = useMemo(() => {
     const ids = new Set<string>()
     for (const e of rels?.items ?? []) {
@@ -90,29 +89,20 @@ export default function DocPage() {
     }
     return Array.from(ids).sort()
   }, [rels])
-  const { data: peerEnrichment } = useQuery<Record<string, { caseStatus?: string; hasMoreNeighbors: boolean }>>({
-    queryKey: ['peer-enrichment', peerIds],
+  const { data: peerEnrichment } = useQuery<Record<string, { hasMoreNeighbors: boolean }>>({
+    queryKey: ['peer-degree', peerIds],
     queryFn: async () => {
-      const result: Record<string, { caseStatus?: string; hasMoreNeighbors: boolean }> = {}
+      const result: Record<string, { hasMoreNeighbors: boolean }> = {}
       const base = import.meta.env.BASE_URL
       await Promise.all(
         peerIds.map(async (peerId) => {
-          const [docRes, relsRes] = await Promise.all([
-            fetch(`${base}wip/api/document-store/documents/${peerId}`),
-            fetch(`${base}wip/api/document-store/documents/${peerId}/relationships`),
-          ])
-          let caseStatus: string | undefined
+          const relsRes = await fetch(`${base}wip/api/document-store/documents/${peerId}/relationships`)
           let degree = 0
-          if (docRes.ok) {
-            const peerDoc = await docRes.json()
-            const cs = peerDoc?.metadata?.custom?.case_status
-            if (typeof cs === 'string' && cs.length > 0) caseStatus = cs
-          }
           if (relsRes.ok) {
             const peerRels = await relsRes.json()
             degree = Array.isArray(peerRels?.items) ? peerRels.items.length : 0
           }
-          result[peerId] = { caseStatus, hasMoreNeighbors: degree > 1 }
+          result[peerId] = { hasMoreNeighbors: degree > 1 }
         }),
       )
       return result

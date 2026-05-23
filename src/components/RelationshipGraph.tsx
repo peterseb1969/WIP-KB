@@ -6,7 +6,7 @@ interface PeerProjection {
   document_id: string
   template_value: string
   status?: string
-  data?: { title?: string }
+  data?: { title?: string; status?: string; case_number?: number }
 }
 
 interface EdgeItem {
@@ -16,7 +16,6 @@ interface EdgeItem {
 }
 
 interface PeerEnrichment {
-  caseStatus?: string
   hasMoreNeighbors: boolean
 }
 
@@ -200,8 +199,9 @@ export function RelationshipGraph({
           const fullTitle = peer.data?.title || peer.document_id
           const inactive = peer.status === 'inactive'
           const enr = enrichment[peer.document_id]
-          const stroke = statusStroke(enr?.caseStatus) ?? c.stroke
-          const labelItalic = enr?.caseStatus !== undefined && TERMINAL_STATUSES.has(enr.caseStatus)
+          const caseStatus = peer.data?.status
+          const stroke = statusStroke(caseStatus) ?? c.stroke
+          const labelItalic = caseStatus !== undefined && TERMINAL_STATUSES.has(caseStatus)
           return (
             <g
               key={`in-node-${peer.document_id}`}
@@ -213,7 +213,7 @@ export function RelationshipGraph({
                   title: fullTitle,
                   template: peer.template_value,
                   status: peer.status,
-                  caseStatus: enr?.caseStatus,
+                  caseStatus,
                   hasMoreNeighbors: enr?.hasMoreNeighbors,
                 })
               }
@@ -231,7 +231,7 @@ export function RelationshipGraph({
                 ry="6"
                 fill={c.fill}
                 stroke={stroke}
-                strokeWidth={enr?.caseStatus ? 1.8 : 1.2}
+                strokeWidth={caseStatus ? 1.8 : 1.2}
               />
               <text
                 x={leftX + NODE_W / 2}
@@ -268,8 +268,9 @@ export function RelationshipGraph({
           const fullTitle = peer.data?.title || peer.document_id
           const inactive = peer.status === 'inactive'
           const enr = enrichment[peer.document_id]
-          const stroke = statusStroke(enr?.caseStatus) ?? c.stroke
-          const labelItalic = enr?.caseStatus !== undefined && TERMINAL_STATUSES.has(enr.caseStatus)
+          const caseStatus = peer.data?.status
+          const stroke = statusStroke(caseStatus) ?? c.stroke
+          const labelItalic = caseStatus !== undefined && TERMINAL_STATUSES.has(caseStatus)
           return (
             <g
               key={`out-node-${peer.document_id}`}
@@ -281,7 +282,7 @@ export function RelationshipGraph({
                   title: fullTitle,
                   template: peer.template_value,
                   status: peer.status,
-                  caseStatus: enr?.caseStatus,
+                  caseStatus,
                   hasMoreNeighbors: enr?.hasMoreNeighbors,
                 })
               }
@@ -299,7 +300,7 @@ export function RelationshipGraph({
                 ry="6"
                 fill={c.fill}
                 stroke={stroke}
-                strokeWidth={enr?.caseStatus ? 1.8 : 1.2}
+                strokeWidth={caseStatus ? 1.8 : 1.2}
               />
               <text
                 x={rightX + NODE_W / 2}
