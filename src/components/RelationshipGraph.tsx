@@ -66,6 +66,8 @@ function nodeColors(templateValue: string, isSelf: boolean): { fill: string; str
       return { fill: '#E0F0E8', stroke: '#2E8B57', text: '#1F6240' } // success
     case 'FLAG_RECORD':
       return { fill: '#FBE6D5', stroke: '#ED7D31', text: '#B4581F' } // accent
+    case 'DOCUMENT':
+      return { fill: '#EBE5F2', stroke: '#7C6BA0', text: '#4A3B6E' } // slate-violet — reference material
     default:
       return { fill: '#F3F4F6', stroke: '#D1D5DB', text: '#374151' } // gray
   }
