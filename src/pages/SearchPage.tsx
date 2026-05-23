@@ -17,16 +17,85 @@ interface DocItem {
     case_number?: number
     kind?: string
     severity?: string
+    app?: string
     [k: string]: unknown
   }
   metadata?: {
     custom?: {
       case_status?: string
+      filed_at?: string
+      responded_at?: string
+      implemented_at?: string
+      closed_at?: string
       [k: string]: unknown
     }
   }
   created_at: string
   updated_at: string
+}
+
+// `data.app` value normalization. The case-frontmatter `app:` field is
+// free-form; today's corpus has 17 distinct spellings for ~6 actual apps
+// (e.g., 'WIP ReactConsole' / 'RC-Console' / 'react-console' are all the
+// same thing). UI-side aliasing collapses them into canonical values for
+// the facet filter. Long-term: BE-YAC/FRanC normalize loader output and
+// this map can shrink (filed separately).
+const APP_ALIAS: Record<string, string> = {
+  KB: 'KB',
+  kb: 'KB',
+  'wip-kb': 'KB',
+  'WIP ReactConsole': 'ReactConsole',
+  'RC-Console': 'ReactConsole',
+  'RC-Console (WIP ReactConsole)': 'ReactConsole',
+  'react-console': 'ReactConsole',
+  'rc-console': 'ReactConsole',
+  AuthorAssist: 'AuthorAssist',
+  'ClinTrial Explorer': 'ClinTrial',
+  clintrial: 'ClinTrial',
+  'clintrial-explorer': 'ClinTrial',
+  'dnd-compendium': 'DnD',
+  backend: 'backend',
+  'cross-agent': 'cross-agent',
+  'wip-deploy': 'wip-deploy',
+  'all-apps': 'all-apps',
+}
+
+function canonicalApp(raw: string | undefined): string | undefined {
+  if (!raw) return undefined
+  return APP_ALIAS[raw] ?? raw
+}
+
+// "Filed" sort uses metadata.custom.filed_at — the case-frontmatter timestamp
+// the operator wrote when filing. Durable, never updated by re-mirror.
+function filedAt(doc: DocItem): Date | null {
+  const s = doc.metadata?.custom?.filed_at
+  if (typeof s !== 'string' || !s) return null
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? null : d
+}
+
+// "Modified" sort uses the latest status-transition timestamp: max of
+// filed_at, responded_at, implemented_at, closed_at. Reflects when the
+// case actually moved, not when add-to-kb.py re-mirrored it (which is
+// what `updated_at` records). Cases without any transitions return null
+// and sort to the end (compareDate handles the null pushdown).
+function statusModifiedAt(doc: DocItem): Date | null {
+  const c = doc.metadata?.custom ?? {}
+  const stamps: number[] = []
+  for (const s of [c.filed_at, c.responded_at, c.implemented_at, c.closed_at]) {
+    if (typeof s !== 'string' || !s) continue
+    const d = new Date(s)
+    if (!isNaN(d.getTime())) stamps.push(d.getTime())
+  }
+  return stamps.length > 0 ? new Date(Math.max(...stamps)) : null
+}
+
+// Sort docs without a timestamp to the end regardless of direction.
+function compareDate(a: Date | null, b: Date | null, dir: 'asc' | 'desc'): number {
+  if (a === null && b === null) return 0
+  if (a === null) return 1
+  if (b === null) return -1
+  return dir === 'asc' ? a.getTime() - b.getTime() : b.getTime() - a.getTime()
 }
 
 // Workflow status lives in metadata.custom.case_status (open, implemented,
@@ -79,8 +148,12 @@ const SORT_OPTIONS = [
   { key: 'relevance', label: 'Relevance' },
   { key: 'case_asc', label: 'Case # · ascending' },
   { key: 'case_desc', label: 'Case # · descending' },
-  { key: 'updated_desc', label: 'Updated · newest' },
-  { key: 'updated_asc', label: 'Updated · oldest' },
+  { key: 'filed_desc', label: 'Filed · newest' },
+  { key: 'filed_asc', label: 'Filed · oldest' },
+  { key: 'modified_desc', label: 'Modified · newest' },
+  { key: 'modified_asc', label: 'Modified · oldest' },
+  { key: 'updated_desc', label: 'Last KB mirror · newest' },
+  { key: 'updated_asc', label: 'Last KB mirror · oldest' },
   { key: 'title_asc', label: 'Title · A→Z' },
   { key: 'title_desc', label: 'Title · Z→A' },
 ] as const
@@ -137,12 +210,13 @@ export default function SearchPage() {
   const [params, setParams] = useSearchParams()
   const query = params.get('q') ?? ''
   const mode = (params.get('mode') ?? 'auto') as 'auto' | 'fts' | 'substring'
-  const sort = ((params.get('sort') ?? (query ? 'relevance' : 'updated_desc')) as SortKey)
+  const sort = ((params.get('sort') ?? (query ? 'relevance' : 'filed_desc')) as SortKey)
   const tFilter = useMemo(() => csvSet(params.get('t')), [params])
   const sFilter = useMemo(() => csvSet(params.get('s')), [params])
   const aFilter = useMemo(() => csvSet(params.get('a')), [params])
   const kFilter = useMemo(() => csvSet(params.get('k')), [params])
   const vFilter = useMemo(() => csvSet(params.get('v')), [params])
+  const pFilter = useMemo(() => csvSet(params.get('p')), [params])
   const [page, setPage] = useState(1)
 
   const [draft, setDraft] = useState(query)
@@ -243,6 +317,21 @@ export default function SearchPage() {
       ).sort(),
     [docsInTypeScope],
   )
+  // App lives on CASE_RECORD.data.app (CASE-404). Raw values are inconsistent
+  // (17 spellings for ~6 actual apps); UI-side aliasing collapses them to
+  // canonical names. Upstream loader normalization is the long-term fix
+  // (filed separately) — once that lands the alias map shrinks.
+  const allApps = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          docsInTypeScope
+            .map((d) => canonicalApp(d.data.app))
+            .filter((s): s is string => typeof s === 'string' && s.length > 0),
+        ),
+      ).sort(),
+    [docsInTypeScope],
+  )
   const allAuthors = useMemo(
     () =>
       Array.from(
@@ -283,9 +372,10 @@ export default function SearchPage() {
         if (aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false
         if (kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
         if (vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
+        if (pFilter.size > 0 && !pFilter.has(canonicalApp(doc.data.app) ?? '')) return false
         return true
       }),
-    [hits, tFilter, sFilter, aFilter, kFilter, vFilter],
+    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter],
   )
 
   const hasCaseInScope = useMemo(
@@ -303,6 +393,14 @@ export default function SearchPage() {
           return compareCaseNumber(a.doc, b.doc, 'asc')
         case 'case_desc':
           return compareCaseNumber(a.doc, b.doc, 'desc')
+        case 'filed_desc':
+          return compareDate(filedAt(a.doc), filedAt(b.doc), 'desc')
+        case 'filed_asc':
+          return compareDate(filedAt(a.doc), filedAt(b.doc), 'asc')
+        case 'modified_desc':
+          return compareDate(statusModifiedAt(a.doc), statusModifiedAt(b.doc), 'desc')
+        case 'modified_asc':
+          return compareDate(statusModifiedAt(a.doc), statusModifiedAt(b.doc), 'asc')
         case 'updated_desc':
           return b.doc.updated_at.localeCompare(a.doc.updated_at)
         case 'updated_asc':
@@ -347,7 +445,8 @@ export default function SearchPage() {
     setParam('q', draft.trim() || null)
   }
 
-  const activeFilterCount = tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size
+  const activeFilterCount =
+    tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size + pFilter.size
   const isLoading =
     allDocsQ.isLoading || templatesQ.isLoading || (query.trim() && searchQ.isLoading)
   const error = allDocsQ.error ?? templatesQ.error ?? searchQ.error
@@ -384,6 +483,16 @@ export default function SearchPage() {
                 label={v}
                 checked={vFilter.has(v)}
                 onChange={() => toggleSet('v', vFilter, v)}
+              />
+            ))}
+          </FacetSection>
+          <FacetSection title="App" allOptions={allApps}>
+            {allApps.map((p) => (
+              <FacetCheckbox
+                key={p}
+                label={p}
+                checked={pFilter.has(p)}
+                onChange={() => toggleSet('p', pFilter, p)}
               />
             ))}
           </FacetSection>
@@ -480,6 +589,9 @@ export default function SearchPage() {
             ))}
             {[...vFilter].map((v) => (
               <FilterChip key={`v:${v}`} label={v} onRemove={() => toggleSet('v', vFilter, v)} />
+            ))}
+            {[...pFilter].map((v) => (
+              <FilterChip key={`p:${v}`} label={v} onRemove={() => toggleSet('p', pFilter, v)} />
             ))}
             {[...kFilter].map((v) => (
               <FilterChip key={`k:${v}`} label={v} onRemove={() => toggleSet('k', kFilter, v)} />
