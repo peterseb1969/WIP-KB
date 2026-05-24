@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env
 *.tgz
+*.whl
 .DS_Store
 .claude-context-pct
+.claude/.session-id
 yac-discussions
