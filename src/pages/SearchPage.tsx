@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
+import { docLabel } from '../lib/casePrefix'
 
 const NAMESPACE = 'kb'
 
@@ -12,6 +13,8 @@ interface DocItem {
   template_value: string
   data: {
     title?: string
+    session_id?: string
+    path?: string
     authored_by?: string
     doc_status?: string
     case_number?: number
@@ -441,9 +444,9 @@ export default function SearchPage() {
         case 'updated_asc':
           return a.doc.updated_at.localeCompare(b.doc.updated_at)
         case 'title_asc':
-          return (a.doc.data.title ?? '').localeCompare(b.doc.data.title ?? '')
+          return docLabel(a.doc.data, '').localeCompare(docLabel(b.doc.data, ''))
         case 'title_desc':
-          return (b.doc.data.title ?? '').localeCompare(a.doc.data.title ?? '')
+          return docLabel(b.doc.data, '').localeCompare(docLabel(a.doc.data, ''))
       }
     })
     return arr
@@ -678,7 +681,7 @@ export default function SearchPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                         <span className="text-sm font-medium text-text">
-                          {doc.data.title || (
+                          {docLabel(doc.data, '') || (
                             <span className="italic text-text-muted">(untitled)</span>
                           )}
                         </span>

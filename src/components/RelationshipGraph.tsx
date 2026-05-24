@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { parseCaseTitle } from '../lib/casePrefix'
+import { parseCaseTitle, docLabel } from '../lib/casePrefix'
 
 interface PeerProjection {
   document_id: string
   template_value: string
   status?: string
-  data?: { title?: string; status?: string; case_number?: number }
+  data?: { title?: string; status?: string; case_number?: number; session_id?: string; path?: string }
 }
 
 interface EdgeItem {
@@ -203,8 +203,8 @@ export function RelationshipGraph({
           if (!peer) return null
           const y = colY(i, incoming.length)
           const c = nodeColors(peer.template_value, false)
-          const label = shortLabel(peer.data?.title, peer.document_id)
-          const fullTitle = peer.data?.title || peer.document_id
+          const fullTitle = docLabel(peer.data, peer.document_id)
+          const label = shortLabel(fullTitle, peer.document_id)
           const inactive = peer.status === 'inactive'
           const enr = enrichment[peer.document_id]
           const caseStatus = peer.data?.status
@@ -272,8 +272,8 @@ export function RelationshipGraph({
           if (!peer) return null
           const y = colY(i, outgoing.length)
           const c = nodeColors(peer.template_value, false)
-          const label = shortLabel(peer.data?.title, peer.document_id)
-          const fullTitle = peer.data?.title || peer.document_id
+          const fullTitle = docLabel(peer.data, peer.document_id)
+          const label = shortLabel(fullTitle, peer.document_id)
           const inactive = peer.status === 'inactive'
           const enr = enrichment[peer.document_id]
           const caseStatus = peer.data?.status

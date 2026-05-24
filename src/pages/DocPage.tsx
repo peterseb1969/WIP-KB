@@ -9,7 +9,7 @@ import { ArrowLeft } from 'lucide-react'
 import { PrepareButtons } from '../components/PrepareButtons'
 import { FlagModal } from '../components/FlagModal'
 import { RelationshipGraph } from '../components/RelationshipGraph'
-import { parseCaseTitle } from '../lib/casePrefix'
+import { parseCaseTitle, docLabel } from '../lib/casePrefix'
 
 const COMMON_FIELDS = new Set(['title', 'authored_by', 'doc_status', 'tags', 'root', 'body'])
 
@@ -22,7 +22,7 @@ interface PeerProjection {
   namespace: string
   template_value: string
   status?: string
-  data?: { title?: string; doc_status?: string; status?: string; case_number?: number }
+  data?: { title?: string; doc_status?: string; status?: string; case_number?: number; session_id?: string; path?: string }
 }
 interface RelationshipItem {
   document_id: string
@@ -144,7 +144,7 @@ export default function DocPage() {
       {hasEdges && (
         <RelationshipGraph
           selfId={id}
-          selfTitle={(data.title as string) || ''}
+          selfTitle={docLabel(data, id)}
           selfTemplate={doc.template_value ?? ''}
           incoming={incoming}
           outgoing={outgoing}
@@ -225,7 +225,7 @@ export default function DocPage() {
             </div>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight text-text">
-            {(data.title as string) || '(untitled)'}
+            {docLabel(data, '') || '(untitled)'}
           </h1>
           <p className="mt-1.5 text-xs text-text-muted">
             {[
@@ -258,7 +258,7 @@ export default function DocPage() {
           >
             Flag for YAC
           </button>
-          <PrepareButtons docId={id} docTitle={(data.title as string) || '(untitled)'} />
+          <PrepareButtons docId={id} docTitle={docLabel(data, id)} />
         </div>
 
         {(structured.length > 0 || metaEntries.length > 0) && (
@@ -306,7 +306,7 @@ export default function DocPage() {
       {flagOpen && (
         <FlagModal
           sourceDocId={id}
-          sourceDocTitle={(data.title as string) || '(untitled)'}
+          sourceDocTitle={docLabel(data, id)}
           onClose={() => setFlagOpen(false)}
         />
       )}
@@ -353,8 +353,8 @@ function RelationshipList({
           const peer = r.peer
           const errorCode = r.peer_error_code
           const isInactive = peer?.status === 'inactive'
-          const parsed = parseCaseTitle(peer?.data?.title)
-          const fullTitle = peer?.data?.title || peerId
+          const fullTitle = docLabel(peer?.data, peerId)
+          const parsed = parseCaseTitle(fullTitle)
           return (
             <li key={r.document_id}>
               <Link
