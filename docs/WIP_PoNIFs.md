@@ -56,6 +56,10 @@ The correct default is in the client library: `@wip/client` should require `temp
 
 For `updateTemplate()`, the default should be to keep the previous version active (preserving the PoNIF's power) but return a clear message: *"Template X updated to v2. Previous version v1 is still active. Pass `{ deactivatePrevious: true }` to deactivate it, or pin `template_version: 2` in document creation calls."*
 
+**Corollary — existing documents survive template updates.** The identity_hash scopes to `template_id` (see PoNIF #3), and `template_id` is canonical — stable across versions. This is the exception to WIP's "new version → new ID" pattern: templates carry one ID across all their versions, so existing docs remain matchable through future template updates. Add a non-identity field to a template, re-mirror an existing doc with the same identity values, and you get an UPDATE (new doc version, populated new field) rather than a CREATE — no data migration step needed, just a backfill pass. CASE-404's schema-extension plan rests on this corollary: 290+ existing CASE_RECORDs receive new `data.*` fields via a single `kb-bulk-mirror.py --nodes` pass, no duplicates created.
+
+**v2 caveat.** v2's template-ID redesign (Day 29 fireside on template ID management — see `docs/design/v2-index.md`) plans to make `template_id` version-specific and route logical identity through `(namespace, template_value)`. The corollary above HOLDS in both v1 and v2 — identity stays stable across schema updates by design — but the mechanism changes. Code that names `template_id` as the canonical handle will need a rename pass when v2 lands.
+
 ### 3. Document Identity — The Registry Decides
 
 **The feature:** Documents don't need an explicit ID to be updated. Instead, templates define identity fields. When a document is submitted, WIP computes an identity hash from those fields. If a document with the same hash exists, it's a new version (update). If not, it's a new document (create). The same endpoint handles both — it's an upsert, not a create-or-update decision.
@@ -73,6 +77,15 @@ For `updateTemplate()`, the default should be to keep the previous version activ
 - A template has no identity fields. The developer tries to "update" a document and gets a duplicate instead.
 
 **Sensible default:** `@wip/client` should warn (not error) when creating a document against a template with zero identity fields. The warning should say: *"Template X has no identity fields. Every submission will create a new document. If you intend updates, add identity fields to the template."*
+
+**What's NOT in the identity hash:**
+
+- `template_version` — see PoNIF #2's corollary; the same canonical entity carries forward across template versions cleanly.
+- `namespace` — scoped externally via the platform's composite key `(namespace, identity_hash, template_id)`. The same `identity_hash` in two different namespaces is two different entities, not a collision.
+
+**Adding to `identity_fields` IS breaking.** Every existing doc would hash differently on next write, creating parallel orphan docs. The CASE-316 / 317 / 318 family is the canonical example: an external loader (`kb-bulk-mirror.py`) computed identity from `metadata.custom.case_number` while the template declared `identity_fields=[]`, hashes all collided to an empty key, 213 of 214 records silently dropped on the reporting-sync side. The fix (CASE-318) was to extend `identity_fields` on the template AND backfill — the additive-to-identity case requires coordinated data migration, not just a re-mirror.
+
+**Adding to `data.*` outside `identity_fields` is non-breaking.** Existing docs receive the new field's value on the next backfill (see PoNIF #2's corollary). This is the path CASE-404 takes for the CASE_RECORD schema extension.
 
 ### 4. Bulk First — 200 OK Always
 
@@ -115,6 +128,8 @@ An entity can have multiple WIP IDs. This is not a bug or an edge case — it's 
 - An AI creates documents with a reference value of "CUS-001". If a synonym maps "CUS-001" to a WIP document, the reference resolves. If no synonym exists, WIP falls back to business key lookup. If the business key lookup also fails, the document is rejected. The AI doesn't know which resolution path was attempted or which one failed.
 
 **Sensible default:** `@wip/client` should surface the resolution path in reference errors: *"Reference 'CUS-001' for field 'customer' could not be resolved. Attempted: direct ID (not a UUID), Registry synonym (not found), business key on CUSTOMER template (no match)."* The developer needs to know *why* resolution failed, not just *that* it failed.
+
+**Corollary — synonyms work identically to canonical IDs at every comparison site, not just at lookup.** The Registry resolves a value-form, a UUID-form, and any registered synonym to the same canonical ID. That equivalence must hold at every place the platform compares references — not only when a write resolves an input, but also when a comparator checks "did this reference change?" The template compatibility checker (`POST /templates?on_conflict=validate`) resolves each reference-typed property on both sides before diffing; a stored canonical UUID vs a freshly-submitted value-form for the same entity is *not* a modification. CASE-406 closed the comparator gap that previously flagged these as phantom `modified_existing`. The principle generalizes: any new comparison site that handles references must canonicalize before comparing (`docs/Vision.md` §"References Must Resolve", `docs/design/synonym-resolution-gaps.md`).
 
 ### 6. Template Field Resolution Timing
 
