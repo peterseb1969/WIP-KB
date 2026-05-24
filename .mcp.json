@@ -1,18 +1,18 @@
-{               
-    "mcpServers": {
-      "wip-kb": {
-        "type": "stdio",                                                                                                                                                              
-        "command": "/Users/peter/Development/World-in-a-Pie/.venv/bin/python",
-        "args": ["-m", "wip_mcp.server"],                                                                                                                                             
-        "env": {                                                                                                                                                                      
-          "WIP_API_KEY_FILE": "/Users/peter/.wip-deploy/wip-dev-local/secrets/api-key",
-          "REGISTRY_URL": "https://localhost:8443",                                                                                                                                
-          "DEF_STORE_URL": "https://localhost:8443",                                                                                                                               
-          "TEMPLATE_STORE_URL": "https://localhost:8443",                                                                                                                          
-          "DOCUMENT_STORE_URL": "https://localhost:8443",                                                                                                                          
-          "REPORTING_SYNC_URL": "https://localhost:8443",                                                                                                                          
-          "WIP_VERIFY_TLS": "false"                                                                                                                                                   
-        }                                                                                                                                                                             
-      }                                                                                                                                                                               
-    }                                                                                                                                                                                 
-  }        
+{
+  "mcpServers": {
+    "wip": {
+      "type": "stdio",
+      "command": "/Users/peter/Development/World-in-a-Pie/.venv/bin/python",
+      "args": ["-m", "wip_mcp.server"],
+      "env": {
+        "WIP_API_KEY_FILE": "/Users/peter/.wip-deploy/wip-dev-local/secrets/api-key",
+        "REGISTRY_URL": "https://localhost:8443",
+        "DEF_STORE_URL": "https://localhost:8443",
+        "TEMPLATE_STORE_URL": "https://localhost:8443",
+        "DOCUMENT_STORE_URL": "https://localhost:8443",
+        "REPORTING_SYNC_URL": "https://localhost:8443",
+        "WIP_VERIFY_TLS": "false"
+      }
+    }
+  }
+}
