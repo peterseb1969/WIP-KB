@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { wipFetchJson } from '../lib/wipBulk'
+import { docLabel } from '../lib/casePrefix'
 
 const NAMESPACE = 'kb'
 
@@ -130,7 +131,7 @@ function DocGroupBox({ group }: { group: Group }) {
     const q = query.trim().toLowerCase()
     if (!q) return group.items
     return group.items.filter((d) => {
-      const t = (d.data.title ?? '').toLowerCase()
+      const t = docLabel(d.data, '').toLowerCase()
       const a = (d.data.authored_by ?? '').toLowerCase()
       return t.includes(q) || a.includes(q)
     })
@@ -149,9 +150,9 @@ function DocGroupBox({ group }: { group: Group }) {
         case 'created_asc':
           return a.created_at.localeCompare(b.created_at)
         case 'title_asc':
-          return (a.data.title ?? '').localeCompare(b.data.title ?? '')
+          return docLabel(a.data, '').localeCompare(docLabel(b.data, ''))
         case 'title_desc':
-          return (b.data.title ?? '').localeCompare(a.data.title ?? '')
+          return docLabel(b.data, '').localeCompare(docLabel(a.data, ''))
         case 'case_asc':
           return compareCaseNumber(a, b, 'asc')
         case 'case_desc':
@@ -238,7 +239,9 @@ function DocGroupBox({ group }: { group: Group }) {
                 className="block px-4 py-2.5 transition hover:bg-background"
               >
                 <div className="text-sm text-text">
-                  {d.data.title || <span className="italic text-text-muted">(untitled)</span>}
+                  {docLabel(d.data, '') || (
+                    <span className="italic text-text-muted">(untitled)</span>
+                  )}
                 </div>
                 <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-text-muted">
                   {d.data.authored_by && <span>{d.data.authored_by}</span>}
