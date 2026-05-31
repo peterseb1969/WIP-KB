@@ -10,6 +10,7 @@
     { "value": "APP-KB",  "label": "APP-KB",  "sort_order": 40, "description": "App YAC building the Knowledge Base (WIP-KB)." },
     { "value": "APP-AA",  "label": "APP-AA",  "sort_order": 50, "description": "App YAC building AuthorAssist (WIP-AA)." },
     { "value": "APP-DND", "label": "APP-DND", "sort_order": 60, "description": "App YAC building the DnD compendium (WIP-DnD)." },
+    { "value": "APP-VAL", "label": "APP-VAL", "sort_order": 65, "description": "Helper app for validating spreadsheet data against WIP templates: loads templates and documents in spreadsheet form, transforms them into WIP JSON, and validates the documents against a user-specified template." },
     { "value": "FRanC",   "label": "FRanC",   "sort_order": 70, "description": "Field Reporter — captures session reports, papers, firesides." },
     { "value": "BUG-YAC", "label": "BUG-YAC", "sort_order": 80, "description": "Bug-triage YAC; per-task focus, not adopting the SESSION model in Phase 1 but the role exists for completeness." },
     { "value": "DOC-YAC", "label": "DOC-YAC", "sort_order": 90, "description": "Documentation YAC; same Phase-1 deferral as BUG-YAC." }
