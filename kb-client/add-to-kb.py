@@ -230,6 +230,47 @@ def http_request(method: str, path: str, body: object | None = None) -> tuple[in
         return 0, {"raw": f"URLError: {e.reason}"}
 
 
+# ------------------------------------------ CASE_RECORD v2 upsert (CASE-425/437)
+
+def resolve_case_id(case_synonym: str) -> str | None:
+    """Resolve a CASE-<n> synonym to its document_id on the active target, or None.
+    The CASE-<n> Registry synonym is the v2 resolution handle (CASE-425)."""
+    status, body = http_request(
+        "POST", "/api/registry/entries/lookup/by-key",
+        [{"namespace": NAMESPACE, "entity_type": "documents",
+          "composite_key": {"value": case_synonym}, "search_synonyms": True}])
+    if status >= 400 or status == 0 or not isinstance(body, dict):
+        return None
+    results = body.get("results") or []
+    r = results[0] if results else {}
+    return r.get("entry_id") if r.get("status") == "found" else None
+
+
+def upsert_case(tgt_doc: dict) -> tuple[int, dict, str, str]:
+    """v2 resolve-then-update for CASE_RECORD. Resolve the doc's CASE-<n> synonym;
+    if it exists, PATCH that doc's data in place; else create. Returns
+    (http_status, body, doc_id, result_status).
+
+    Safe under BOTH identity models: PATCH-by-id is version-agnostic, and the
+    create path still upserts under v1 (case_number identity) while registering
+    the CASE-<n> synonym. Under v2 (identity_fields:[]) a re-mirror resolves and
+    PATCHes (no duplicate); a genuinely new case creates. Relies on the synonym
+    backfill having run before the v2 template flip so existing cases resolve."""
+    syns = tgt_doc.get("synonyms") or []
+    case_key = syns[0].get("value") if syns else None
+    existing = resolve_case_id(case_key) if case_key else None
+    if existing:
+        status, body = http_request(
+            "PATCH", f"/api/document-store/documents?namespace={NAMESPACE}",
+            [{"document_id": existing, "patch": tgt_doc["data"]}])
+        return status, body, existing, "updated"
+    status, body = http_request("POST", "/api/document-store/documents", [tgt_doc])
+    results = body.get("results", []) if isinstance(body, dict) else (body if isinstance(body, list) else [])
+    doc_id = results[0].get("document_id", "?") if results else "?"
+    rstatus = results[0].get("status", "?") if results else "?"
+    return status, body, doc_id, rstatus
+
+
 # parse_frontmatter / normalize_target / parse_journal_date / parse_day_number
 # imported from kb_write_core (CASE-407).
 
@@ -683,18 +724,22 @@ def main():
             if tgt_doc is None:
                 raise RuntimeError("doc builder returned None")
 
-            status, body = http_request("POST", "/api/document-store/documents", [tgt_doc])
+            if template_id == TPL_CASE:
+                # v2 resolve-then-update (CASE-425/437): resolve the CASE-<n>
+                # synonym → PATCH in place; else create. Safe under v1 and v2.
+                status, body, doc_id, rstatus = upsert_case(tgt_doc)
+            else:
+                status, body = http_request("POST", "/api/document-store/documents", [tgt_doc])
+                results = body.get("results", body if isinstance(body, list) else [])
+                doc_id = results[0].get("document_id", "?") if results else "?"
+                rstatus = results[0].get("status", "?") if results else "?"
             if status >= 400 or status == 0:
-                raise RuntimeError(f"POST HTTP {status}: {str(body)[:300]}")
-            ok, fail = assert_bulk_success(body, f"{prefix} post")
+                raise RuntimeError(f"write HTTP {status}: {str(body)[:300]}")
+            ok, fail = assert_bulk_success(body, f"{prefix} write")
             if fail:
-                raise RuntimeError(f"bulk POST reported {fail} failures")
-            results = body.get("results", body if isinstance(body, list) else [])
-            if not results:
-                raise RuntimeError("empty results from POST")
-            result = results[0]
-            doc_id = result.get("document_id", "?")
-            rstatus = result.get("status", "?")
+                raise RuntimeError(f"bulk write reported {fail} failures")
+            if doc_id == "?":
+                raise RuntimeError("empty results from write")
             if not args.quiet:
                 print(f"{prefix} {rstatus} kb document_id: {doc_id} ({path.name})")
 
