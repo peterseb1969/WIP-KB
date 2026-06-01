@@ -1,6 +1,6 @@
 {
   "client": "wip-kb-client",
-  "client_version": "2.0.0",
+  "client_version": "2.0.1",
   "schema_version": "v2",
   "case_record_identity": "document_id (UUID); case_number carried by the CASE-<n> Registry synonym",
   "files": [
@@ -9,6 +9,7 @@
     "kb-bulk-mirror.py",
     "case-fetch.py",
     "case-update.py",
+    "case_allocate.py",
     "stats-to-kb.py",
     "kb_client_handshake.py"
   ],
