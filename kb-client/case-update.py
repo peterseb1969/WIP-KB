@@ -73,6 +73,12 @@ LOCAL_KEY = Path(os.environ.get(
     "/Users/peter/.wip-deploy/wip-dev-local/secrets/api-key",
 ))
 NAMESPACE = os.environ.get("KB_NAMESPACE", "kb")
+
+try:
+    from kb_client_handshake import verify_from_env
+except ImportError:  # handshake module not alongside — no-op
+    def verify_from_env(api_key: str = "") -> None:  # type: ignore[misc]
+        return None
 VERIFY_TLS = os.environ.get("KB_VERIFY_TLS", "false").lower() == "true"
 
 
@@ -259,8 +265,9 @@ def _patch_doc(base_url: str, key_file: Path, document_id: str, data_patch: dict
 
 
 def update_case(case_num: int, new_body: str, verb: str) -> int:
-    """Pull → modify → push to both targets. Returns process exit code."""
+    """Pull → modify → push to the canonical target. Returns process exit code."""
     new_status = VERB_TO_STATUS[verb]
+    verify_from_env()  # no-skew handshake (skips unless KB_APP_URL is set)
 
     # Sanity: the new body's frontmatter status should match the verb's target.
     body_status = _parse_frontmatter_status(new_body)

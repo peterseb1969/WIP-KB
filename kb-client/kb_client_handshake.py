@@ -14,9 +14,20 @@ Wired into the entry scripts in CASE-437 Phase 2 (the v2 cutover).
 from __future__ import annotations
 
 import json
+import os
 import ssl
+import sys
 import urllib.request
 from pathlib import Path
+
+# The manifest is served by the KB *app* (Express), which is a different URL than
+# the WIP backend the loaders write to (KB_BASE_URL). Configure the app endpoint
+# separately. If KB_APP_URL is unset, the handshake is skipped (not yet wired in
+# this environment) — it becomes active once the served-client endpoint is
+# deployed and KB_APP_URL / KB_APP_BASE_PATH are set.
+APP_URL = os.environ.get("KB_APP_URL", "")
+APP_BASE_PATH = os.environ.get("KB_APP_BASE_PATH", "").rstrip("/")
+VERIFY_TLS = os.environ.get("KB_VERIFY_TLS", "false").lower() == "true"
 
 
 def local_schema_version() -> str | None:
@@ -45,5 +56,26 @@ def verify_schema(base_url: str, api_key: str = "", verify_tls: bool = False,
         raise SystemExit(
             f"kb-client schema mismatch: client={local} instance={remote}. "
             f"Re-fetch the client from {base_url}{base_path}/server-api/kb-client/download"
+        )
+    return local
+
+
+def verify_from_env(api_key: str = "") -> str | None:
+    """Env-driven handshake for loader main()s. Skips (returns None) if KB_APP_URL
+    is unset, or warns-and-skips if the manifest endpoint is unreachable (instance
+    predates the served-client feature). Raises SystemExit ONLY on a definite
+    schema_version mismatch — the no-skew guard. Safe to call unconditionally."""
+    if not APP_URL:
+        return None
+    local = local_schema_version()
+    try:
+        remote = instance_schema_version(APP_URL, api_key, VERIFY_TLS, APP_BASE_PATH)
+    except Exception as e:  # noqa: BLE001 — unreachable/404/old instance: warn, don't block
+        print(f"[kb-client] schema handshake skipped ({e})", file=sys.stderr)
+        return local
+    if remote is not None and local != remote:
+        raise SystemExit(
+            f"kb-client schema mismatch: client={local} instance={remote}. "
+            f"Re-fetch the client from {APP_URL}{APP_BASE_PATH}/server-api/kb-client/download"
         )
     return local

@@ -35,6 +35,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+try:
+    from kb_client_handshake import verify_from_env
+except ImportError:  # handshake module not alongside — no-op
+    def verify_from_env(api_key: str = "") -> None:  # type: ignore[misc]
+        return None
+
 BASE = os.environ.get("KB_BASE_URL", "https://wip-kb.local")
 KEY = Path(os.environ.get("KB_KEY_FILE", str(Path.home() / ".wip-deploy/wip-kb/secrets/api-key"))).expanduser()
 NS = os.environ.get("KB_NAMESPACE", "kb")
@@ -131,6 +137,7 @@ def main() -> int:
     for f in ("type", "severity", "component", "filed-by", "app", "target-yac"):
         ap.add_argument(f"--{f}", default="")
     args = ap.parse_args()
+    verify_from_env()  # no-skew handshake (skips unless KB_APP_URL is set)
     body = Path(args.body_file).read_text() if args.body_file else args.body
     filed_by = getattr(args, "filed_by") or "unknown"
     data = {

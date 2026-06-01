@@ -148,6 +148,13 @@ from kb_write_core import (
 )
 
 
+try:
+    from kb_client_handshake import verify_from_env
+except ImportError:  # handshake module not alongside — no-op
+    def verify_from_env(api_key: str = "") -> None:  # type: ignore[misc]
+        return None
+
+
 def build_case_doc(path: Path, text: str, fm: dict[str, str]) -> dict:
     return _build_case_doc_core(
         path, text, fm, template_id=resolve_template_id(TPL_CASE), loader="add-to-kb.py",
@@ -706,6 +713,7 @@ def main():
     failures: list[tuple[str, str]] = []
     global _active_target
 
+    verify_from_env()  # no-skew handshake (skips unless KB_APP_URL is set)
     for target in TARGETS:
         _active_target = target
         prefix = f"[{target.name}]"
