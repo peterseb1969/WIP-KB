@@ -230,6 +230,34 @@ def _post_doc(base_url: str, key_file: Path, doc: dict) -> str:
     return r.get("status", "?")
 
 
+def _build_case_patch(existing: dict, new_body: str, new_status: str) -> dict:
+    """Minimal JSON Merge Patch for a CASE_RECORD respond/comment: body + the
+    structured data.status (the field the UI filters on, CASE-404 / be2e90e) +
+    the status-* tag. Deliberately omits case_number so the patch never touches
+    the identity field — safe under v1 (case_number identity) and v2
+    (identity_fields:[]). Supersedes the metadata.custom.case_status mirror
+    (deprecated; the UI now reads data.status)."""
+    ed = existing.get("data") or {}
+    other_tags = [t for t in (ed.get("tags") or []) if not t.startswith("status-")]
+    return {"body": new_body, "status": new_status, "tags": other_tags + [f"status-{new_status}"]}
+
+
+def _patch_doc(base_url: str, key_file: Path, document_id: str, data_patch: dict) -> str:
+    """PATCH a document's data in place (RFC 7396 merge). Returns result status."""
+    _, payload = _http(
+        "PATCH", base_url, key_file,
+        f"/api/document-store/documents?namespace={NAMESPACE}",
+        [{"document_id": document_id, "patch": data_patch}],
+    )
+    results = payload.get("results") or (payload if isinstance(payload, list) else [])
+    if not results:
+        raise RuntimeError(f"empty results from PATCH to {base_url}")
+    r = results[0]
+    if r.get("error"):
+        raise RuntimeError(f"PATCH item error from {base_url}: {r.get('error')}")
+    return r.get("status", "?")
+
+
 def update_case(case_num: int, new_body: str, verb: str) -> int:
     """Pull → modify → push to both targets. Returns process exit code."""
     new_status = VERB_TO_STATUS[verb]
@@ -244,7 +272,7 @@ def update_case(case_num: int, new_body: str, verb: str) -> int:
             file=sys.stderr,
         )
 
-    targets = [("local", LOCAL_URL, LOCAL_KEY), ("remote", REMOTE_URL, REMOTE_KEY)]
+    targets = [("canonical", REMOTE_URL, REMOTE_KEY)]  # dual-write retired (Peter 2026-06-01): single canonical instance
 
     # Discover existing case via local first (fast); fall through to remote.
     existing: dict | None = None
@@ -265,14 +293,22 @@ def update_case(case_num: int, new_body: str, verb: str) -> int:
         print(f"case {case_num} not found in kb", file=sys.stderr)
         return 1
 
-    doc = _build_doc(existing, new_body, new_status)
+    # v2 resolve-then-update (CASE-425/437): PATCH the existing case in place by
+    # its document_id (the pre-pull resolved it). Minimal patch — body/status/tags
+    # only — never touches case_number, so it's safe under v1 (case_number
+    # identity) and v2 (identity_fields:[]), and it sets data.status (the field
+    # the UI reads). Single canonical target (dual-write retired).
+    patch = _build_case_patch(existing, new_body, new_status)
+    doc_id = existing.get("document_id")
+    if not doc_id:
+        print(f"ERROR: case {case_num} has no document_id; cannot update", file=sys.stderr)
+        return 2
 
-    # Dual-write loop (warn-and-continue per CASE-307 / CASE-391 contract)
     successes: list[tuple[str, str]] = []
     failures: list[tuple[str, str]] = []
     for name, url, key in targets:
         try:
-            result_status = _post_doc(url, key, doc)
+            result_status = _patch_doc(url, key, doc_id, patch)
             successes.append((name, result_status))
             print(f"[{name}] {result_status} case {case_num}", file=sys.stderr)
         except RuntimeError as e:
@@ -296,7 +332,7 @@ def update_journey(day_num: float, new_body: str) -> int:
     """Pull → modify → push the JOURNEY_ENTRY for `day_num`. No verb (journals
     don't have status transitions). Mirror of update_case minus the status flip.
     """
-    targets = [("local", LOCAL_URL, LOCAL_KEY), ("remote", REMOTE_URL, REMOTE_KEY)]
+    targets = [("canonical", REMOTE_URL, REMOTE_KEY)]  # dual-write retired (Peter 2026-06-01): single canonical instance
 
     existing: dict | None = None
     last_error: Exception | None = None

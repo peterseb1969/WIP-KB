@@ -103,22 +103,23 @@ class Target:
         return f"Target({self.name}, {self.base_url})"
 
 
-LOCAL_TARGET = Target(
-    name="local",
-    base_url=os.environ.get("KB_LOCAL_BASE_URL", os.environ.get("KB_BASE_URL", "https://localhost:8443")),
-    key_file=Path(os.environ.get("KB_LOCAL_KEY_FILE", os.environ.get("KB_KEY_FILE", "/Users/peter/.wip-deploy/wip-dev-local/secrets/api-key"))),
+# Single canonical instance (dual-write retired per Peter, 2026-06-01). All
+# writes go to ONE instance — eliminates the divergent-allocator / per-target
+# document_id problems (CASE-425 §"Why not multi-instance"; a single canonical
+# instance + a KB-YAC-maintained sync, not per-agent multi-writes). Default is
+# wip-kb.local; override KB_BASE_URL / KB_KEY_FILE for a client served from a
+# different instance.
+CANONICAL_TARGET = Target(
+    name="canonical",
+    base_url=os.environ.get("KB_BASE_URL", "https://wip-kb.local"),
+    key_file=Path(os.environ.get("KB_KEY_FILE", "/Users/peter/.wip-deploy/wip-kb/secrets/api-key")),
 )
-REMOTE_TARGET = Target(
-    name="remote",
-    base_url=os.environ.get("KB_REMOTE_BASE_URL", "https://wip-kb.local"),
-    key_file=Path(os.environ.get("KB_REMOTE_KEY_FILE", "/Users/peter/.wip-deploy/wip-kb/secrets/api-key")),
-)
-TARGETS: list[Target] = [LOCAL_TARGET, REMOTE_TARGET]
+TARGETS: list[Target] = [CANONICAL_TARGET]
 
-# Module-level "currently active" target. Set by main()'s dual-write loop;
-# read by http_request / resolve_template_id / _api_key. Keeps function
-# signatures throughout the file unchanged.
-_active_target: Target = LOCAL_TARGET
+# Module-level "currently active" target. Read by http_request /
+# resolve_template_id / _api_key. Single-target now; the loop in main() is kept
+# for structure (and to re-enable a second target trivially if ever needed).
+_active_target: Target = CANONICAL_TARGET
 
 # Constants + pure helpers + doc builders live in kb_write_core
 # (CASE-407 consolidation). Imported here so this file stays the
