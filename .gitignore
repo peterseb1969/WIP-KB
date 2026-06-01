@@ -7,3 +7,7 @@ dist/
 .claude-context-pct
 .claude/.session-id
 yac-discussions
+
+# Python (kb-client loaders)
+__pycache__/
+*.pyc
