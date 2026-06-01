@@ -21,6 +21,7 @@ interface DocItem {
     kind?: string
     severity?: string
     app?: string
+    status?: string
     [k: string]: unknown
   }
   metadata?: {
@@ -101,11 +102,13 @@ function compareDate(a: Date | null, b: Date | null, dir: 'asc' | 'desc'): numbe
   return dir === 'asc' ? a.getTime() - b.getTime() : b.getTime() - a.getTime()
 }
 
-// Workflow status lives in metadata.custom.case_status (open, implemented,
-// responded, closed, ...). data.doc_status is the WIP lifecycle (always
-// "published" for cases) — not what the user means by "status".
+// Workflow status (open, responded, implemented, closed, ...) is the structured
+// data.status field (CASE-404), populated by the loaders + reporting `data_status`
+// column. (Was metadata.custom.case_status, which the add-to-kb.py loader no longer
+// writes — see CASE-437.) data.doc_status is the WIP lifecycle (always "published"
+// for cases) — not what the user means by "status".
 function workflowStatus(doc: DocItem): string | undefined {
-  return doc.metadata?.custom?.case_status
+  return doc.data?.status
 }
 
 interface ListResponse {

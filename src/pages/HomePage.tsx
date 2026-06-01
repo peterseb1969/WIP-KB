@@ -14,6 +14,7 @@ interface DocItem {
     authored_by?: string
     doc_status?: string
     case_number?: number
+    status?: string
     [k: string]: unknown
   }
   metadata?: {
@@ -27,7 +28,7 @@ interface DocItem {
 }
 
 function workflowStatus(doc: DocItem): string | undefined {
-  return doc.metadata?.custom?.case_status
+  return doc.data?.status
 }
 
 interface ListResponse {
