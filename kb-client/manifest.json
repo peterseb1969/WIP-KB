@@ -1,0 +1,17 @@
+{
+  "client": "wip-kb-client",
+  "client_version": "1.0.0",
+  "schema_version": "v1",
+  "case_record_identity": "case_number",
+  "files": [
+    "kb_write_core.py",
+    "add-to-kb.py",
+    "kb-bulk-mirror.py",
+    "case-fetch.py",
+    "case-update.py",
+    "stats-to-kb.py"
+  ],
+  "served_from": "{BASE_PATH}/server-api/kb-client/download",
+  "manifest_endpoint": "{BASE_PATH}/server-api/kb-client/manifest",
+  "note": "CASE-437: the KB write/ingest client, owned by APP-KB-YAC and served from the running KB instance. A client MUST compare its schema_version against the instance manifest before writing and refuse on mismatch (no-skew guarantee). v1 = case_number identity (current live model); v2 (CASE-425) flips to document_id/UUID identity + CASE-<n> Registry synonym + identity_fields:[]."
+}
