@@ -38,6 +38,21 @@ server: it checks its `schema_version` against the instance manifest
   is safe to run before the template flip (PATCH-by-id is version-agnostic; create
   still upserts under v1).
 
+## Versioning — two independent signals
+- **`schema_version`** (e.g. `v2`, hand-set) = the **identity-model / write-safety**
+  gate. The served loaders refuse to write on a schema mismatch
+  (`kb_client_handshake.py`), because a wrong identity model corrupts data (e.g. a
+  v1 create-upsert client against a v2 `identity_fields:[]` template duplicates
+  cases). **Bumps only on identity-model changes.**
+- **`bundle_digest`** (auto) = the **code/currency** signal — a sha256 the
+  `/manifest` endpoint computes over the served files at request time. **A fetcher
+  re-fetches when it changes.** `files[]` and `bundle_digest` are *derived from the
+  `kb-client/` directory at serve time*, so the served manifest can never drift
+  from the actual bundle and there's no manual version to forget (this is what
+  caused the earlier "allocator missing from the bundle" / stale-cache misses).
+- **`client_version`** is an informational human semver only — **not** the currency
+  signal; use `bundle_digest`. (CASE-437.)
+
 ## Running
 Run from inside `kb-client/` (so `from kb_write_core import …` resolves), e.g.
 `python3 kb-client/add-to-kb.py <flat-file>`.
