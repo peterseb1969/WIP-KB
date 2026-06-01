@@ -304,6 +304,12 @@ def build_case_doc(
             "related": fm.get("related", ""),
             "loader": loader,
         },
+        # CASE-425/437 v2: register CASE-<n> as a Registry synonym — the human
+        # handle + uniqueness carrier once identity moves off case_number to the
+        # document_id (UUID). Forward-compatible under v1 (it just also registers
+        # the synonym; self-claim on re-mirror is a no-op, CASE-427). The synonym
+        # claim is atomic + fails loudly on a real cross-case collision (CASE-436).
+        "synonyms": [{"value": f"CASE-{case_num}"}] if case_num else [],
     }
 
 
