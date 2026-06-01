@@ -9,7 +9,8 @@
     "kb-bulk-mirror.py",
     "case-fetch.py",
     "case-update.py",
-    "stats-to-kb.py"
+    "stats-to-kb.py",
+    "kb_client_handshake.py"
   ],
   "served_from": "{BASE_PATH}/server-api/kb-client/download",
   "manifest_endpoint": "{BASE_PATH}/server-api/kb-client/manifest",

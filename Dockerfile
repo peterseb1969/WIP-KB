@@ -26,6 +26,9 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 # Copy server source (run via tsx). Includes server/seed/ + server/prompts/
 # which are read at runtime by bootstrap.routes.ts and agent.ts.
 COPY server/ server/
+# Copy the served KB client bundle (CASE-437) — kb-client.routes.ts reads it at
+# runtime to serve GET /server-api/kb-client/{manifest,files/:name}.
+COPY kb-client/ kb-client/
 COPY tsconfig.json ./
 
 # Copy built frontend

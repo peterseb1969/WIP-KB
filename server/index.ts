@@ -8,6 +8,7 @@ import { wipProxy } from '@wip/proxy'
 import { initAgent, ask } from './agent.js'
 import { initAuth, requireAuth, handleCallback, handleLogout } from './auth.js'
 import bootstrapRoutes from './bootstrap.routes.js'
+import kbClientRoutes from './kb-client.routes.js'
 
 const PORT = parseInt(process.env.PORT || '3012')
 
@@ -44,6 +45,11 @@ app.use(session({
 // Auth routes
 router.get('/auth/callback', (req, res) => { handleCallback(req, res) })
 router.get('/auth/logout', handleLogout)
+
+// kb-client served-client download + manifest (CASE-437). PUBLIC-READ, mounted
+// BEFORE requireAuth() — headless clients fetch with an API key, not a browser
+// session, so this must not be session-gated. Non-secret distributable code.
+router.use('/server-api/kb-client', kbClientRoutes)
 
 // Auth middleware (no-op when OIDC_ISSUER is not set)
 router.use(requireAuth())
