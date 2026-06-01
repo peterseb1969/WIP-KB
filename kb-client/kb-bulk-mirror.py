@@ -77,6 +77,13 @@ from kb_write_core import (
 )
 
 
+try:
+    from kb_client_handshake import verify_from_env
+except ImportError:  # handshake module not alongside — no-op
+    def verify_from_env(api_key: str = "") -> None:  # type: ignore[misc]
+        return None
+
+
 def build_case_doc(path: Path) -> dict:
     text = path.read_text()
     fm, _ = parse_frontmatter(text)
@@ -263,6 +270,52 @@ def post_bulk_documents(docs: list[dict], label: str) -> tuple[int, int]:
     return assert_bulk_success(body, label)
 
 
+def _resolve_case_id(case_synonym: str) -> str | None:
+    """Resolve a CASE-<n> synonym to its document_id, or None (CASE-425/437)."""
+    status, body = http_request(
+        "POST", "/api/registry/entries/lookup/by-key",
+        [{"namespace": NAMESPACE, "entity_type": "documents",
+          "composite_key": {"value": case_synonym}, "search_synonyms": True}])
+    if status >= 400 or status == 0 or not isinstance(body, dict):
+        return None
+    results = body.get("results") or []
+    r = results[0] if results else {}
+    return r.get("entry_id") if r.get("status") == "found" else None
+
+
+def post_cases_v2(cases: list[dict]) -> tuple[int, int]:
+    """v2 resolve-then-update for CASE_RECORD bulk (CASE-425/437): resolve each
+    CASE-<n> synonym → PATCH existing in place, create the rest. Safe under v1
+    (case_number identity) and v2 (identity_fields:[]). Journeys/documents keep
+    plain create-upsert (their title/path identity is unchanged in v2)."""
+    patches: list[dict] = []
+    creates: list[dict] = []
+    for doc in cases:
+        syn = (doc.get("synonyms") or [{}])[0].get("value")
+        did = _resolve_case_id(syn) if syn else None
+        if did:
+            patches.append({"document_id": did, "patch": doc["data"]})
+        else:
+            creates.append(doc)
+    print(f"  cases: {len(patches)} update / {len(creates)} create")
+    ok = fail = 0
+    for i, batch in enumerate(chunked(patches, BATCH_SIZE), 1):
+        status, body = http_request(
+            "PATCH", f"/api/document-store/documents?namespace={NAMESPACE}", batch)
+        if status >= 400:
+            print(f"  case-update batch {i}: HTTP {status}: {str(body)[:200]}", file=sys.stderr)
+            fail += len(batch)
+            continue
+        o, f = assert_bulk_success(body, f"case-update batch {i}")
+        ok += o
+        fail += f
+    for i, batch in enumerate(chunked(creates, BATCH_SIZE), 1):
+        o, f = post_bulk_documents(batch, f"case-create batch {i}")
+        ok += o
+        fail += f
+    return ok, fail
+
+
 def chunked(lst: list, n: int):
     for i in range(0, len(lst), n):
         yield lst[i : i + n]
@@ -333,13 +386,20 @@ def cmd_nodes(_args):
     cases = all_cases()
     journeys = all_journeys()
     documents = all_documents()
-    docs = cases + journeys + documents
-    print(f"To post: {len(docs)} ({len(cases)} cases + {len(journeys)} journeys + {len(documents)} documents — platform dedups via identity_hash)")
-    if not docs:
+    other = journeys + documents
+    print(f"To post: {len(cases)} cases (v2 resolve-then-update) + {len(other)} journeys/documents (create-upsert)")
+    if not (cases or other):
         return
 
+    verify_from_env()  # no-skew handshake (skips unless KB_APP_URL is set)
     total_ok = total_fail = 0
-    for i, batch in enumerate(chunked(docs, BATCH_SIZE), 1):
+    # CASE_RECORD: v2 — resolve CASE-<n> and PATCH in place, else create.
+    if cases:
+        ok, fail = post_cases_v2(cases)
+        total_ok += ok
+        total_fail += fail
+    # journeys + documents keep create-upsert (title/path identity unchanged in v2).
+    for i, batch in enumerate(chunked(other, BATCH_SIZE), 1):
         ok, fail = post_bulk_documents(batch, f"nodes batch {i}")
         total_ok += ok
         total_fail += fail
