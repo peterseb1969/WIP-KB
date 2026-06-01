@@ -4,10 +4,13 @@
 // session. The bundle is non-secret distributable code.
 //
 //   GET {BASE_PATH}/server-api/kb-client/manifest      -> manifest.json (schema_version, file list)
-//   GET {BASE_PATH}/server-api/kb-client/files/:name   -> a single bundle file (whitelisted)
+//   GET {BASE_PATH}/server-api/kb-client/download       -> JSON bundle { files: {name: content} } (one-shot)
+//   GET {BASE_PATH}/server-api/kb-client/files/:name    -> a single bundle file (whitelisted)
 //
-// Per-file fetch (manifest → loop files) avoids a tar/zip dependency. The
-// manifest's schema_version is the no-skew handshake key (kb_client_handshake.py).
+// /download returns a dep-free JSON bundle (no tar/zip); /files is the per-file
+// alternative. The manifest's schema_version is the no-skew handshake key
+// (kb_client_handshake.py). Every route is a real handler so none falls through
+// to the SPA catch-all.
 import { Router } from 'express'
 import fs from 'fs'
 import path from 'path'
@@ -36,6 +39,36 @@ router.get('/manifest', (_req, res) => {
   } catch (e: unknown) {
     res.status(500).json({ error: `kb-client manifest unavailable: ${(e as Error).message}` })
   }
+})
+
+router.get('/download', (_req, res) => {
+  // One-shot bundle: { client, client_version, schema_version, files: {name: content} }.
+  // Dep-free (no tar/zip); the client-fetcher writes each entry to its kb-client dir.
+  let manifest: Manifest
+  try {
+    manifest = loadManifest()
+  } catch (e: unknown) {
+    res.status(500).json({ error: `kb-client manifest unavailable: ${(e as Error).message}` })
+    return
+  }
+  const names = [...manifest.files, 'manifest.json', 'README.md']
+  const files: Record<string, string> = {}
+  try {
+    for (const name of names) {
+      const fp = path.join(CLIENT_DIR, name)
+      if (fp !== path.join(CLIENT_DIR, path.basename(name))) continue // path-traversal guard
+      if (fs.existsSync(fp)) files[name] = fs.readFileSync(fp, 'utf-8')
+    }
+  } catch (e: unknown) {
+    res.status(500).json({ error: `kb-client bundle read failed: ${(e as Error).message}` })
+    return
+  }
+  res.json({
+    client: manifest.client,
+    client_version: manifest.client_version,
+    schema_version: manifest.schema_version,
+    files,
+  })
 })
 
 router.get('/files/:name', (req, res) => {
