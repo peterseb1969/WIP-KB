@@ -1,9 +1,9 @@
 {
   "value": "CASE_RECORD",
   "label": "Case Record",
-  "description": "Cross-agent case filed by a YAC (DESIGN.md §5.1). Knowledge artifact / write-once breadcrumb. Identity by case_number — atomically claimed via case-helper.sh per CASE-306 (CASE-310 / CASE-318 design rule).",
+  "description": "Cross-agent case filed by a YAC (DESIGN.md §5.1). Knowledge artifact / write-once breadcrumb. v2 (CASE-425): identity is the registry-assigned document_id (UUID); case_number is a display field whose uniqueness + human-handle role is carried by a `CASE-<n>` Registry synonym, allocated atomically via create-with-inline-synonym (fail-on-conflict → retry, CASE-436). Re-mirror resolves the CASE-<n> synonym to the document_id and updates in place. Supersedes the case_number-as-identity model (CASE-306 FS noclobber claim retired).",
   "usage": "entity",
-  "identity_fields": ["case_number"],
+  "identity_fields": [],
   "header_fields": ["title", "case_number", "status"],
   "fields": [
     { "name": "title",       "label": "Title",        "type": "string",  "mandatory": true, "full_text_indexed": true },
