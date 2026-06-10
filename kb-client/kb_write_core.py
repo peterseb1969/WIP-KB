@@ -16,7 +16,7 @@ Public surface:
     TPL_CASE / TPL_JOURNEY / TPL_DOCUMENT / TPL_REFERENCES / TPL_SUPERSEDES
     VALID_TARGETS
     NAMESPACE        (env: KB_NAMESPACE, default "kb")
-    DEV_ROOT         (env: KB_DEV_ROOT, default /Users/peter/Development)
+    DEV_ROOT         (env: KB_DEV_ROOT, default ~/Development)
     DOC_PATH_RE      (regex for DOCUMENT path detection per CASE-346)
 - Pure helpers (no I/O beyond what the builders need):
     parse_frontmatter(text) -> (dict, str)
@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +59,46 @@ TPL_SUPERSEDES = "SUPERSEDES"
 TPL_CONTINUES_FROM = "CONTINUES_FROM"
 
 NAMESPACE = os.environ.get("KB_NAMESPACE", "kb")
-DEV_ROOT = Path(os.environ.get("KB_DEV_ROOT", "/Users/peter/Development"))
+DEV_ROOT = Path(os.environ.get("KB_DEV_ROOT", str(Path.home() / "Development")))
+
+# --- API-key resolution (CASE-444) -----------------------------------------
+# One rule for the whole served bundle. Before this, the write scripts read
+# KB_KEY_FILE while the read scripts and the FR-YAC wrapper used
+# KB_API_KEY_FILE, and the fallback baked one machine's homedir + one
+# instance's key into served code.
+CANONICAL_BASE_URL = "https://wip-kb.local"
+LOCAL_BASE_URL = "https://localhost:8443"
+
+
+def default_key_path(profile: str) -> Path:
+    """$HOME-derived key path for a wip-deploy profile (e.g. 'wip-kb')."""
+    return Path.home() / ".wip-deploy" / profile / "secrets" / "api-key"
+
+
+def resolve_key_file(base_url: str, base_url_default: str,
+                     default_profile: str, *env_vars: str) -> Path:
+    """Resolve the API-key file for a target (CASE-444).
+
+    env_vars are checked in order; first set one wins. KB_KEY_FILE is accepted
+    anywhere in the list as a deprecated alias (stderr warning). If no env var
+    is set AND the target's base URL was overridden away from its default,
+    fail loud rather than silently pair the default profile's key with a
+    different instance (the silent wrong-key 401 class).
+    """
+    for var in env_vars:
+        val = os.environ.get(var)
+        if val:
+            if var == "KB_KEY_FILE":
+                print("[kb-client] KB_KEY_FILE is deprecated; use "
+                      "KB_API_KEY_FILE (CASE-444)", file=sys.stderr)
+            return Path(val).expanduser()
+    if base_url.rstrip("/") != base_url_default.rstrip("/"):
+        raise SystemExit(
+            f"[kb-client] base URL overridden to {base_url} but none of "
+            f"{'/'.join(env_vars)} is set — refusing to fall back to the "
+            f"default '{default_profile}' key for a different instance. "
+            f"Set {env_vars[0]} to that instance's key file. (CASE-444)")
+    return default_key_path(default_profile)
 
 # Valid KB_TARGET_YAC term values.
 VALID_TARGETS = {"USER1", "BE-YAC", "APP-RC", "APP-CT", "APP-KB", "BUG-YAC", "FRanC", "any"}

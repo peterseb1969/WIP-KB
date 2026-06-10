@@ -58,9 +58,19 @@ Run from inside `kb-client/` (so `from kb_write_core import …` resolves), e.g.
 `python3 kb-client/add-to-kb.py <flat-file>`.
 
 Env:
-- `KB_BASE_URL` / `KB_KEY_FILE` — the canonical instance + admin key (default
-  `https://wip-kb.local`).
-- `KB_NAMESPACE` (default `kb`), `KB_VERIFY_TLS` (default `false`).
+- `KB_BASE_URL` — the canonical instance (default `https://wip-kb.local`).
+- `KB_API_KEY_FILE` — its key file (default `~/.wip-deploy/wip-kb/secrets/api-key`).
+  **One var across the whole bundle** (CASE-444); `KB_KEY_FILE` is accepted as a
+  deprecated alias with a stderr warning. The default key pairs only with the
+  default target: overriding `KB_BASE_URL` without setting `KB_API_KEY_FILE`
+  fails loud instead of silently 401-ing with the canonical instance's key.
+  No `/Users/<user>` literals — defaults derive from `$HOME`.
+- `KB_LOCAL_URL` / `KB_LOCAL_KEY_FILE` — the optional local fast-path instance
+  (`case-fetch`/`case-update` `KB_PREFER_LOCAL=1`, `stats-to-kb` local target);
+  defaults `https://localhost:8443` + `~/.wip-deploy/wip-dev-local/secrets/api-key`,
+  same pairing guard.
+- `KB_NAMESPACE` (default `kb`), `KB_VERIFY_TLS` (default `false`),
+  `KB_DEV_ROOT` (default `~/Development` — flat-file repo roots).
 - `KB_APP_URL` / `KB_APP_BASE_PATH` — the KB app endpoint serving the manifest, for
   the handshake (distinct from the WIP backend `KB_BASE_URL`). Unset → handshake
   skipped (warn-and-continue if unreachable).

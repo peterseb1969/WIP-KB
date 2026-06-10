@@ -22,10 +22,12 @@ Targets (dual-write, since 2026-05-14):
     target's per-record edges (REFERENCES, SUPERSEDES) are derived independently
     since the edges live in each kb's own graph.
 
-    Per-target env-var overrides (leave unset for sensible defaults):
-      KB_LOCAL_BASE_URL  / KB_LOCAL_KEY_FILE
-      KB_REMOTE_BASE_URL / KB_REMOTE_KEY_FILE
-    Legacy KB_BASE_URL / KB_KEY_FILE still override the LOCAL target only.
+    Env (single canonical target since 2026-06-01; key rule per CASE-444):
+      KB_BASE_URL       target instance (default https://wip-kb.local)
+      KB_API_KEY_FILE   key file for that instance (KB_KEY_FILE accepted as a
+                        deprecated alias; default ~/.wip-deploy/wip-kb/secrets/
+                        api-key — only valid for the default target, otherwise
+                        the script fails loud rather than 401 with a wrong key)
 
 Per CASE-307, this is the canonical write surface for ongoing
 single-record dual-writes. Bulk historical backfill goes through
@@ -71,7 +73,6 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-REPO = Path("/Users/peter/Development/FR-YAC")
 
 # Dual-write targets. Each filing POSTs to both; tolerate one-side failure
 # (exit 0 if at least one succeeds, exit 1 only if all fail). The remote
@@ -79,11 +80,9 @@ REPO = Path("/Users/peter/Development/FR-YAC")
 # preset flip + the WIP-KB k8s migration; both surfaces now run the same
 # post-CASE-318 schema, so dual-write is safe.
 #
-# Per-target env-var overrides:
-#   KB_LOCAL_BASE_URL  / KB_LOCAL_KEY_FILE   override local target
-#   KB_REMOTE_BASE_URL / KB_REMOTE_KEY_FILE  override remote target
-# Legacy fallback: KB_BASE_URL / KB_KEY_FILE still recognized as overrides
-# for the LOCAL target (old single-target invocations keep working).
+# Env overrides: KB_BASE_URL (target) + KB_API_KEY_FILE (its key; KB_KEY_FILE
+# is a deprecated alias). Key resolution + pairing guard live in
+# kb_write_core.resolve_key_file (CASE-444).
 
 class Target:
     """One kb endpoint. Per-target template UUID cache + cached api key."""
@@ -107,12 +106,18 @@ class Target:
 # writes go to ONE instance — eliminates the divergent-allocator / per-target
 # document_id problems (CASE-425 §"Why not multi-instance"; a single canonical
 # instance + a KB-YAC-maintained sync, not per-agent multi-writes). Default is
-# wip-kb.local; override KB_BASE_URL / KB_KEY_FILE for a client served from a
-# different instance.
+# wip-kb.local; override KB_BASE_URL + KB_API_KEY_FILE for a client served
+# from a different instance (key resolution: CASE-444).
+from kb_write_core import CANONICAL_BASE_URL, DEV_ROOT, resolve_key_file
+
+REPO = DEV_ROOT / "FR-YAC"  # FR-YAC root (CASE-444: no /Users/<user> literals)
+
+_BASE_URL = os.environ.get("KB_BASE_URL", CANONICAL_BASE_URL)
 CANONICAL_TARGET = Target(
     name="canonical",
-    base_url=os.environ.get("KB_BASE_URL", "https://wip-kb.local"),
-    key_file=Path(os.environ.get("KB_KEY_FILE", "/Users/peter/.wip-deploy/wip-kb/secrets/api-key")),
+    base_url=_BASE_URL,
+    key_file=resolve_key_file(_BASE_URL, CANONICAL_BASE_URL, "wip-kb",
+                              "KB_API_KEY_FILE", "KB_KEY_FILE"),
 )
 TARGETS: list[Target] = [CANONICAL_TARGET]
 

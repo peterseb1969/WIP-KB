@@ -20,6 +20,7 @@ Usage:
 Env vars (all optional):
     KB_BASE_URL          default https://wip-kb.local   (remote canonical)
     KB_API_KEY_FILE      default ~/.wip-deploy/wip-kb/secrets/api-key
+                         (KB_KEY_FILE accepted as deprecated alias — CASE-444)
     KB_LOCAL_URL         default https://localhost:8443 (used when KB_PREFER_LOCAL=1)
     KB_LOCAL_KEY_FILE    default ~/.wip-deploy/wip-dev-local/secrets/api-key
     KB_NAMESPACE         default kb
@@ -38,16 +39,14 @@ import urllib.request
 from pathlib import Path
 
 
-REMOTE_URL = os.environ.get("KB_BASE_URL", "https://wip-kb.local")
-REMOTE_KEY = Path(os.environ.get(
-    "KB_API_KEY_FILE",
-    "/Users/peter/.wip-deploy/wip-kb/secrets/api-key",
-))
-LOCAL_URL = os.environ.get("KB_LOCAL_URL", "https://localhost:8443")
-LOCAL_KEY = Path(os.environ.get(
-    "KB_LOCAL_KEY_FILE",
-    "/Users/peter/.wip-deploy/wip-dev-local/secrets/api-key",
-))
+from kb_write_core import CANONICAL_BASE_URL, LOCAL_BASE_URL, resolve_key_file
+
+REMOTE_URL = os.environ.get("KB_BASE_URL", CANONICAL_BASE_URL)
+REMOTE_KEY = resolve_key_file(REMOTE_URL, CANONICAL_BASE_URL, "wip-kb",
+                              "KB_API_KEY_FILE", "KB_KEY_FILE")
+LOCAL_URL = os.environ.get("KB_LOCAL_URL", LOCAL_BASE_URL)
+LOCAL_KEY = resolve_key_file(LOCAL_URL, LOCAL_BASE_URL, "wip-dev-local",
+                             "KB_LOCAL_KEY_FILE")
 NAMESPACE = os.environ.get("KB_NAMESPACE", "kb")
 PREFER_LOCAL = os.environ.get("KB_PREFER_LOCAL") == "1"
 PREFER_FS = os.environ.get("KB_PREFER_FS") == "1"

@@ -19,12 +19,14 @@ Usage:
     stats-to-kb.py --backfill 7                     # last 7 days, all repos
     stats-to-kb.py --backfill 7 --repo FR-YAC       # last 7 days, one repo
 
-Env vars (mirror add-to-kb.py):
+Env vars:
     KB_LOCAL_BASE_URL    default https://localhost:8443
     KB_LOCAL_KEY_FILE    default ~/.wip-deploy/wip-dev-local/secrets/api-key
     KB_REMOTE_BASE_URL   default https://wip-kb.local
     KB_REMOTE_KEY_FILE   default ~/.wip-deploy/wip-kb/secrets/api-key
+                         (falls back to bundle-wide KB_API_KEY_FILE — CASE-444)
     KB_NAMESPACE         default kb
+    KB_DEV_ROOT          default ~/Development (repo roots for REPOS)
 """
 import argparse
 import json
@@ -39,16 +41,24 @@ from datetime import date, timedelta
 from pathlib import Path
 
 
-# Canonical repo name → filesystem path. Names use the same canonical form as
-# kb_write_core.APP_ALIASES where they overlap (e.g. "KB" not "wip-kb") so
-# joins between GIT_STATS_SNAPSHOT.repo and CASE_RECORD.data.app work.
+from kb_write_core import (
+    CANONICAL_BASE_URL,
+    DEV_ROOT,
+    LOCAL_BASE_URL,
+    resolve_key_file,
+)
+
+# Canonical repo name → filesystem path (under DEV_ROOT, env: KB_DEV_ROOT).
+# Names use the same canonical form as kb_write_core.APP_ALIASES where they
+# overlap (e.g. "KB" not "wip-kb") so joins between GIT_STATS_SNAPSHOT.repo
+# and CASE_RECORD.data.app work.
 REPOS: dict[str, Path] = {
-    "World-in-a-Pie": Path("/Users/peter/Development/World-in-a-Pie"),
-    "FR-YAC":         Path("/Users/peter/Development/FR-YAC"),
-    "KB":             Path("/Users/peter/Development/WIP-KB"),
-    "ClinTrial":      Path("/Users/peter/Development/WIP-ClinTrial"),
-    "DnD":            Path("/Users/peter/Development/WIP-DnD"),
-    "AuthorAssist":   Path("/Users/peter/Development/WIP-AA"),
+    "World-in-a-Pie": DEV_ROOT / "World-in-a-Pie",
+    "FR-YAC":         DEV_ROOT / "FR-YAC",
+    "KB":             DEV_ROOT / "WIP-KB",
+    "ClinTrial":      DEV_ROOT / "WIP-ClinTrial",
+    "DnD":            DEV_ROOT / "WIP-DnD",
+    "AuthorAssist":   DEV_ROOT / "WIP-AA",
 }
 
 
@@ -62,21 +72,21 @@ class Target:
     key_file: Path
 
 
+_LOCAL_URL = os.environ.get("KB_LOCAL_BASE_URL", LOCAL_BASE_URL).rstrip("/")
 LOCAL_TARGET = Target(
     name="local",
-    base_url=os.environ.get("KB_LOCAL_BASE_URL", "https://localhost:8443").rstrip("/"),
-    key_file=Path(os.environ.get(
-        "KB_LOCAL_KEY_FILE",
-        "/Users/peter/.wip-deploy/wip-dev-local/secrets/api-key",
-    )),
+    base_url=_LOCAL_URL,
+    key_file=resolve_key_file(_LOCAL_URL, LOCAL_BASE_URL, "wip-dev-local",
+                              "KB_LOCAL_KEY_FILE"),
 )
+_REMOTE_URL = os.environ.get("KB_REMOTE_BASE_URL", CANONICAL_BASE_URL).rstrip("/")
 REMOTE_TARGET = Target(
     name="remote",
-    base_url=os.environ.get("KB_REMOTE_BASE_URL", "https://wip-kb.local").rstrip("/"),
-    key_file=Path(os.environ.get(
-        "KB_REMOTE_KEY_FILE",
-        "/Users/peter/.wip-deploy/wip-kb/secrets/api-key",
-    )),
+    base_url=_REMOTE_URL,
+    # Script-specific KB_REMOTE_KEY_FILE wins over the bundle-wide
+    # KB_API_KEY_FILE (specific-over-generic, CASE-444).
+    key_file=resolve_key_file(_REMOTE_URL, CANONICAL_BASE_URL, "wip-kb",
+                              "KB_REMOTE_KEY_FILE", "KB_API_KEY_FILE"),
 )
 TARGETS: list[Target] = [LOCAL_TARGET, REMOTE_TARGET]
 

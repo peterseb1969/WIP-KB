@@ -20,9 +20,9 @@ CLI:
         [--severity annoying] [--component registry] [--filed-by SID] [--app KB]
     -> prints "CASE-<n> <document_id>"
 
-Env: KB_BASE_URL (default https://wip-kb.local), KB_KEY_FILE
-     (default ~/.wip-deploy/wip-kb/secrets/api-key), KB_NAMESPACE (kb),
-     KB_VERIFY_TLS (false).
+Env: KB_BASE_URL (default https://wip-kb.local), KB_API_KEY_FILE (KB_KEY_FILE
+     is a deprecated alias; default ~/.wip-deploy/wip-kb/secrets/api-key —
+     CASE-444), KB_NAMESPACE (kb), KB_VERIFY_TLS (false).
 """
 from __future__ import annotations
 
@@ -41,8 +41,11 @@ except ImportError:  # handshake module not alongside — no-op
     def verify_from_env(api_key: str = "") -> None:  # type: ignore[misc]
         return None
 
-BASE = os.environ.get("KB_BASE_URL", "https://wip-kb.local")
-KEY = Path(os.environ.get("KB_KEY_FILE", str(Path.home() / ".wip-deploy/wip-kb/secrets/api-key"))).expanduser()
+from kb_write_core import CANONICAL_BASE_URL, resolve_key_file
+
+BASE = os.environ.get("KB_BASE_URL", CANONICAL_BASE_URL)
+KEY = resolve_key_file(BASE, CANONICAL_BASE_URL, "wip-kb",
+                       "KB_API_KEY_FILE", "KB_KEY_FILE")
 NS = os.environ.get("KB_NAMESPACE", "kb")
 VERIFY_TLS = os.environ.get("KB_VERIFY_TLS", "false").lower() == "true"
 MAX_RETRIES = 100

@@ -11,10 +11,12 @@ Usage:
     python3 tools/kb-bulk-mirror.py --edges           # derive REFERENCES (related: + body) + SUPERSEDES
     python3 tools/kb-bulk-mirror.py --check           # report drift between flats and KB (no writes)
 
-Env-var overrides (default targets wip-kb cluster):
-    KB_BASE_URL    https://localhost:8443       (default; or https://wip-kb.local)
-    KB_KEY_FILE    /Users/peter/.wip-deploy/wip-dev-local/secrets/api-key  (default)
-    KB_NAMESPACE   kb
+Env-var overrides (default targets the canonical wip-kb.local instance):
+    KB_BASE_URL      https://wip-kb.local (default; CASE-444 aligned — was
+                     localhost:8443 while the cluster lagged the schema)
+    KB_API_KEY_FILE  ~/.wip-deploy/wip-kb/secrets/api-key (default;
+                     KB_KEY_FILE is a deprecated alias — CASE-444)
+    KB_NAMESPACE     kb
 
 Post-CASE-318 contract:
     CASE_RECORD declares identity_fields=["case_number"] (data.case_number).
@@ -43,14 +45,17 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-REPO = Path("/Users/peter/Development/FR-YAC")
-# Default targets the localhost dev kb because it tracks the latest schema
-# (post-CASE-318: data.case_number). The wip-kb.local cluster lags until
-# APP-KB-YAC redeploys with the patched templates; until then writes there
-# fail with "Unknown field 'case_number' is not declared in the template".
-# Env-var override switches to cluster (or any other kb instance) on demand.
-KEY_FILE = Path(os.environ.get("KB_KEY_FILE", "/Users/peter/.wip-deploy/wip-dev-local/secrets/api-key"))
-BASE_URL = os.environ.get("KB_BASE_URL", "https://localhost:8443")
+# Default targets the canonical wip-kb.local instance (single canonical since
+# 2026-06-01; the old localhost default predated the cluster running the
+# current schema — CASE-444 aligned it with the rest of the bundle).
+# Env-var override switches to any other kb instance on demand, but then
+# KB_API_KEY_FILE must name that instance's key (pairing guard, CASE-444).
+from kb_write_core import CANONICAL_BASE_URL, DEV_ROOT, resolve_key_file
+
+REPO = DEV_ROOT / "FR-YAC"  # flat-file corpus root (CASE-444: no /Users/<user> literals)
+BASE_URL = os.environ.get("KB_BASE_URL", CANONICAL_BASE_URL)
+KEY_FILE = resolve_key_file(BASE_URL, CANONICAL_BASE_URL, "wip-kb",
+                            "KB_API_KEY_FILE", "KB_KEY_FILE")
 BATCH_SIZE = 50
 
 # Constants + pure helpers + doc builders live in kb_write_core
