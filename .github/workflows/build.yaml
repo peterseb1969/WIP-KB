@@ -1,0 +1,45 @@
+name: Build & Push Image (x86)
+
+# Manually triggered: Actions tab -> Run workflow. Builds the production
+# image natively on amd64 and pushes it to GHCR as
+# ghcr.io/<owner>/wip-kb:<tag>. Empty tag input falls back to sha-<short>.
+# VITE_BASE_PATH must match the platform manifest's APP_BASE_PATH
+# (apps/wip-kb/wip-app.yaml in World-in-a-Pie).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (e.g. 1.0.0). Leave empty for sha-<short-commit>.'
+        required: false
+        default: ''
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="sha-$(git rev-parse --short HEAD)"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building with tag: $TAG"
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push
+        run: |
+          IMG="ghcr.io/${{ github.repository_owner }}/wip-kb:${{ steps.tag.outputs.tag }}"
+          docker build --build-arg VITE_BASE_PATH=/apps/kb/ -t "$IMG" .
+          docker push "$IMG"
