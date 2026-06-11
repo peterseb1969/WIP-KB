@@ -1,10 +1,13 @@
 name: Build & Push Image (x86)
 
 # Manually triggered: Actions tab -> Run workflow. Builds the production
-# image natively on amd64 and pushes it to GHCR as
-# ghcr.io/<owner>/wip-kb:<tag>. Empty tag input falls back to sha-<short>.
-# VITE_BASE_PATH must match the platform manifest's APP_BASE_PATH
-# (apps/wip-kb/wip-app.yaml in World-in-a-Pie).
+# image and pushes it to GHCR as ghcr.io/<owner>/wip-kb:<tag>. Empty tag
+# input falls back to sha-<short>. VITE_BASE_PATH must match the platform
+# manifest's APP_BASE_PATH (apps/wip-kb/wip-app.yaml in World-in-a-Pie).
+#
+# Platforms: default native amd64. Set the platforms input to e.g.
+# "linux/amd64,linux/arm64" for a multi-arch manifest via buildx + QEMU
+# (emulated arm64 npm ci/build is slow).
 
 on:
   workflow_dispatch:
@@ -13,6 +16,10 @@ on:
         description: 'Image tag (e.g. 1.0.0). Leave empty for sha-<short-commit>.'
         required: false
         default: ''
+      platforms:
+        description: 'Comma-separated platforms. Default native amd64; e.g. linux/amd64,linux/arm64 for multi-arch (QEMU, slow).'
+        required: false
+        default: 'linux/amd64'
 
 jobs:
   build-and-push:
@@ -33,6 +40,13 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Building with tag: $TAG"
 
+      - name: Set up QEMU (multi-arch only)
+        if: inputs.platforms != 'linux/amd64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
@@ -40,6 +54,8 @@ jobs:
 
       - name: Build and push
         run: |
-          IMG="ghcr.io/${{ github.repository_owner }}/wip-kb:${{ steps.tag.outputs.tag }}"
-          docker build --build-arg VITE_BASE_PATH=/apps/kb/ -t "$IMG" .
-          docker push "$IMG"
+          docker buildx build \
+            --platform "${{ inputs.platforms }}" \
+            --build-arg VITE_BASE_PATH=/apps/kb/ \
+            -t "ghcr.io/${{ github.repository_owner }}/wip-kb:${{ steps.tag.outputs.tag }}" \
+            --push .
