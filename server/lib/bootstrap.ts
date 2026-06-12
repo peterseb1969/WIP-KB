@@ -32,7 +32,11 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SEED_DIR = join(__dirname, '..', 'seed')
 
-const NAMESPACE = 'kb'
+// Production namespace is 'kb' (BootstrapGate offer-on-empty contract). The
+// env override exists ONLY for test harnesses that bootstrap a throwaway
+// namespace through the same code path (CASE-464 gateway lifecycle tests) —
+// never set in any deployed environment.
+const NAMESPACE = process.env.KB_BOOTSTRAP_NAMESPACE || 'kb'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObj = Record<string, any>

@@ -9,6 +9,7 @@ import { initAgent, ask } from './agent.js'
 import { initAuth, requireAuth, handleCallback, handleLogout } from './auth.js'
 import bootstrapRoutes from './bootstrap.routes.js'
 import kbClientRoutes from './kb-client.routes.js'
+import kbGatewayRoutes from './kb-gateway.routes.js'
 
 const PORT = parseInt(process.env.PORT || '3012')
 
@@ -50,6 +51,13 @@ router.get('/auth/logout', handleLogout)
 // BEFORE requireAuth() — headless clients fetch with an API key, not a browser
 // session, so this must not be session-gated. Non-secret distributable code.
 router.use('/server-api/kb-client', kbClientRoutes)
+
+// KB write-gateway (CASE-464 Phase 1): domain case verbs. Mounted BEFORE
+// requireAuth() for the same headless reason — but NOT unauthenticated: every
+// verb requires X-API-Key and executes its WIP calls with the caller's key
+// (un-privileged pass-through; a bad key fails at the platform). Own JSON
+// parser — the global express.json() is deliberately after the /wip proxy.
+router.use('/server-api/kb', express.json({ limit: '2mb' }), kbGatewayRoutes)
 
 // Auth middleware (no-op when OIDC_ISSUER is not set)
 router.use(requireAuth())
