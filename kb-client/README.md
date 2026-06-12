@@ -1,5 +1,15 @@
 # kb-client — the KB write/ingest client
 
+> **CASE-464 Phase 4 (Roll A): case writes have moved to the KB write-gateway.**
+> Filing: `POST {BASE_PATH}/server-api/kb/cases` · transitions:
+> `POST {BASE_PATH}/server-api/kb/cases/<n>/(respond|comment|close|implement)`
+> (X-API-Key; append semantics + server-side status machine — see the served
+> `case-workflow.md`). The loaders below REFUSE case files with that pointer.
+> Sessions/journeys/documents/stats still mirror via the loaders until Roll B.
+> Reads: `case-fetch.py` works; the gateway read API
+> (`GET /server-api/kb/cases[…]`, `/sessions`, `/journeys/<day>`) is the
+> forward path.
+
 The loaders that ingest cases / journals / sessions / stats into a KB instance's
 `kb` namespace. **Owned by APP-KB-YAC** and **served from the running KB instance**
 (downloadable from the app, versioned with the server) — see CASE-437 and

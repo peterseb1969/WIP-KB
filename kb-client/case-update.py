@@ -429,6 +429,13 @@ def update_journey(day_num: float, new_body: str) -> int:
 
 
 def main() -> None:
+    # CASE-464 Phase 4 (Roll A): this verb moved to the KB write-gateway.
+    app_url = os.environ.get("KB_APP_URL", "https://wip-kb.local")
+    base_path = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")
+    raise SystemExit(
+        "[kb-client] case state push (respond/comment/close/implement) has MOVED to the KB write-gateway (CASE-464):\n"
+        f"  POST " + app_url + base_path + "/server-api/kb/cases/<n>/(respond|comment|close|implement)  (author, text)\n"
+        "  (X-API-Key header; see the served case-workflow.md for the exact calls)")
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,

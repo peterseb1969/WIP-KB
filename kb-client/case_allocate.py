@@ -133,6 +133,13 @@ def allocate_and_create(data: dict, template_id: str | None = None) -> tuple[int
 
 
 def main() -> int:
+    # CASE-464 Phase 4 (Roll A): this verb moved to the KB write-gateway.
+    app_url = os.environ.get("KB_APP_URL", "https://wip-kb.local")
+    base_path = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")
+    raise SystemExit(
+        "[kb-client] case filing has MOVED to the KB write-gateway (CASE-464):\n"
+        f"  POST " + app_url + base_path + "/server-api/kb/cases  (title, filed_by, type, severity, component, body, related)\n"
+        "  (X-API-Key header; see the served case-workflow.md for the exact calls)")
     ap = argparse.ArgumentParser(description="kb-only case-number allocator (CASE-425/437)")
     ap.add_argument("--title", required=True)
     ap.add_argument("--body-file")

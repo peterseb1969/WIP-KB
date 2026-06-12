@@ -398,11 +398,17 @@ def cmd_nodes(_args):
 
     verify_from_env()  # no-skew handshake (skips unless KB_APP_URL is set)
     total_ok = total_fail = 0
-    # CASE_RECORD: v2 — resolve CASE-<n> and PATCH in place, else create.
+    # CASE-464 Phase 4 (Roll A): bulk case writes retired — a wholesale
+    # re-mirror would clobber gateway-side appends (the CASE-462 class).
+    # Journeys/documents continue below until Roll B.
     if cases:
-        ok, fail = post_cases_v2(cases)
-        total_ok += ok
-        total_fail += fail
+        app_url = os.environ.get("KB_APP_URL", "https://wip-kb.local")
+        base_path = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")
+        raise SystemExit(
+            f"[kb-client] bulk CASE mirroring has been RETIRED (CASE-464): cases are "
+            f"written via the KB write-gateway verbs at "
+            f"{app_url}{base_path}/server-api/kb/cases[…]. Re-run with the case "
+            "flat files moved aside to mirror journeys/documents only.")
     # journeys + documents keep create-upsert (title/path identity unchanged in v2).
     for i, batch in enumerate(chunked(other, BATCH_SIZE), 1):
         ok, fail = post_bulk_documents(batch, f"nodes batch {i}")

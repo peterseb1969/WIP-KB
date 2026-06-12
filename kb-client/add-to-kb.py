@@ -647,6 +647,21 @@ def main():
         print(f"ERROR: template {template_id} not yet supported by add-to-kb", file=sys.stderr)
         sys.exit(1)
 
+    # CASE-464 Phase 4 (Roll A): case writes moved to the KB write-gateway.
+    # This loader REFUSES case files rather than silently coexisting with the
+    # verbs (gate-and-flip, no dual write paths). Sessions/journeys/documents
+    # still mirror here until Roll B.
+    if template_id == TPL_CASE:
+        app_url = os.environ.get("KB_APP_URL", "https://wip-kb.local")
+        base_path = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")
+        raise SystemExit(
+            "[kb-client] case writes have MOVED to the KB write-gateway (CASE-464):\n"
+            f"  file:        POST {app_url}{base_path}/server-api/kb/cases\n"
+            f"  transitions: POST {app_url}{base_path}/server-api/kb/cases/<n>/(respond|comment|close|implement)\n"
+            "  (X-API-Key header; see the served case-workflow.md for the exact calls)\n"
+            "This loader no longer writes CASE_RECORDs — re-mirroring a flat file "
+            "would clobber gateway-side appends (the CASE-462 class).")
+
     if args.check:
         # Build only when --check needs `doc`; the write path rebuilds per-target
         # inside the dual-write loop, where per-target failures are tolerated.
