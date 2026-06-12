@@ -275,4 +275,211 @@ router.post('/cases/:n/:verb', async (req, res) => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// Phase 2 (CASE-464): session / journey / stats mirror verbs. All three are
+// create-upserts on templates that KEEP their identity_fields (Mixed model,
+// C7) — the platform's identity hash is the dedup; re-mirrors converge.
+
+// naive ISO — WIP's datetime validator rejects any UTC offset (CASE-389)
+function normalizeIsoDt(s: string): string {
+  const t = (s || '').trim()
+  if (!t) return t
+  const m = /^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?)(?:[Zz]|[+-]\d{2}:?\d{2})?$/.exec(t)
+  return m && m[1] ? m[1].replace(' ', 'T') : t
+}
+
+function parseFrontmatter(text: string): Record<string, string> {
+  const m = /^---\n([\s\S]*?)\n---/.exec(text)
+  const fm: Record<string, string> = {}
+  if (!m || !m[1]) return fm
+  for (const line of m[1].split('\n')) {
+    const i = line.indexOf(':')
+    if (i < 1 || line.trimStart().startsWith('#')) continue
+    fm[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+  }
+  return fm
+}
+
+const EDITOR_BACKUP_RE = /(~|\.bak|\.swp|\.orig)$/
+
+// POST /sessions/mirror — { session_id, files: {name: content} }
+// Body composition (session.md first, siblings alphabetical, "## <name>"
+// headers) is a domain convention, so it lives HERE, not in callers.
+router.post('/sessions/mirror', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const b: AnyObj = req.body || {}
+  const sessionId = String(b.session_id || '')
+  const files: Record<string, string> = b.files || {}
+  if (!sessionId || typeof files['session.md'] !== 'string') {
+    res.status(422).json({ error: 'session_id and files["session.md"] are required' })
+    return
+  }
+  try {
+    const fm = parseFrontmatter(files['session.md'])
+    let role = fm.role || ''
+    if (!role) role = /^([A-Z][A-Z-]+?)-\d{8}/.exec(sessionId)?.[1] || ''
+    let startedAt = fm.started_at || ''
+    if (!startedAt) {
+      const m = /(\d{8})-(\d{4,6})$/.exec(sessionId)
+      if (m && m[1] && m[2]) {
+        const d = m[1], t = m[2].padEnd(6, '0')
+        startedAt = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}T${t.slice(0, 2)}:${t.slice(2, 4)}:${t.slice(4, 6)}`
+      }
+    }
+    const names = Object.keys(files).filter((n) => n.endsWith('.md') && !EDITOR_BACKUP_RE.test(n)).sort()
+    const ordered = ['session.md', ...names.filter((n) => n !== 'session.md')]
+    const body = ordered.map((n) => `## ${n}\n\n${files[n]}`).join('\n\n')
+
+    const data: AnyObj = {
+      session_id: sessionId, role,
+      started_at: normalizeIsoDt(startedAt),
+      status: fm.status || 'active',
+      body,
+    }
+    if (fm.continues_from) data.continues_from = fm.continues_from.trim()
+    if (fm.ended_at) data.ended_at = normalizeIsoDt(fm.ended_at)
+
+    const tid = await templateId('SESSION', ns, key)
+    const d = await wipReq('POST', '/api/document-store/documents', key, [{
+      template_id: tid, namespace: ns, created_by: 'kb-gateway',
+      data,
+      metadata: { flat_file_mirror: `reports/${sessionId}/session.md`, loader: 'kb-gateway' },
+    }])
+    const r = (d.results || [])[0] || {}
+    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status)) { // skipped = identical re-mirror, a success for upserts
+      res.status(502).json({ error: `session mirror failed: ${r.error || JSON.stringify(r)}` })
+      return
+    }
+    // CONTINUES_FROM edge (CASE-389 §D): this session -> the prior one.
+    // Prior not mirrored yet -> skipped; the next re-mirror converges.
+    let edge = 'none'
+    if (data.continues_from) {
+      const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key, {
+        template_id: 'SESSION',
+        filters: [{ field: 'data.session_id', operator: 'eq', value: data.continues_from }],
+        page: 1, page_size: 1,
+      })
+      const prior = (q.items || [])[0]
+      if (prior) {
+        const cfTpl = await templateId('CONTINUES_FROM', ns, key)
+        const ed = await wipReq('POST', '/api/document-store/documents', key, [{
+          template_id: cfTpl, namespace: ns, created_by: 'kb-gateway',
+          data: { source_ref: r.document_id, target_ref: prior.document_id },
+          metadata: { edge_kind: 'CONTINUES_FROM', loader: 'kb-gateway' },
+        }])
+        const er = (ed.results || [])[0] || {}
+        edge = ['created', 'updated', 'skipped', 'unchanged'].includes(er.status) ? er.status : `error: ${er.error}`
+      } else {
+        edge = 'target-not-in-kb-skipped'
+      }
+    }
+    res.json({ session_id: sessionId, document_id: r.document_id, result: r.status, continues_from_edge: edge })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// POST /journeys/mirror — { filename, body } (filename carries day number,
+// per the WIP_Journey_DayN[.5|_Intermezzo].md convention — CASE-309)
+const DAY_ONE = Date.UTC(2026, 2, 14) // 2026-03-14
+router.post('/journeys/mirror', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const b: AnyObj = req.body || {}
+  const fname = String(b.filename || '')
+  const text = String(b.body || '')
+  let dayNum: number | null = null
+  let m = /^WIP_Journey_Day(\d+)_Intermezzo\.md$/.exec(fname)
+  if (m && m[1]) dayNum = parseFloat(m[1]) + 0.5
+  else {
+    m = /^WIP_Journey_Day(\d+(?:\.\d+)?)\.md$/.exec(fname)
+    if (m && m[1]) dayNum = parseFloat(m[1])
+  }
+  if (dayNum === null || !text) {
+    res.status(422).json({ error: 'filename (WIP_Journey_DayN….md) and body are required' })
+    return
+  }
+  try {
+    const titleNum = Number.isInteger(dayNum) ? String(dayNum) : String(dayNum)
+    let title = `Day ${titleNum}`
+    const tm = /^#[^\n]*?Day\s+\S+:\s*(.+)$/m.exec(text)
+    if (tm && tm[1]) title = `Day ${titleNum}: ${tm[1].trim()}`
+    // journey_date: **Date:** header (Month D[, ranges] YYYY) else DAY_ONE+N-1
+    let journeyDate = new Date(DAY_ONE + (Math.trunc(dayNum) - 1) * 86400000).toISOString().slice(0, 10)
+    const dm = /\*\*Date:\*\*[^\n]*?\b(January|February|March|April|May|June|July|August|September|October|November|December)\b\s+(\d{1,2})/.exec(text.slice(0, 1500))
+    const line = /\*\*Date:\*\*([^\n]+)/.exec(text.slice(0, 1500))?.[1] || ''
+    const year = /\b(20\d{2})\b/.exec(line)?.[1]
+    if (dm && dm[1] && dm[2] && year) {
+      const months = ['January','February','March','April','May','June','July','August','September','October','November','December']
+      const mo = String(months.indexOf(dm[1]) + 1).padStart(2, '0')
+      journeyDate = `${year}-${mo}-${dm[2].padStart(2, '0')}`
+    }
+    const tid = await templateId('JOURNEY_ENTRY', ns, key)
+    const d = await wipReq('POST', '/api/document-store/documents', key, [{
+      template_id: tid, namespace: ns, created_by: 'kb-gateway',
+      data: {
+        title, body: text, authored_by: String(b.authored_by || 'FRanC'),
+        doc_status: 'published', tags: ['journey-mirror', `day-${dayNum}`],
+        root: true, journey_date: journeyDate, day_number: dayNum,
+      },
+      metadata: { flat_file_mirror: `dayJournals/${fname}`, loader: 'kb-gateway' },
+    }])
+    const r = (d.results || [])[0] || {}
+    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status)) { // skipped = identical re-mirror, a success for upserts
+      res.status(502).json({ error: `journey mirror failed: ${r.error || JSON.stringify(r)}` })
+      return
+    }
+    res.json({ title, document_id: r.document_id, result: r.status })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// POST /stats/snapshot — computed git stats from the machine that has the
+// repos; title/tags/shape composed server-side (the roster class, CASE-453)
+router.post('/stats/snapshot', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const b: AnyObj = req.body || {}
+  const repo = String(b.repo || '')
+  const date = String(b.snapshot_date || '')
+  if (!repo || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    res.status(422).json({ error: 'repo and snapshot_date (YYYY-MM-DD) are required' })
+    return
+  }
+  const ints: AnyObj = {}
+  for (const f of ['commits', 'lines_added', 'lines_removed', 'files_changed', 'contributors']) {
+    const v = Number(b[f])
+    if (!Number.isInteger(v) || v < 0) {
+      res.status(422).json({ error: `${f} must be a non-negative integer` })
+      return
+    }
+    ints[f] = v
+  }
+  try {
+    const tid = await templateId('GIT_STATS_SNAPSHOT', ns, key)
+    const d = await wipReq('POST', '/api/document-store/documents', key, [{
+      template_id: tid, namespace: ns, created_by: 'kb-gateway',
+      data: {
+        title: `${repo} — ${date}`, authored_by: String(b.authored_by || 'FRanC'),
+        doc_status: 'published', tags: ['git-stats', `repo-${repo}`, `date-${date}`],
+        root: false, snapshot_date: date, repo, ...ints,
+      },
+      metadata: { loader: 'kb-gateway' },
+    }])
+    const r = (d.results || [])[0] || {}
+    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status)) { // skipped = identical re-mirror, a success for upserts
+      res.status(502).json({ error: `stats snapshot failed: ${r.error || JSON.stringify(r)}` })
+      return
+    }
+    res.json({ repo, snapshot_date: date, document_id: r.document_id, result: r.status })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
 export default router
