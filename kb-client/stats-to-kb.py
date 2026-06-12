@@ -59,6 +59,11 @@ REPOS: dict[str, Path] = {
     "ClinTrial":      DEV_ROOT / "WIP-ClinTrial",
     "DnD":            DEV_ROOT / "WIP-DnD",
     "AuthorAssist":   DEV_ROOT / "WIP-AA",
+    # CASE-453: the roster lagged the constellation — keep in step with
+    # APP_ALIASES canonical names when new apps spawn.
+    "Song":           DEV_ROOT / "WIP-Song",
+    "Validator":      DEV_ROOT / "WIP-VAL",
+    "ReactConsole":   DEV_ROOT / "WIP-ReactConsole",
 }
 
 

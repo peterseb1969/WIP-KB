@@ -23,6 +23,9 @@ server: it checks its `schema_version` against the instance manifest
 | `case_allocate.py` | Case-number allocator — allocate-then-create on the atomic synonym claim; replaces `case-helper.sh claim` (CASE-425/427). |
 | `stats-to-kb.py` | Git-stats snapshot loader. |
 | `kb_client_handshake.py` | No-skew schema handshake (`verify_from_env`) — refuses to write on client/instance `schema_version` mismatch. |
+| `kb-client.sh` | The runner (CASE-440): fetch/refresh the bundle on `bundle_digest` change, then run a script with `PYTHONPATH` set. Ships inside the bundle — relocated out of FR-YAC. |
+| `install.sh` | One-liner bootstrap (CASE-440): `curl -fsSk -H "X-API-Key: $KEY" {BASE_PATH}/server-api/kb-client/install \| sh` materializes the bundle to `~/.cache/wip-kb-client`. |
+| `case-workflow.md` | The cross-YAC case playbook, served with the client (single source: `docs/playbooks/case-workflow.md`, synced from the gene-pool master). |
 
 ## Status — v2 client (CASE-425 / 437)
 `schema_version: v2`. The v2 identity model is **Mixed** — only CASE_RECORD changes:

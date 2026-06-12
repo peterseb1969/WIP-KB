@@ -27,8 +27,11 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 # which are read at runtime by bootstrap.routes.ts and agent.ts.
 COPY server/ server/
 # Copy the served KB client bundle (CASE-437) — kb-client.routes.ts reads it at
-# runtime to serve GET /server-api/kb-client/{manifest,files/:name}.
+# runtime to serve GET /server-api/kb-client/{manifest,download,files/:name,install}.
 COPY kb-client/ kb-client/
+# The case playbook is served with the client (CASE-440) — single source under
+# docs/playbooks/, read at runtime by kb-client.routes.ts.
+COPY docs/playbooks/case-workflow.md docs/playbooks/case-workflow.md
 COPY tsconfig.json ./
 
 # Copy built frontend
