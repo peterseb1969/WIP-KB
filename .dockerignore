@@ -6,6 +6,9 @@ dist
 *.md
 tests
 docs
+# re-include the served case playbook (CASE-440: Dockerfile COPYs it for the
+# kb-client serving routes)
+!docs/playbooks/case-workflow.md
 papers
 yac-discussions
 tools
