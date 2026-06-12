@@ -1,14 +1,14 @@
 # kb-client — the KB write/ingest client
 
-> **CASE-464 Phase 4 (Roll A): case writes have moved to the KB write-gateway.**
-> Filing: `POST {BASE_PATH}/server-api/kb/cases` · transitions:
-> `POST {BASE_PATH}/server-api/kb/cases/<n>/(respond|comment|close|implement)`
-> (X-API-Key; append semantics + server-side status machine — see the served
-> `case-workflow.md`). The loaders below REFUSE case files with that pointer.
-> Sessions/journeys/documents/stats still mirror via the loaders until Roll B.
-> Reads: `case-fetch.py` works; the gateway read API
-> (`GET /server-api/kb/cases[…]`, `/sessions`, `/journeys/<day>`) is the
-> forward path.
+> **CASE-464 Phase 4 (Roll B): ALL writes have moved to the KB write-gateway.**
+> cases: `POST {BASE_PATH}/server-api/kb/cases` + `/cases/<n>/(respond|comment|close|implement)` ·
+> sessions: `POST /sessions/mirror` · journals: `POST /journeys/mirror` ·
+> papers: `POST /documents/mirror` · git stats: `POST /stats/snapshot`
+> (X-API-Key; see the served `case-workflow.md` + command playbooks).
+> The loaders below REFUSE writes with those pointers; the schema handshake is
+> deleted (a thin HTTP caller has nothing to skew). Still runnable:
+> `case-fetch.py` (reads; the gateway read API is the forward path) and
+> `stats-to-kb.py` (computes locally, posts the verb).
 
 The loaders that ingest cases / journals / sessions / stats into a KB instance's
 `kb` namespace. **Owned by APP-KB-YAC** and **served from the running KB instance**
@@ -17,10 +17,9 @@ The loaders that ingest cases / journals / sessions / stats into a KB instance's
 
 Any client of a KB instance fetches *this* client from *that* instance
 (`GET {BASE_PATH}/server-api/kb-client/download` — one-shot JSON bundle — or
-`/files/<name>` per file) and runs it. The client is version-matched to the
-server: it checks its `schema_version` against the instance manifest
-(`{BASE_PATH}/server-api/kb-client/manifest`) and refuses to write on mismatch
-(`kb_client_handshake.py`), so schema skew is impossible by construction.
+`/files/<name>` per file) and runs it, refreshing on `bundle_digest` change.
+Since Roll B the bundle has no write paths, so version-skew is moot for
+writes — the gateway verbs inherit the platform's real validation.
 
 ## Roster
 | File | Role |
@@ -32,7 +31,6 @@ server: it checks its `schema_version` against the instance manifest
 | `case-update.py` | kb-native case state push (`respond`) — PATCHes the case in place and sets `data.status` (CASE-396/425). |
 | `case_allocate.py` | Case-number allocator — allocate-then-create on the atomic synonym claim; replaces `case-helper.sh claim` (CASE-425/427). |
 | `stats-to-kb.py` | Git-stats snapshot loader. |
-| `kb_client_handshake.py` | No-skew schema handshake (`verify_from_env`) — refuses to write on client/instance `schema_version` mismatch. |
 | `kb-client.sh` | The runner (CASE-440): fetch/refresh the bundle on `bundle_digest` change, then run a script with `PYTHONPATH` set. Ships inside the bundle — relocated out of FR-YAC. |
 | `install.sh` | One-liner bootstrap (CASE-440): `curl -fsSk -H "X-API-Key: $KEY" {BASE_PATH}/server-api/kb-client/install \| sh` materializes the bundle to `~/.cache/wip-kb-client`. |
 | `case-workflow.md` | The cross-YAC case playbook, served with the client (single source: `docs/playbooks/case-workflow.md`, synced from the gene-pool master). |
@@ -52,11 +50,9 @@ server: it checks its `schema_version` against the instance manifest
   still upserts under v1).
 
 ## Versioning — two independent signals
-- **`schema_version`** (e.g. `v2`, hand-set) = the **identity-model / write-safety**
-  gate. The served loaders refuse to write on a schema mismatch
-  (`kb_client_handshake.py`), because a wrong identity model corrupts data (e.g. a
-  v1 create-upsert client against a v2 `identity_fields:[]` template duplicates
-  cases). **Bumps only on identity-model changes.**
+- **`schema_version`** — RETIRED as a write gate (CASE-464 Roll B: no write
+  paths remain in the bundle). Kept as an informational field describing the
+  instance's identity model.
 - **`bundle_digest`** (auto) = the **code/currency** signal — a sha256 the
   `/manifest` endpoint computes over the served files at request time. **A fetcher
   re-fetches when it changes.** `files[]` and `bundle_digest` are *derived from the
@@ -84,6 +80,6 @@ Env:
   same pairing guard.
 - `KB_NAMESPACE` (default `kb`), `KB_VERIFY_TLS` (default `false`),
   `KB_DEV_ROOT` (default `~/Development` — flat-file repo roots).
-- `KB_APP_URL` / `KB_APP_BASE_PATH` — the KB app endpoint serving the manifest, for
-  the handshake (distinct from the WIP backend `KB_BASE_URL`). Unset → handshake
-  skipped (warn-and-continue if unreachable).
+- `KB_APP_URL` / `KB_APP_BASE_PATH` — the KB app endpoint (gateway verbs +
+  served bundle), distinct from the WIP backend `KB_BASE_URL`. Default
+  `https://wip-kb.local` + `/apps/kb`.

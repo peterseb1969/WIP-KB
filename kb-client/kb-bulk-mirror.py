@@ -396,19 +396,16 @@ def cmd_nodes(_args):
     if not (cases or other):
         return
 
-    verify_from_env()  # no-skew handshake (skips unless KB_APP_URL is set)
+    # CASE-464 Phase 4 (Roll B): ALL bulk writes retired — every template has a
+    # gateway verb; a wholesale re-mirror would clobber gateway-side state.
+    app_url = os.environ.get("KB_APP_URL", "https://wip-kb.local")
+    base_path = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")
+    raise SystemExit(
+        f"[kb-client] bulk kb mirroring has been RETIRED (CASE-464): writes go "
+        f"through the KB write-gateway verbs at {app_url}{base_path}/server-api/kb/"
+        "(cases|sessions/mirror|journeys/mirror|documents/mirror|stats/snapshot). "
+        "--dry-run and --check remain available for corpus analysis.")
     total_ok = total_fail = 0
-    # CASE-464 Phase 4 (Roll A): bulk case writes retired — a wholesale
-    # re-mirror would clobber gateway-side appends (the CASE-462 class).
-    # Journeys/documents continue below until Roll B.
-    if cases:
-        app_url = os.environ.get("KB_APP_URL", "https://wip-kb.local")
-        base_path = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")
-        raise SystemExit(
-            f"[kb-client] bulk CASE mirroring has been RETIRED (CASE-464): cases are "
-            f"written via the KB write-gateway verbs at "
-            f"{app_url}{base_path}/server-api/kb/cases[…]. Re-run with the case "
-            "flat files moved aside to mirror journeys/documents only.")
     # journeys + documents keep create-upsert (title/path identity unchanged in v2).
     for i, batch in enumerate(chunked(other, BATCH_SIZE), 1):
         ok, fail = post_bulk_documents(batch, f"nodes batch {i}")
@@ -422,6 +419,11 @@ def cmd_nodes(_args):
 
 
 def cmd_edges(_args):
+    # CASE-464 Phase 4 (Roll B): edge writes retired — the gateway derives
+    # edges at write time (REFERENCES on case file, CONTINUES_FROM on session
+    # mirror). Bulk edge backfill is an operator action via the platform API.
+    raise SystemExit("[kb-client] bulk edge derivation has been RETIRED (CASE-464): "
+                     "the KB write-gateway derives edges at write time.")
     active = fetch_all_active_documents()
     case_to_doc_ids = case_number_to_doc_ids(active)
     doc_path_to_doc_id = document_path_to_doc_id(active)

@@ -19,13 +19,11 @@ Usage:
     stats-to-kb.py --backfill 7                     # last 7 days, all repos
     stats-to-kb.py --backfill 7 --repo FR-YAC       # last 7 days, one repo
 
-Env vars:
-    KB_LOCAL_BASE_URL    default https://localhost:8443
-    KB_LOCAL_KEY_FILE    default ~/.wip-deploy/wip-dev-local/secrets/api-key
-    KB_REMOTE_BASE_URL   default https://wip-kb.local
-    KB_REMOTE_KEY_FILE   default ~/.wip-deploy/wip-kb/secrets/api-key
-                         (falls back to bundle-wide KB_API_KEY_FILE — CASE-444)
-    KB_NAMESPACE         default kb
+Env vars (CASE-464 Roll B — writes go through the KB write-gateway):
+    KB_APP_URL           default https://wip-kb.local (the KB app)
+    KB_APP_BASE_PATH     default /apps/kb
+    KB_API_KEY_FILE      default ~/.wip-deploy/wip-kb/secrets/api-key
+                         (KB_KEY_FILE accepted as deprecated alias — CASE-444)
     KB_DEV_ROOT          default ~/Development (repo roots for REPOS)
 """
 import argparse
@@ -41,12 +39,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 
-from kb_write_core import (
-    CANONICAL_BASE_URL,
-    DEV_ROOT,
-    LOCAL_BASE_URL,
-    resolve_key_file,
-)
+from kb_write_core import DEV_ROOT, resolve_key_file
 
 # Canonical repo name → filesystem path (under DEV_ROOT, env: KB_DEV_ROOT).
 # Names use the same canonical form as kb_write_core.APP_ALIASES where they
@@ -67,41 +60,18 @@ REPOS: dict[str, Path] = {
 }
 
 
-NAMESPACE = os.environ.get("KB_NAMESPACE", "kb")
-
-
-@dataclass
-class Target:
-    name: str
-    base_url: str
-    key_file: Path
-
-
-_LOCAL_URL = os.environ.get("KB_LOCAL_BASE_URL", LOCAL_BASE_URL).rstrip("/")
-LOCAL_TARGET = Target(
-    name="local",
-    base_url=_LOCAL_URL,
-    key_file=resolve_key_file(_LOCAL_URL, LOCAL_BASE_URL, "wip-dev-local",
-                              "KB_LOCAL_KEY_FILE"),
-)
-_REMOTE_URL = os.environ.get("KB_REMOTE_BASE_URL", CANONICAL_BASE_URL).rstrip("/")
-REMOTE_TARGET = Target(
-    name="remote",
-    base_url=_REMOTE_URL,
-    # Script-specific KB_REMOTE_KEY_FILE wins over the bundle-wide
-    # KB_API_KEY_FILE (specific-over-generic, CASE-444).
-    key_file=resolve_key_file(_REMOTE_URL, CANONICAL_BASE_URL, "wip-kb",
-                              "KB_REMOTE_KEY_FILE", "KB_API_KEY_FILE"),
-)
-TARGETS: list[Target] = [LOCAL_TARGET, REMOTE_TARGET]
-
+# CASE-464 Phase 4 (Roll B): computation stays here (git lives on this
+# machine); the WRITE goes through the KB write-gateway verb. The gateway
+# composes title/tags/shape server-side (the CASE-453 roster class).
+GW_APP_URL = os.environ.get("KB_APP_URL", "https://wip-kb.local")
+GW_BASE_PATH = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")
+GW_KEY_FILE = resolve_key_file(GW_APP_URL, "https://wip-kb.local", "wip-kb",
+                               "KB_API_KEY_FILE", "KB_KEY_FILE")
 
 ssl_ctx = ssl.create_default_context()
 ssl_ctx.check_hostname = False
 ssl_ctx.verify_mode = ssl.CERT_NONE
 
-
-# ---------------------------------------------------------------- git plumbing
 
 @dataclass
 class DayStats:
@@ -179,113 +149,39 @@ def gather_stats(repo_path: Path, snapshot_date: date) -> DayStats | None:
 
 # ------------------------------------------------------------------ http + kb
 
-def _http(method: str, target: Target, path: str, body: object | None = None) -> tuple[int, dict]:
-    data = json.dumps(body).encode() if body is not None else None
-    headers = {"X-API-Key": target.key_file.read_text().strip()}
-    if data is not None:
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(
-        f"{target.base_url}{path}", data=data, headers=headers, method=method,
-    )
-    try:
-        with urllib.request.urlopen(req, context=ssl_ctx, timeout=15) as resp:
-            return resp.status, json.loads(resp.read() or "{}")
-    except urllib.error.HTTPError as e:
-        try:
-            return e.code, json.loads(e.read() or "{}")
-        except Exception:
-            return e.code, {}
-
-
-# Per-target template UUID cache. Resolved on first need; reused for the run.
-_template_id_cache: dict[str, str] = {}
-
-
-def resolve_template_id(target: Target) -> str:
-    cache_key = f"{target.name}:GIT_STATS_SNAPSHOT"
-    if cache_key in _template_id_cache:
-        return _template_id_cache[cache_key]
-    status, body = _http(
-        "GET", target,
-        f"/api/template-store/templates/by-value/GIT_STATS_SNAPSHOT?namespace={NAMESPACE}",
-    )
-    if status != 200 or not body.get("template_id"):
-        raise RuntimeError(
-            f"cannot resolve GIT_STATS_SNAPSHOT template on {target.name} "
-            f"(HTTP {status}). Was the kb namespace seeded?"
-        )
-    _template_id_cache[cache_key] = body["template_id"]
-    return body["template_id"]
-
-
-def build_git_stats_doc(target: Target, repo_name: str, snapshot_date: date,
-                        stats: DayStats) -> dict:
-    return {
-        "template_id": resolve_template_id(target),
-        "namespace": NAMESPACE,
-        "created_by": "stats-to-kb.py",
-        "data": {
-            "title": f"{repo_name} — {snapshot_date.isoformat()}",
-            "authored_by": "FRanC",
-            "doc_status": "published",
-            "tags": ["git-stats", f"repo-{repo_name}", f"date-{snapshot_date.isoformat()}"],
-            "root": False,
-            "snapshot_date": snapshot_date.isoformat(),
-            "repo": repo_name,
-            "commits": stats.commits,
-            "lines_added": stats.lines_added,
-            "lines_removed": stats.lines_removed,
-            "files_changed": stats.files_changed,
-            "contributors": stats.contributors,
-        },
-        "metadata": {
-            "loader": "stats-to-kb.py",
-        },
-    }
-
-
-def post_doc(target: Target, doc: dict) -> str:
-    status, payload = _http("POST", target, "/api/document-store/documents", [doc])
-    if status >= 400:
-        raise RuntimeError(f"HTTP {status}: {str(payload)[:300]}")
-    results = payload.get("results") or (payload if isinstance(payload, list) else [])
-    if not results:
-        raise RuntimeError(f"empty results from POST to {target.name}")
-    r = results[0]
-    if r.get("error"):
-        raise RuntimeError(f"bulk POST item error from {target.name}: {r.get('error')}")
-    return r.get("status", "?")
-
-
 def write_snapshot(repo_name: str, repo_path: Path, snapshot_date: date) -> int:
-    """Compute + dual-write one (repo, date) snapshot. Return 0 if at least
-    one target succeeded; 1 if repo isn't git; 2 if both targets failed."""
+    """Compute one (repo, date) snapshot and POST it to the gateway verb.
+    Return 0 on success; 1 if repo isn't git; 2 on write failure."""
     stats = gather_stats(repo_path, snapshot_date)
     if stats is None:
         print(f"[skip] {repo_name}: not a git repo at {repo_path}", file=sys.stderr)
         return 1
-
-    successes: list[tuple[str, str]] = []
-    failures: list[tuple[str, str]] = []
-    for target in TARGETS:
-        try:
-            doc = build_git_stats_doc(target, repo_name, snapshot_date, stats)
-            result = post_doc(target, doc)
-            successes.append((target.name, result))
-        except RuntimeError as e:
-            failures.append((target.name, str(e)))
-            print(f"[{target.name}] FAILED: {e}", file=sys.stderr)
-
-    if successes:
-        verbs = " / ".join(f"{n}:{r}" for n, r in successes)
-        print(
-            f"[stats-to-kb] {repo_name} {snapshot_date.isoformat()}: "
-            f"commits={stats.commits} +{stats.lines_added}/-{stats.lines_removed} "
-            f"files={stats.files_changed} contrib={stats.contributors} → {verbs}",
-            file=sys.stderr,
-        )
-    if not successes:
+    payload = {
+        "repo": repo_name, "snapshot_date": snapshot_date.isoformat(),
+        "commits": stats.commits, "lines_added": stats.lines_added,
+        "lines_removed": stats.lines_removed, "files_changed": stats.files_changed,
+        "contributors": stats.contributors,
+    }
+    url = f"{GW_APP_URL}{GW_BASE_PATH}/server-api/kb/stats/snapshot"
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode(), method="POST",
+        headers={"Content-Type": "application/json",
+                 "X-API-Key": GW_KEY_FILE.read_text().strip()})
+    try:
+        resp = urllib.request.urlopen(req, context=ssl_ctx, timeout=20)
+        result = json.loads(resp.read()).get("result", "?")
+    except urllib.error.HTTPError as e:
+        print(f"[gateway] FAILED {e.code}: {e.read()[:200].decode(errors='replace')}", file=sys.stderr)
         return 2
+    except (urllib.error.URLError, OSError) as e:
+        print(f"[gateway] unreachable: {e}", file=sys.stderr)
+        return 2
+    print(
+        f"[stats-to-kb] {repo_name} {snapshot_date.isoformat()}: "
+        f"commits={stats.commits} +{stats.lines_added}/-{stats.lines_removed} "
+        f"files={stats.files_changed} contrib={stats.contributors} -> gateway:{result}",
+        file=sys.stderr,
+    )
     return 0
 
 

@@ -438,6 +438,56 @@ router.post('/journeys/mirror', async (req, res) => {
   }
 })
 
+// POST /documents/mirror — papers/docs (DOCUMENT, CASE-346). The caller
+// supplies what only it knows (repo origin, repo-relative path, kind); the
+// domain conventions (title fallback, frontmatter strip) live here.
+router.post('/documents/mirror', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const b: AnyObj = req.body || {}
+  const relPath = String(b.path || '')
+  const repoOrigin = String(b.repo_origin || '')
+  const kind = String(b.kind || '')
+  const text = String(b.body || '')
+  if (!relPath || !repoOrigin || !kind || !text) {
+    res.status(422).json({ error: 'path, repo_origin, kind and body are required' })
+    return
+  }
+  try {
+    const fm = parseFrontmatter(text)
+    let title = String(b.title || fm.title || '').trim()
+    if (!title) {
+      const h1 = /^#\s+(.+)$/m.exec(text)
+      title = h1 && h1[1] ? h1[1].trim() : relPath.split('/').pop()!.replace(/\.md$/, '')
+    }
+    const fmEnd = /^---\n[\s\S]*?\n---\s*\n?/.exec(text)
+    const body = fmEnd && text.slice(fmEnd[0].length).trim() ? text.slice(fmEnd[0].length) : text
+    const data: AnyObj = {
+      path: relPath, repo_origin: repoOrigin, title, body, kind,
+      doc_status: 'published',
+    }
+    if (b.authored_by || fm.authored_by) data.authored_by = String(b.authored_by || fm.authored_by)
+    const tags = Array.isArray(b.tags) ? b.tags.map(String)
+      : (fm.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean)
+    if (tags.length) data.tags = tags
+    const tid = await templateId('DOCUMENT', ns, key)
+    const d = await wipReq('POST', '/api/document-store/documents', key, [{
+      template_id: tid, namespace: ns, created_by: 'kb-gateway',
+      data,
+      metadata: { flat_file_mirror: relPath, kind, loader: 'kb-gateway' },
+    }])
+    const r = (d.results || [])[0] || {}
+    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status)) {
+      res.status(502).json({ error: `document mirror failed: ${r.error || JSON.stringify(r)}` })
+      return
+    }
+    res.json({ path: relPath, title, document_id: r.document_id, result: r.status })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
 // POST /stats/snapshot — computed git stats from the machine that has the
 // repos; title/tags/shape composed server-side (the roster class, CASE-453)
 router.post('/stats/snapshot', async (req, res) => {
