@@ -482,4 +482,124 @@ router.post('/stats/snapshot', async (req, res) => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// Phase 3 (CASE-464): read API — the surface /catch-up & friends re-source
+// from once FS reads retire (kb-only blocker 6). Thin projections over
+// documents/query; caller's key, page_size capped at the platform's 100.
+
+function pageParams(req: Request): { page: number; pageSize: number } {
+  const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1)
+  const pageSize = Math.min(100, Math.max(1, parseInt(String(req.query.page_size || '50'), 10) || 50))
+  return { page, pageSize }
+}
+
+function caseProjection(it: AnyObj): AnyObj {
+  const d = it.data || {}
+  return {
+    case: d.case_number, title: d.title, status: d.status,
+    severity: d.severity || '', type: d.type || '', component: d.component || '',
+    filed_by: d.filed_by || '', app: d.app || '', target_yac: d.target_yac || '',
+    document_id: it.document_id, doc_version: it.version, updated_at: it.updated_at,
+  }
+}
+
+// GET /cases?status=&since=&page=&page_size=  (since: ISO date, on updated_at)
+router.get('/cases', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const { page, pageSize } = pageParams(req)
+  const filters: AnyObj[] = []
+  if (req.query.status) filters.push({ field: 'data.status', operator: 'eq', value: String(req.query.status) })
+  if (req.query.since) filters.push({ field: 'updated_at', operator: 'gte', value: String(req.query.since) })
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'CASE_RECORD', filters, page, page_size: pageSize })
+    res.json({ total: d.total, page: d.page, pages: d.pages, items: (d.items || []).map(caseProjection) })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// GET /cases/:n — full case incl. body, resolved via the CASE-<n> synonym
+router.get('/cases/:n', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const n = parseInt(req.params.n, 10)
+  if (!Number.isFinite(n)) {
+    res.status(422).json({ error: 'case number must be an integer' })
+    return
+  }
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  try {
+    const docId = await resolveCase(n, ns, key)
+    if (!docId) {
+      res.status(404).json({ error: `CASE-${n} not found in ${ns}` })
+      return
+    }
+    const doc = await getDoc(docId, ns, key)
+    res.json({ ...caseProjection(doc), body: doc.data?.body || '' })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// GET /sessions?role=&status=&page=&page_size=[&include_body=1]
+router.get('/sessions', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const { page, pageSize } = pageParams(req)
+  const filters: AnyObj[] = []
+  if (req.query.role) filters.push({ field: 'data.role', operator: 'eq', value: String(req.query.role) })
+  if (req.query.status) filters.push({ field: 'data.status', operator: 'eq', value: String(req.query.status) })
+  const includeBody = req.query.include_body === '1'
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'SESSION', filters, page, page_size: pageSize })
+    const items = (d.items || []).map((it: AnyObj) => {
+      const s = it.data || {}
+      const out: AnyObj = {
+        session_id: s.session_id, role: s.role, status: s.status,
+        started_at: s.started_at, ended_at: s.ended_at || null,
+        continues_from: s.continues_from || null,
+        document_id: it.document_id, doc_version: it.version, updated_at: it.updated_at,
+      }
+      if (includeBody) out.body = s.body || ''
+      return out
+    })
+    res.json({ total: d.total, page: d.page, pages: d.pages, items })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// GET /journeys/:day — one journal entry by day number (fractional ok: 7.5)
+router.get('/journeys/:day', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const day = parseFloat(req.params.day)
+  if (!Number.isFinite(day)) {
+    res.status(422).json({ error: 'day must be a number (fractional allowed, e.g. 7.5)' })
+    return
+  }
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'JOURNEY_ENTRY', filters: [{ field: 'data.day_number', operator: 'eq', value: day }], page: 1, page_size: 2 })
+    const it = (d.items || [])[0]
+    if (!it) {
+      res.status(404).json({ error: `no journal entry for day ${day} in ${ns}` })
+      return
+    }
+    const j = it.data || {}
+    res.json({
+      title: j.title, day_number: j.day_number, journey_date: j.journey_date,
+      body: j.body || '', document_id: it.document_id, doc_version: it.version,
+    })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
 export default router
