@@ -293,6 +293,33 @@ def detect_document_meta(path: Path) -> tuple[str, str, str] | None:
 
 # -------------------------------------------------------------- doc builders
 
+def validate_case_flat_file(path: Path, fm: dict[str, str]) -> None:
+    """CASE-462 guard — refuse malformed or ambiguous case flat files.
+
+    Incident: a frontmatter-less comment fragment written to a stale-status
+    filename (CASE-462-open-… beside the real CASE-462-implemented-…) was
+    silently mirrored with 'unknown'/'' defaults, clobbering the complete kb
+    record in place. Under the v2 identity model (resolve-then-update) a bad
+    mirror PATCHes the real record — so malformed input must fail loud, never
+    default quietly.
+    """
+    if not fm or "case" not in fm:
+        raise SystemExit(
+            f"[kb-client] REFUSING to mirror {path.name}: no parseable "
+            "frontmatter / missing 'case:' key. A fragment like this once "
+            "clobbered a complete kb record (CASE-462) — merge the content "
+            "into the real CASE file and retry.")
+    m = re.match(r"CASE-(\d+)-", path.name)
+    if m:
+        sibs = sorted(p.name for p in path.parent.glob(f"CASE-{m.group(1)}-*.md"))
+        if len(sibs) > 1:
+            raise SystemExit(
+                f"[kb-client] REFUSING to mirror {path.name}: {len(sibs)} flat "
+                f"files match CASE-{m.group(1)} ({', '.join(sibs)}) — "
+                "stale-status duplicate (CASE-462 class). Merge/delete the "
+                "stale file and retry.")
+
+
 def build_case_doc(
     path: Path,
     text: str,
@@ -302,7 +329,9 @@ def build_case_doc(
     loader: str,
 ) -> dict:
     """Build a CASE_RECORD doc. Caller passes the resolved template_id and
-    a loader identifier (e.g. 'add-to-kb.py') for audit context."""
+    a loader identifier (e.g. 'add-to-kb.py') for audit context. Refuses
+    malformed/ambiguous flat files (CASE-462 guard)."""
+    validate_case_flat_file(path, fm)
     fname = path.name
     m = re.match(r"CASE-(\d+)-([a-z]+)-(.+)\.md", fname)
     case_num = int(m.group(1)) if m else 0

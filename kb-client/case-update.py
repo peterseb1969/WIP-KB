@@ -263,6 +263,47 @@ def _patch_doc(base_url: str, key_file: Path, document_id: str, data_patch: dict
     return r.get("status", "?")
 
 
+def _sync_fs_flat_file(case_num: int, new_body: str, new_status: str) -> None:
+    """Best-effort FS sync after a successful kb push (CASE-437 §3b / CASE-462).
+
+    While flat files persist, a kb-only transition leaves the FS record with a
+    stale status in BOTH frontmatter and filename — and a stale `-open-` name
+    invites the exact wrong-filename fragment that clobbered CASE-462. So:
+    rewrite the flat file with the pushed body and rename `-<old>-` → `-<new>-`.
+    Looks for `yac-discussions/` under the caller's cwd (the playbook runs from
+    the repo root, where it is the shared-store symlink). No dir / no match →
+    warn and skip (thin agents have no FS record); multiple matches → warn and
+    skip (CASE-462 ambiguity — never guess).
+    """
+    cases_dir = Path("yac-discussions")
+    if not cases_dir.is_dir():
+        print(f"[case-update] note: no yac-discussions/ here — FS record not synced "
+              f"(kb is canonical)", file=sys.stderr)
+        return
+    matches = sorted(cases_dir.glob(f"CASE-{case_num}-*.md"))
+    if not matches:
+        print(f"[case-update] note: no FS flat file for CASE-{case_num} — skipped",
+              file=sys.stderr)
+        return
+    if len(matches) > 1:
+        print(f"[case-update] WARN: {len(matches)} flat files match CASE-{case_num} "
+              f"({', '.join(p.name for p in matches)}) — FS sync skipped; merge the "
+              "duplicates (CASE-462 class)", file=sys.stderr)
+        return
+    src = matches[0]
+    m = re.match(rf"(CASE-{case_num})-([a-z]+)-(.+)\.md$", src.name)
+    dst = src if not m or m.group(2) == new_status else \
+        src.with_name(f"{m.group(1)}-{new_status}-{m.group(3)}.md")
+    tmp = src.with_name(src.name + ".tmp")
+    tmp.write_text(new_body if new_body.endswith("\n") else new_body + "\n")
+    tmp.replace(dst)
+    if dst != src:
+        src.unlink()
+        print(f"[case-update] FS synced: {src.name} → {dst.name}", file=sys.stderr)
+    else:
+        print(f"[case-update] FS synced: {dst.name} (body rewritten)", file=sys.stderr)
+
+
 def update_case(case_num: int, new_body: str, verb: str) -> int:
     """Pull → modify → push to the canonical target. Returns process exit code."""
     new_status = VERB_TO_STATUS[verb]
@@ -331,6 +372,9 @@ def update_case(case_num: int, new_body: str, verb: str) -> int:
             f"failed on [{', '.join(n for n, _ in failures)}]",
             file=sys.stderr,
         )
+    # FS follows kb (CASE-437 §3b): rewrite + rename the flat file so its
+    # status can't drift from the record just pushed (CASE-462 prevention).
+    _sync_fs_flat_file(case_num, new_body, new_status)
     return 0
 
 
