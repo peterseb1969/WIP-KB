@@ -66,7 +66,29 @@ DEV_ROOT = Path(os.environ.get("KB_DEV_ROOT", str(Path.home() / "Development")))
 # KB_KEY_FILE while the read scripts and the FR-YAC wrapper used
 # KB_API_KEY_FILE, and the fallback baked one machine's homedir + one
 # instance's key into served code.
-CANONICAL_BASE_URL = "https://wip-kb.local"
+# Single source of truth: the calling repo's .claude/kb.json (CASE-471). When the
+# env doesn't already pin the instance, inject kb_app_url + kb_api_key_file PAIRED
+# into the environment — so the `os.environ.get("KB_BASE_URL", …)` reads below and
+# resolve_key_file's `KB_API_KEY_FILE` lookup pick them up exactly like caller-set
+# values (CASE-444's url/key guard stays intact). Mirrors the kb-client.sh wrapper;
+# a hostname cutover is then one edit to kb.json. No-op when the wrapper already
+# exported these, or when run outside a repo with a kb.json.
+def _load_kbjson_into_env() -> None:
+    import json
+    try:
+        with open(".claude/kb.json", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:
+        return
+    if cfg.get("kb_app_url") and not os.environ.get("KB_BASE_URL"):
+        os.environ["KB_BASE_URL"] = cfg["kb_app_url"]
+    if cfg.get("kb_api_key_file") and not os.environ.get("KB_API_KEY_FILE"):
+        os.environ["KB_API_KEY_FILE"] = cfg["kb_api_key_file"]
+
+
+_load_kbjson_into_env()
+
+CANONICAL_BASE_URL = "https://kb.internal"  # last-resort fallback (was wip-kb.local; CASE-471)
 LOCAL_BASE_URL = "https://localhost:8443"
 
 
