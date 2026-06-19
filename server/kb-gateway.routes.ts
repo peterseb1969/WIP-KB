@@ -179,11 +179,17 @@ router.post('/cases', async (req, res) => {
       component: String(b.component || ''), filed_by: String(b.filed_by),
       app: String(b.app || ''),
     }
+    // Capture the filing timestamp into metadata.custom.filed_at — the durable,
+    // never-re-mirrored field the loaders set and the UI's "Filed" sort reads.
+    // Prefer the body frontmatter `filed:` (what the operator wrote); else stamp now.
+    const fm = parseFrontmatter(String(b.body || ''))
+    const filedAt = fm.filed && /^\d{4}-\d{2}-\d{2}/.test(fm.filed) ? fm.filed : nowStamp()
     let n = (await maxCaseNumber(ns, key)) + 1
     for (let i = 0; i < ALLOC_MAX_RETRIES; i++) {
       const d = await wipReq('POST', '/api/document-store/documents', key, [{
         template_id: tid, namespace: ns, created_by: 'kb-gateway',
         data: { ...data, case_number: n },
+        metadata: { custom: { filed_at: filedAt }, loader: 'kb-gateway' },
         synonyms: [{ value: `CASE-${n}` }],
       }])
       const r = (d.results || [])[0] || {}

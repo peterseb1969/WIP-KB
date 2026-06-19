@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react
 import { wipFetchJson } from '../lib/wipBulk'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
+import { CaseLabel } from '../components/CaseLabel'
 
 const NAMESPACE = 'kb'
 
@@ -71,11 +72,20 @@ function canonicalApp(raw: string | undefined): string | undefined {
 
 // "Filed" sort uses metadata.custom.filed_at — the case-frontmatter timestamp
 // the operator wrote when filing. Durable, never updated by re-mirror.
+// Gateway-filed cases (CASE-464) carry no filed_at; for those the doc was CREATED
+// in kb at file time, so created_at IS the filing moment — fall back to it. Scoped
+// to cases (case_number present) so non-case docs stay null and sort to the end.
 function filedAt(doc: DocItem): Date | null {
   const s = doc.metadata?.custom?.filed_at
-  if (typeof s !== 'string' || !s) return null
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? null : d
+  if (typeof s === 'string' && s) {
+    const d = new Date(s)
+    if (!isNaN(d.getTime())) return d
+  }
+  if (typeof doc.data.case_number === 'number') {
+    const d = new Date(doc.created_at)
+    if (!isNaN(d.getTime())) return d
+  }
+  return null
 }
 
 // "Modified" sort uses the latest status-transition timestamp: max of
@@ -684,9 +694,7 @@ export default function SearchPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                         <span className="text-sm font-medium text-text">
-                          {docLabel(doc.data, '') || (
-                            <span className="italic text-text-muted">(untitled)</span>
-                          )}
+                          <CaseLabel data={doc.data} />
                         </span>
                         <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                           {doc.template_value}

@@ -23,6 +23,19 @@ export function parseCaseTitle(
   return { caseNumber: caseNum, slug, full }
 }
 
+// List-row helper: the case-number (structured data.case_number, legacy title
+// prefix as fallback) plus the slug to render beside it. num is null for
+// non-case docs, so callers fall back to docLabel.
+export function caseParts(data: { title?: unknown; case_number?: unknown }): {
+  num: number | null
+  slug: string
+} {
+  const title = typeof data.title === 'string' ? data.title : ''
+  const num = typeof data.case_number === 'number' ? data.case_number : null
+  const p = parseCaseTitle(title, num)
+  return { num: p.caseNumber, slug: p.slug }
+}
+
 // Resolve the best human-readable label for a document. Most templates carry a
 // `title`, but SESSION (CASE-389) uses `session_id` as its identifier and has no
 // title field, and DOCUMENT (CASE-346) can fall back to its repo-relative `path`.

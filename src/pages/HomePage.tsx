@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { wipFetchJson } from '../lib/wipBulk'
 import { docLabel } from '../lib/casePrefix'
+import { CaseLabel } from '../components/CaseLabel'
 
 const NAMESPACE = 'kb'
 
@@ -240,9 +241,7 @@ function DocGroupBox({ group }: { group: Group }) {
                 className="block px-4 py-2.5 transition hover:bg-background"
               >
                 <div className="text-sm text-text">
-                  {docLabel(d.data, '') || (
-                    <span className="italic text-text-muted">(untitled)</span>
-                  )}
+                  <CaseLabel data={d.data} />
                 </div>
                 <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-text-muted">
                   {d.data.authored_by && <span>{d.data.authored_by}</span>}
