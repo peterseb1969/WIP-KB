@@ -9,7 +9,7 @@
 #
 # Usage:  bash <cache>/kb-client.sh <script.py> [args...]
 #   e.g.  bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 437
-#         bash ~/.cache/wip-kb-client/kb-client.sh add-to-kb.py yac-discussions/CASE-…md
+#         bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py list --status open
 #
 # Env (defaults target the canonical wip-kb.local KB app):
 #   KB_APP_URL        https://wip-kb.local

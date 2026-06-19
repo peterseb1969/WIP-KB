@@ -7,9 +7,14 @@ detection logic that lived in both `tools/add-to-kb.py` and
 CASE-404 step 2 acceptance-test time — the schema-extension landed in
 add-to-kb.py but bulk-mirror's separate copy still wrote the old shape.
 
-Used by:
-- tools/add-to-kb.py — single-record dual-write
-- tools/kb-bulk-mirror.py — bulk reconciliation
+Used by (CASE-464 retired the write loaders; remaining consumers use the
+resolution helpers — kb.json/key resolution — not the builders):
+- case-fetch.py — case/journal reads
+- stats-to-kb.py — git-stats computer (POSTs the /stats/snapshot gateway verb)
+
+NOTE: the build_*_doc / parse / detect helpers below are legacy — they were the
+write loaders' shared core. The loaders were deleted (writes go through the
+gateway verbs); these are retained but unused. Slim or drop in a follow-up.
 
 Public surface:
 - Constants:

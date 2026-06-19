@@ -24,13 +24,9 @@ writes — the gateway verbs inherit the platform's real validation.
 ## Roster
 | File | Role |
 |---|---|
-| `kb_write_core.py` | Shared core (stdlib-only): doc builders, `detect_document_meta`, `VALID_TARGETS`, `DOC_PATH_RE`, edge derivation (CASE-407). Imported by the entry scripts. |
-| `add-to-kb.py` | Single-file mirror to the canonical instance. CASE_RECORD → resolve-then-update (resolve `CASE-<n>` → PATCH in place, else create); SESSION/JOURNEY/DOCUMENT → upsert by their own identity. |
-| `kb-bulk-mirror.py` | Bulk mirror (cases → resolve-then-update; journeys/documents → upsert-by-identity). |
+| `kb_write_core.py` | Shared core (stdlib-only): `.claude/kb.json` + API-key resolution (CASE-444/471), imported by the read/stats scripts. |
 | `case-fetch.py` | REST-canonical case/journal read (CASE-393). |
-| `case-update.py` | kb-native case state push (`respond`) — PATCHes the case in place and sets `data.status` (CASE-396/425). |
-| `case_allocate.py` | Case-number allocator — allocate-then-create on the atomic synonym claim; replaces `case-helper.sh claim` (CASE-425/427). |
-| `stats-to-kb.py` | Git-stats snapshot loader. |
+| `stats-to-kb.py` | Git-stats snapshot computer — computes locally, POSTs the `/stats/snapshot` gateway verb. |
 | `kb-client.sh` | The runner (CASE-440): fetch/refresh the bundle on `bundle_digest` change, then run a script with `PYTHONPATH` set. Ships inside the bundle — relocated out of FR-YAC. |
 | `install.sh` | One-liner bootstrap (CASE-440): `curl -fsSk -H "X-API-Key: $KEY" {BASE_PATH}/server-api/kb-client/install \| sh` materializes the bundle to `~/.cache/wip-kb-client`. |
 | `case-workflow.md` | The cross-YAC case playbook, served with the client (single source: `docs/playbooks/case-workflow.md`, synced from the gene-pool master). |
@@ -63,19 +59,23 @@ writes — the gateway verbs inherit the platform's real validation.
   signal; use `bundle_digest`. (CASE-437.)
 
 ## Running
-Run from inside `kb-client/` (so `from kb_write_core import …` resolves), e.g.
-`python3 kb-client/add-to-kb.py <flat-file>`.
+Normally invoked via the `kb-client.sh` runner (sets `PYTHONPATH`, derives the
+instance from `.claude/kb.json`), e.g.
+`bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 471`.
 
 Env:
-- `KB_BASE_URL` — the canonical instance (default `https://wip-kb.local`).
-- `KB_API_KEY_FILE` — its key file (default `~/.wip-deploy/wip-kb/secrets/api-key`).
+- **Single source of truth: `.claude/kb.json`** (`kb_app_url` + `kb_api_key_file`,
+  CASE-471). The runner and `kb_write_core.py` derive `KB_BASE_URL` +
+  `KB_API_KEY_FILE` from it when unset, so a hostname cutover is one edit there.
+- `KB_BASE_URL` — the canonical instance (default `https://kb.internal`).
+- `KB_API_KEY_FILE` — its key file (default `~/.wip-deploy/kb/secrets/api-key`).
   **One var across the whole bundle** (CASE-444); `KB_KEY_FILE` is accepted as a
   deprecated alias with a stderr warning. The default key pairs only with the
   default target: overriding `KB_BASE_URL` without setting `KB_API_KEY_FILE`
   fails loud instead of silently 401-ing with the canonical instance's key.
   No `/Users/<user>` literals — defaults derive from `$HOME`.
 - `KB_LOCAL_URL` / `KB_LOCAL_KEY_FILE` — the optional local fast-path instance
-  (`case-fetch`/`case-update` `KB_PREFER_LOCAL=1`, `stats-to-kb` local target);
+  (`case-fetch` `KB_PREFER_LOCAL=1`, `stats-to-kb` local target);
   defaults `https://localhost:8443` + `~/.wip-deploy/wip-dev-local/secrets/api-key`,
   same pairing guard.
 - `KB_NAMESPACE` (default `kb`), `KB_VERIFY_TLS` (default `false`),

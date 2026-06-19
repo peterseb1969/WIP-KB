@@ -26,17 +26,13 @@ interface Manifest {
 // Roles for the served files (the manifest derives files[] from disk but carries
 // no per-file role). `retired` writers are flagged — writes go through the
 // gateway verbs now (CASE-464). `extra` = served alongside the .py files[].
-type Role = { role: string; retired?: boolean; extra?: boolean }
+type Role = { role: string; extra?: boolean }
 const FILE_ROLES: Record<string, Role> = {
   'kb-client.sh': { role: 'Runner — fetches/refreshes the bundle; run scripts via it', extra: true },
   'install.sh': { role: 'Bootstrap — `curl | sh` materializes the bundle', extra: true },
   'case-fetch.py': { role: 'Read — fetch a case / list cases' },
-  'kb_write_core.py': { role: 'Shared core — doc builders + kb.json/key resolution' },
+  'kb_write_core.py': { role: 'Shared core — kb.json / API-key resolution (CASE-444)' },
   'stats-to-kb.py': { role: 'Stats — computes locally, POSTs /stats/snapshot' },
-  'add-to-kb.py': { role: 'Retired writer — file/transition via gateway verbs', retired: true },
-  'case_allocate.py': { role: 'Retired — allocation is a gateway verb now', retired: true },
-  'case-update.py': { role: 'Retired writer — transitions via gateway verbs', retired: true },
-  'kb-bulk-mirror.py': { role: 'Retired writer — mirror via gateway verbs (--dry-run stays)', retired: true },
   'case-workflow.md': { role: 'Playbook — authoritative case how-to (rendered below)', extra: true },
   'README.md': { role: 'Bundle readme', extra: true },
   'manifest.json': { role: 'Manifest (schema_version, version_contract)', extra: true },
@@ -130,10 +126,14 @@ export default function ClientPage() {
   const oneLiner = `curl -fsSk -H "X-API-Key: $(cat ~/.wip-deploy/kb/secrets/api-key)" \\\n  ${installUrl} | sh`
   const runCmd = `bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 471`
 
-  // Build the file list: scripts (files[]) + the served extras, each downloadable.
-  const scriptFiles = (m?.files ?? []).filter((n) => !EXTRA_ORDER.includes(n))
-  const fileRows = [...scriptFiles, ...EXTRA_ORDER]
+  // The served bundle: scripts (manifest files[]) + the served extras. Every file
+  // here is current — retired writers were removed from the bundle (CASE-464:
+  // writes go through the gateway verbs).
   const fileHref = (name: string) => `${KBC}/files/${encodeURIComponent(name)}`
+  const fileRows = [
+    ...(m?.files ?? []).filter((n) => !EXTRA_ORDER.includes(n)),
+    ...EXTRA_ORDER,
+  ]
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -197,32 +197,22 @@ export default function ClientPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {fileRows.map((name) => {
-                    const r = FILE_ROLES[name]
-                    return (
-                      <tr key={name} className={r?.retired ? 'opacity-60' : ''}>
-                        <td className="whitespace-nowrap px-3 py-2 font-mono text-text">{name}</td>
-                        <td className="px-3 py-2 text-text-muted">
-                          {r?.role ?? '—'}
-                          {r?.retired && (
-                            <span className="ml-1.5 rounded bg-gray-100 px-1 py-0.5 text-[10px] uppercase text-text-muted">
-                              retired
-                            </span>
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2 text-right">
-                          <a
-                            href={fileHref(name)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-primary hover:underline"
-                          >
-                            <Download className="h-3 w-3" /> file
-                          </a>
-                        </td>
-                      </tr>
-                    )
-                  })}
+                  {fileRows.map((name) => (
+                    <tr key={name}>
+                      <td className="whitespace-nowrap px-3 py-2 font-mono text-text">{name}</td>
+                      <td className="px-3 py-2 text-text-muted">{FILE_ROLES[name]?.role ?? '—'}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right">
+                        <a
+                          href={fileHref(name)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-primary hover:underline"
+                        >
+                          <Download className="h-3 w-3" /> file
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
