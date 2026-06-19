@@ -124,6 +124,13 @@ export default function DocPage() {
   const fields: TemplateField[] = (template?.fields as TemplateField[] | undefined) ?? []
   const structured = fields.filter((f) => !COMMON_FIELDS.has(f.name) && data[f.name] !== undefined)
   const body = typeof data.body === 'string' ? data.body : ''
+  // CASE-464: gateway-filed cases carry their number in structured data.case_number,
+  // not a "CASE-N:" title prefix. Source the header chip from the field, with the
+  // legacy title prefix as fallback for pre-cutover cases.
+  const selfParsed = parseCaseTitle(
+    typeof data.title === 'string' ? data.title : '',
+    typeof data.case_number === 'number' ? data.case_number : null,
+  )
   const isRoot = data.root === true
   const orphan = !isRoot && incoming.length === 0 && outgoing.length === 0
 
@@ -145,6 +152,7 @@ export default function DocPage() {
         <RelationshipGraph
           selfId={id}
           selfTitle={docLabel(data, id)}
+          selfCaseNumber={selfParsed.caseNumber}
           selfTemplate={doc.template_value ?? ''}
           incoming={incoming}
           outgoing={outgoing}
@@ -167,7 +175,7 @@ export default function DocPage() {
             {supersededBy.map((r, i) => {
               const peerId = r.data.source_ref as string | undefined
               if (!peerId) return null
-              const parsed = parseCaseTitle(r.peer?.data?.title)
+              const parsed = parseCaseTitle(r.peer?.data?.title, r.peer?.data?.case_number)
               const labelChip =
                 parsed.caseNumber !== null ? `CASE-${parsed.caseNumber}` : null
               const slug = parsed.slug || r.peer?.data?.title || peerId
@@ -224,8 +232,16 @@ export default function DocPage() {
               )}
             </div>
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-text">
-            {docLabel(data, '') || '(untitled)'}
+          <h1 className="flex items-baseline gap-2 text-2xl font-semibold tracking-tight text-text">
+            {selfParsed.caseNumber !== null && (
+              <span className="shrink-0 rounded bg-primary/10 px-2 py-0.5 font-mono text-lg font-semibold text-primary">
+                CASE-{selfParsed.caseNumber}
+              </span>
+            )}
+            <span>
+              {(selfParsed.caseNumber !== null ? selfParsed.slug : docLabel(data, '')) ||
+                '(untitled)'}
+            </span>
           </h1>
           <p className="mt-1.5 text-xs text-text-muted">
             {[
@@ -354,7 +370,7 @@ function RelationshipList({
           const errorCode = r.peer_error_code
           const isInactive = peer?.status === 'inactive'
           const fullTitle = docLabel(peer?.data, peerId)
-          const parsed = parseCaseTitle(fullTitle)
+          const parsed = parseCaseTitle(fullTitle, peer?.data?.case_number)
           return (
             <li key={r.document_id}>
               <Link

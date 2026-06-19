@@ -22,6 +22,7 @@ interface PeerEnrichment {
 interface Props {
   selfId: string
   selfTitle: string
+  selfCaseNumber?: number | null
   selfTemplate: string
   incoming: EdgeItem[]
   outgoing: EdgeItem[]
@@ -73,8 +74,12 @@ function nodeColors(templateValue: string, isSelf: boolean): { fill: string; str
   }
 }
 
-function shortLabel(title: string | undefined, fallbackId: string): string {
-  const parsed = parseCaseTitle(title)
+function shortLabel(
+  title: string | undefined,
+  fallbackId: string,
+  caseNumber?: number | null,
+): string {
+  const parsed = parseCaseTitle(title, caseNumber)
   if (parsed.caseNumber !== null) return `CASE-${parsed.caseNumber}`
   if (title) return title.length > 14 ? title.slice(0, 13) + '…' : title
   return fallbackId.slice(0, 8)
@@ -97,6 +102,7 @@ const TOOLTIP_GAP = 8
 export function RelationshipGraph({
   selfId,
   selfTitle,
+  selfCaseNumber,
   selfTemplate,
   incoming,
   outgoing,
@@ -122,7 +128,7 @@ export function RelationshipGraph({
   }
 
   const selfColors = nodeColors(selfTemplate, true)
-  const selfLabel = shortLabel(selfTitle, selfId)
+  const selfLabel = shortLabel(selfTitle, selfId, selfCaseNumber)
 
   return (
     <div className="mb-6 rounded-lg border border-gray-200 bg-surface p-4">
@@ -204,7 +210,7 @@ export function RelationshipGraph({
           const y = colY(i, incoming.length)
           const c = nodeColors(peer.template_value, false)
           const fullTitle = docLabel(peer.data, peer.document_id)
-          const label = shortLabel(fullTitle, peer.document_id)
+          const label = shortLabel(fullTitle, peer.document_id, peer.data?.case_number)
           const inactive = peer.status === 'inactive'
           const enr = enrichment[peer.document_id]
           const caseStatus = peer.data?.status
@@ -273,7 +279,7 @@ export function RelationshipGraph({
           const y = colY(i, outgoing.length)
           const c = nodeColors(peer.template_value, false)
           const fullTitle = docLabel(peer.data, peer.document_id)
-          const label = shortLabel(fullTitle, peer.document_id)
+          const label = shortLabel(fullTitle, peer.document_id, peer.data?.case_number)
           const inactive = peer.status === 'inactive'
           const enr = enrichment[peer.document_id]
           const caseStatus = peer.data?.status

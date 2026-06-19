@@ -4,15 +4,23 @@ export interface ParsedCaseTitle {
   full: string
 }
 
-// Titles of CASE_RECORD docs follow "CASE-N: slug…" by FRanC's loader convention.
-// Split the prefix out so renderers can show the case-number as a chip while
-// keeping the slug as readable text. Falls back to the full title for non-case
-// docs or titles that don't match the convention.
-export function parseCaseTitle(title: string | undefined | null): ParsedCaseTitle {
-  if (!title) return { caseNumber: null, slug: '', full: '' }
-  const m = title.match(/^CASE-(\d+):\s*(.+)$/)
-  if (m) return { caseNumber: parseInt(m[1]!, 10), slug: m[2]!, full: title }
-  return { caseNumber: null, slug: title, full: title }
+// Resolve a CASE_RECORD's number + readable slug for rendering as a chip + title.
+// The number's source of truth is the structured `data.case_number` field, set
+// server-side by the gateway file verb (CASE-464). Pass it as `caseNumber`.
+// The legacy "CASE-N: slug…" title prefix (FRanC's old loader convention) is kept
+// as a fallback for docs filed before the cutover, whose titles bake the number in.
+// Falls back to the full title for non-case docs / titles without a match.
+export function parseCaseTitle(
+  title: string | undefined | null,
+  caseNumber?: number | null,
+): ParsedCaseTitle {
+  const full = title ?? ''
+  const m = full.match(/^CASE-(\d+):\s*(.+)$/)
+  const caseNum =
+    typeof caseNumber === 'number' ? caseNumber : m ? parseInt(m[1]!, 10) : null
+  // Strip a legacy "CASE-N: " prefix from the slug if present; else use the title as-is.
+  const slug = m ? m[2]! : full
+  return { caseNumber: caseNum, slug, full }
 }
 
 // Resolve the best human-readable label for a document. Most templates carry a
