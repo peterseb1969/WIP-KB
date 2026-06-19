@@ -19,10 +19,23 @@
 # POSIX sh (curl|sh target) — no bashisms.
 set -eu
 
-KB_APP_URL="${KB_APP_URL:-https://wip-kb.local}"
+# When run from a repo, derive the instance from .claude/kb.json (single source
+# of truth; PAIRED url+key so a hostname cutover is one edit). Best-effort: a
+# bare `curl|sh` from an arbitrary cwd just uses the literal fallbacks below.
+if [ -r ./.claude/kb.json ]; then
+  if [ -z "${KB_APP_URL:-}" ]; then
+    KB_APP_URL="$(python3 -c 'import json;print(json.load(open(".claude/kb.json")).get("kb_app_url",""))' 2>/dev/null || true)"
+  fi
+  if [ -z "${KB_API_KEY_FILE:-}" ]; then
+    _kbj_key="$(python3 -c 'import json;print(json.load(open(".claude/kb.json")).get("kb_api_key_file",""))' 2>/dev/null || true)"
+    [ -n "$_kbj_key" ] && KB_API_KEY_FILE="$_kbj_key"
+  fi
+fi
+
+KB_APP_URL="${KB_APP_URL:-https://kb.internal}"
 KB_APP_BASE_PATH="${KB_APP_BASE_PATH-/apps/kb}"  # `-` not `:-`: explicit empty = root-mounted instance
 KBC="${KB_CLIENT_CACHE:-$HOME/.cache/wip-kb-client}"
-KEYFILE="${KB_API_KEY_FILE:-$HOME/.wip-deploy/wip-kb/secrets/api-key}"
+KEYFILE="${KB_API_KEY_FILE:-$HOME/.wip-deploy/kb/secrets/api-key}"
 
 if [ ! -r "$KEYFILE" ]; then
   echo "kb-client install: API key not readable at $KEYFILE (set KB_API_KEY_FILE)" >&2

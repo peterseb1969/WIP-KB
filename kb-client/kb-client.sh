@@ -30,13 +30,32 @@
 # the canonical instance's key).
 set -euo pipefail
 
-KB_APP_URL="${KB_APP_URL:-https://wip-kb.local}"
+# Single source of truth for the canonical instance: the calling repo's
+# .claude/kb.json (kb_app_url + kb_api_key_file). When the env doesn't already
+# pin the target, derive both from it — PAIRED, so a hostname cutover (e.g.
+# wip-kb.local -> kb.internal) is one edit to kb.json and CASE-444's url/key
+# pairing guard stays intact. Literal fallbacks below are the last resort.
+if [ -r ./.claude/kb.json ]; then
+  if [ -z "${KB_APP_URL:-}" ]; then
+    KB_APP_URL="$(python3 -c 'import json;print(json.load(open(".claude/kb.json")).get("kb_app_url",""))' 2>/dev/null || true)"
+  fi
+  if [ -z "${KB_API_KEY_FILE:-}" ]; then
+    _kbj_key="$(python3 -c 'import json;print(json.load(open(".claude/kb.json")).get("kb_api_key_file",""))' 2>/dev/null || true)"
+    [ -n "$_kbj_key" ] && KB_API_KEY_FILE="$_kbj_key"
+  fi
+fi
+
+KB_APP_URL="${KB_APP_URL:-https://kb.internal}"
 KB_APP_BASE_PATH="${KB_APP_BASE_PATH-/apps/kb}"  # `-` not `:-`: explicit empty = root-mounted instance
 KB_VERIFY_TLS="${KB_VERIFY_TLS:-false}"
 KBC="${KB_CLIENT_CACHE:-$HOME/.cache/wip-kb-client}"
+# KB_BASE_URL is what the served python read/write scripts use for the instance
+# host; keep it in lockstep with KB_APP_URL so the whole bundle targets one place.
 export KB_APP_URL KB_APP_BASE_PATH KB_VERIFY_TLS
-# Wrapper-local key for its own fetch curls; exported only if caller-set (CASE-444).
-KEYFILE="${KB_API_KEY_FILE:-$HOME/.wip-deploy/wip-kb/secrets/api-key}"
+export KB_BASE_URL="$KB_APP_URL"
+# Wrapper-local key for its own fetch curls; exported when set in env OR derived
+# from kb.json above (paired with the URL, so CASE-444's guard holds).
+KEYFILE="${KB_API_KEY_FILE:-$HOME/.wip-deploy/kb/secrets/api-key}"
 if [ -n "${KB_API_KEY_FILE:-}" ]; then export KB_API_KEY_FILE; fi
 
 if [ ! -r "$KEYFILE" ]; then echo "kb-client: API key not readable at $KEYFILE" >&2; exit 2; fi

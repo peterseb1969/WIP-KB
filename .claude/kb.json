@@ -1,4 +1,4 @@
 {
-  "kb_app_url": "https://wip-kb.local",
-  "kb_api_key_file": "/Users/peter/.wip-deploy/wip-kb/secrets/api-key"
+  "kb_app_url": "https://kb.internal",
+  "kb_api_key_file": "/Users/peter/.wip-deploy/kb/secrets/api-key"
 }

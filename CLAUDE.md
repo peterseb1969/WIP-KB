@@ -45,14 +45,14 @@ The spec is authoritative. If FRanC's papers and this CLAUDE.md disagree on anyt
 
 This app talks to the **`wip-kb` instance** on the Pi cluster, not local-dev. Concretely:
 
-- **Base URL:** `https://wip-kb.local` (port 443; self-signed cert).
+- **Base URL:** `https://kb.internal` (port 443; self-signed cert). *(Canonical since the 2026-06-19 cutover; was `wip-kb.local`.)* The single source of truth for the instance is `.claude/kb.json` (`kb_app_url` + `kb_api_key_file`) — the served KB client reads it, so a future rename is one edit there. Runtime/ops key: `~/.wip-deploy/kb/secrets/api-key`.
 - **MCP server name** is `wip-kb` (not `wip`). Tool calls surface as `mcp__wip-kb__<tool>`. Many gene-pool docs reference `mcp__wip__*` — translate.
 - **`.mcp.json`** uses `WIP_API_KEY_FILE` pointing at `~/.wip-deploy/wip-kb/secrets/api-key` (privileged admin key). Key rotation is one file write; do not paste literal keys into `.mcp.json`.
 - **`.env`** carries the runtime key scoped to `dev-kb` (already provisioned during spawn — see `.env` for the value, on disk at `~/.wip-deploy/wip-kb/secrets/api-key-dev-kb`).
 
 ### TLS gotcha for the Node server
 
-`wip-kb.local` uses a self-signed cert. Node.js `fetch()` rejects it by default. Add `NODE_TLS_REJECT_UNAUTHORIZED=0` to the `dev:server` script (NOT `start`/production). The python MCP client uses `WIP_VERIFY_TLS=false` (already set in `.mcp.json` and `.env`).
+`kb.internal` (like `wip-kb.local` before it) uses a self-signed cert. Node.js `fetch()` rejects it by default. Add `NODE_TLS_REJECT_UNAUTHORIZED=0` to the `dev:server` script (NOT `start`/production). The python MCP client uses `WIP_VERIFY_TLS=false` (already set in `.mcp.json` and `.env`).
 
 ---
 
