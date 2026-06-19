@@ -184,16 +184,15 @@ router.post('/cases', async (req, res) => {
     // Prefer the body frontmatter `filed:` (what the operator wrote); else stamp now.
     const fm = parseFrontmatter(String(b.body || ''))
     const filedAt = fm.filed && /^\d{4}-\d{2}-\d{2}/.test(fm.filed) ? fm.filed : nowStamp()
-    // Canonical title carries the `CASE-<n>:` prefix (uniform with legacy cases).
-    // The number then lives in the full-text-indexed title, so cases are findable
-    // by number via FTS; the UI strips the prefix for display and reads the chip
-    // from case_number. (Restores the prefix CASE-464 dropped from this verb.)
-    const rawTitle = String(b.title).replace(/^CASE-\d+:\s*/i, '')
     let n = (await maxCaseNumber(ns, key)) + 1
     for (let i = 0; i < ALLOC_MAX_RETRIES; i++) {
       const d = await wipReq('POST', '/api/document-store/documents', key, [{
         template_id: tid, namespace: ns, created_by: 'kb-gateway',
-        data: { ...data, case_number: n, title: `CASE-${n}: ${rawTitle}` },
+        // case_ref is the full-text-indexed search handle for the case number:
+        // "CASE-<n> <n>" tokenizes to `case-<n>` + standalone `<n>`, so FTS finds
+        // the case by both "CASE-468" and bare "468" — title stays the clean human
+        // title; the chip reads case_number. (CASE_RECORD v5.)
+        data: { ...data, case_number: n, case_ref: `CASE-${n} ${n}` },
         metadata: { custom: { filed_at: filedAt }, loader: 'kb-gateway' },
         synonyms: [{ value: `CASE-${n}` }],
       }])
