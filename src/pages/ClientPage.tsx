@@ -282,7 +282,7 @@ export default function ClientPage() {
           <p className="text-sm text-danger">Playbook unavailable: {(playbookQ.error as Error).message}</p>
         )}
         {playbookQ.data && (
-          <div className="prose-kb max-w-none rounded-md border border-gray-200 bg-background p-4 text-sm">
+          <div className="prose prose-sm max-w-none rounded-md border border-gray-200 bg-background p-4">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{playbookQ.data}</ReactMarkdown>
           </div>
         )}
