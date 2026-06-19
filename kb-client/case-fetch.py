@@ -35,6 +35,7 @@ import os
 import ssl
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -48,6 +49,7 @@ LOCAL_URL = os.environ.get("KB_LOCAL_URL", LOCAL_BASE_URL)
 LOCAL_KEY = resolve_key_file(LOCAL_URL, LOCAL_BASE_URL, "wip-dev-local",
                              "KB_LOCAL_KEY_FILE")
 NAMESPACE = os.environ.get("KB_NAMESPACE", "kb")
+GW_BASE_PATH = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")  # KB gateway mount
 PREFER_LOCAL = os.environ.get("KB_PREFER_LOCAL") == "1"
 PREFER_FS = os.environ.get("KB_PREFER_FS") == "1"
 VERIFY_TLS = os.environ.get("KB_VERIFY_TLS", "false").lower() == "true"
@@ -224,6 +226,119 @@ def fetch_journey(day_num: float) -> str | None:
 
 
 # ----------------------------------------------------------------------------
+# fireside mode (CASE-479)
+# ----------------------------------------------------------------------------
+# FIRESIDE identity_fields = ["title"] — no number/synonym, so a single fireside
+# is fetched by document_id (discover ids via `fireside list`).
+#
+# These reads go through the KB gateway API (GET /firesides, /firesides/:id) —
+# the app-specific layer that owns the FIRESIDE projection, namespace
+# discipline, and identity. Clients must NOT reach past it into the
+# document-store backend directly (that is the "straight to MongoDB"
+# anti-pattern; the gateway is the contract). Same local->remote fallthrough as
+# cases/journeys; no FS fast-path — firesides live only in kb.
+
+
+def _gw_get(base_url: str, key_file: Path, path: str) -> dict | None:
+    """GET a KB gateway endpoint (path relative to /server-api/kb, e.g.
+    '/firesides'). Returns the parsed JSON object, or None on 404. Raises
+    RuntimeError on transport / non-404 HTTP error."""
+    url = f"{base_url}{GW_BASE_PATH}/server-api/kb{path}"
+    req = urllib.request.Request(
+        url,
+        method="GET",
+        headers={"X-API-Key": _read_key(key_file)},
+    )
+    try:
+        resp = urllib.request.urlopen(req, context=_ssl_ctx(), timeout=10)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        snippet = e.read()[:200].decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {e.code} from {base_url}: {snippet}") from e
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(f"{base_url} unreachable: {e}") from e
+    return json.loads(resp.read())
+
+
+def _gw_targets() -> list[tuple[str, str, Path]]:
+    targets: list[tuple[str, str, Path]] = []
+    if PREFER_LOCAL:
+        targets.append(("local", LOCAL_URL, LOCAL_KEY))
+    targets.append(("remote", REMOTE_URL, REMOTE_KEY))
+    return targets
+
+
+def list_firesides(topic: str | None, author: str | None, limit: int) -> list[dict]:
+    """GET /firesides via the gateway. Returns the gateway's projected rows
+    (title, topic, authored_by, chat_date, document_id, …); bodies omitted."""
+    params: dict[str, str] = {"page_size": str(min(limit, 100))}
+    if topic:
+        params["topic"] = topic
+    if author:
+        params["author"] = author
+    path = "/firesides?" + urllib.parse.urlencode(params)
+
+    last_error: Exception | None = None
+    for name, url, key in _gw_targets():
+        try:
+            payload = _gw_get(url, key, path)
+        except RuntimeError as e:
+            last_error = e
+            if name != "remote":
+                print(f"[case-fetch] {name} unreachable, falling through to remote: {e}",
+                      file=sys.stderr)
+                continue
+            raise
+        return (payload or {}).get("items") or []
+    if last_error:
+        raise last_error
+    return []
+
+
+def fetch_fireside(doc_id: str) -> str | None:
+    """GET /firesides/:id via the gateway. Returns the body, or None if the
+    gateway reports the fireside not found on the remote (last) target."""
+    last_error: Exception | None = None
+    for name, url, key in _gw_targets():
+        try:
+            payload = _gw_get(url, key, f"/firesides/{doc_id}")
+        except RuntimeError as e:
+            last_error = e
+            if name != "remote":
+                print(f"[case-fetch] {name} unreachable, falling through to remote: {e}",
+                      file=sys.stderr)
+                continue
+            raise
+        if payload is not None:
+            return payload.get("body")
+        if name != "remote":
+            print(f"[case-fetch] fireside {doc_id} not found on {name}, trying remote",
+                  file=sys.stderr)
+            continue
+        return None  # remote (gateway) returned 404
+    if last_error:
+        raise last_error
+    return None
+
+
+def _format_fireside_table(rows: list[dict]) -> str:
+    header = (
+        "| Chat date | Topic | Authored by | Title | Document ID |\n"
+        "|---|---|---|---|---|"
+    )
+    if not rows:
+        return f"{header}\n_(no matches)_\n"
+    out = [header]
+    for r in rows:
+        out.append(
+            f"| {r['chat_date'] or ''} | {r['topic'] or ''} | "
+            f"{r['authored_by'] or ''} | {r['title'] or ''} | {r['document_id'] or ''} |"
+        )
+    return "\n".join(out) + "\n"
+
+
+# ----------------------------------------------------------------------------
 # list mode (CASE-403)
 # ----------------------------------------------------------------------------
 # REST-only by design — the per-file frontmatter parse IS the latency problem
@@ -384,6 +499,14 @@ def main() -> None:
     list_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
     list_sp.add_argument("--format", choices=["table", "json"], default="table")
 
+    fireside_sp = sub.add_parser("fireside",
+                                 help="list firesides, or fetch one by document_id (CASE-479)")
+    fireside_sp.add_argument("target", help="'list', or a fireside document_id")
+    fireside_sp.add_argument("--topic", help="filter list by exact topic (data.topic)")
+    fireside_sp.add_argument("--author", help="filter list by exact author (data.authored_by)")
+    fireside_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
+    fireside_sp.add_argument("--format", choices=["table", "json"], default="table")
+
     args = ap.parse_args()
 
     if args.mode == "case":
@@ -440,6 +563,35 @@ def main() -> None:
             sys.stdout.write("\n")
         else:
             sys.stdout.write(_format_table(rows))
+        sys.exit(0)
+
+    if args.mode == "fireside":
+        if args.target == "list":
+            try:
+                rows = list_firesides(args.topic, args.author, args.limit)
+            except RuntimeError as e:
+                print(f"ERROR: transport failure: {e}", file=sys.stderr)
+                sys.exit(2)
+            # newest chat first; docs without chat_date sort last
+            rows.sort(key=lambda r: r.get("chat_date") or "", reverse=True)
+            if args.format == "json":
+                sys.stdout.write(json.dumps(rows, indent=2))
+                sys.stdout.write("\n")
+            else:
+                sys.stdout.write(_format_fireside_table(rows))
+            sys.exit(0)
+        # target is a document_id
+        try:
+            body = fetch_fireside(args.target)
+        except RuntimeError as e:
+            print(f"ERROR: transport failure: {e}", file=sys.stderr)
+            sys.exit(2)
+        if body is None:
+            print(f"fireside {args.target} not found in kb", file=sys.stderr)
+            sys.exit(1)
+        sys.stdout.write(body)
+        if not body.endswith("\n"):
+            sys.stdout.write("\n")
         sys.exit(0)
 
 

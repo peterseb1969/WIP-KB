@@ -723,4 +723,51 @@ router.get('/journeys/:day', async (req, res) => {
   }
 })
 
+function firesideProjection(it: AnyObj): AnyObj {
+  const d = it.data || {}
+  return {
+    title: d.title, topic: d.topic || '', authored_by: d.authored_by || '',
+    chat_date: d.chat_date || null, doc_status: d.doc_status || '',
+    tags: d.tags || [], root: d.root || false,
+    document_id: it.document_id, doc_version: it.version, updated_at: it.updated_at,
+  }
+}
+
+// GET /firesides?topic=&author=&since=&page=&page_size=  — discovery list (bodies omitted)
+router.get('/firesides', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const { page, pageSize } = pageParams(req)
+  const filters: AnyObj[] = []
+  if (req.query.topic) filters.push({ field: 'data.topic', operator: 'eq', value: String(req.query.topic) })
+  if (req.query.author) filters.push({ field: 'data.authored_by', operator: 'eq', value: String(req.query.author) })
+  if (req.query.since) filters.push({ field: 'updated_at', operator: 'gte', value: String(req.query.since) })
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'FIRESIDE', filters, page, page_size: pageSize })
+    res.json({ total: d.total, page: d.page, pages: d.pages, items: (d.items || []).map(firesideProjection) })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// GET /firesides/:id — full fireside incl. body, by document_id (identity is title;
+// no number/synonym). Discover ids via GET /firesides, then fetch here.
+router.get('/firesides/:id', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  try {
+    const doc = await getDoc(req.params.id, ns, key)
+    res.json({ ...firesideProjection(doc), body: doc.data?.body || '' })
+  } catch (e) {
+    if (e instanceof WipError && e.status === 404) {
+      res.status(404).json({ error: `fireside ${req.params.id} not found in ${ns}` })
+      return
+    }
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
 export default router
