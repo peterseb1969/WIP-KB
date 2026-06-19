@@ -366,6 +366,22 @@ export default function SearchPage() {
       const ftsHits = Object.values(searchQ.data?.results ?? {}).flatMap((b) => b.items)
       const seen = new Set<string>()
       const result: Hit[] = []
+      // Case-number match. The number lives in data.case_number (a structured int,
+      // NOT full-text-indexed), and gateway-filed cases (CASE-464) carry no
+      // "CASE-N:" title prefix — so FTS can't find them by number. Match it
+      // directly over the loaded docs and prepend (exact hits rank first).
+      const nums = (query.match(/\d+/g) ?? []).map((s) => parseInt(s, 10))
+      if (nums.length) {
+        for (const d of filterableDocs) {
+          const cn = d.data.case_number
+          if (typeof cn === 'number' && nums.includes(cn) && !seen.has(d.document_id)) {
+            seen.add(d.document_id)
+            // Sentinel score so an exact case-number match ranks first under the
+            // 'relevance' sort, above any FTS text hit that merely mentions it.
+            result.push({ doc: d, score: Number.MAX_SAFE_INTEGER, snippet: null })
+          }
+        }
+      }
       for (const h of ftsHits) {
         if (h.type !== 'document') continue
         if (seen.has(h.id)) continue
