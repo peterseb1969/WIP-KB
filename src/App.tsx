@@ -4,6 +4,7 @@ import { Layout } from './components/Layout'
 import HomePage from './pages/HomePage'
 import DocPage from './pages/DocPage'
 import SearchPage from './pages/SearchPage'
+import ClientPage from './pages/ClientPage'
 import AskBar from './components/AskBar'
 
 const BASENAME = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
@@ -16,6 +17,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/search" element={<SearchPage />} />
+            <Route path="/client" element={<ClientPage />} />
             <Route path="/doc/:id" element={<DocPage />} />
           </Routes>
         </Layout>
