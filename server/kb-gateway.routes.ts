@@ -188,11 +188,9 @@ router.post('/cases', async (req, res) => {
     for (let i = 0; i < ALLOC_MAX_RETRIES; i++) {
       const d = await wipReq('POST', '/api/document-store/documents', key, [{
         template_id: tid, namespace: ns, created_by: 'kb-gateway',
-        // case_ref is the full-text-indexed search handle for the case number:
-        // "CASE-<n> <n>" tokenizes to `case-<n>` + standalone `<n>`, so FTS finds
-        // the case by both "CASE-468" and bare "468" — title stays the clean human
-        // title; the chip reads case_number. (CASE_RECORD v5.)
-        data: { ...data, case_number: n, case_ref: `CASE-${n} ${n}` },
+        // NOTE: case_ref search-handle is HELD pending the KB identity decision
+        // (CASE-481/477) — not written here so this firesides roll doesn't ship it.
+        data: { ...data, case_number: n },
         metadata: { custom: { filed_at: filedAt }, loader: 'kb-gateway' },
         synonyms: [{ value: `CASE-${n}` }],
       }])
@@ -493,6 +491,69 @@ router.post('/documents/mirror', async (req, res) => {
       return
     }
     res.json({ path: relPath, title, document_id: r.document_id, result: r.status })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// POST /firesides/mirror — fireside / design-chat transcripts (FIRESIDE, CASE-479).
+// FIRESIDE has its own identity (title) plus topic/chat_date FTS fields that
+// DOCUMENT lacks, so firesides get a dedicated verb rather than folding into
+// /documents/mirror. Caller supplies the transcript + what only it knows
+// (session origin, participants); domain conventions (title/topic/date
+// fallbacks, frontmatter strip) live here. Upsert by title → re-mirror = new
+// version (PoNIF #3), idempotent.
+router.post('/firesides/mirror', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const b: AnyObj = req.body || {}
+  const text = String(b.body || '')
+  if (!text) {
+    res.status(422).json({ error: 'body is required' })
+    return
+  }
+  try {
+    const fm = parseFrontmatter(text)
+    let title = String(b.title || fm.title || fm.topic || '').trim()
+    if (!title) {
+      const h1 = /^#\s+(.+)$/m.exec(text)
+      title = h1 && h1[1] ? h1[1].trim() : ''
+    }
+    if (!title) {
+      res.status(422).json({ error: 'title unresolved (pass title, or frontmatter title/topic, or an H1)' })
+      return
+    }
+    const authoredBy = String(b.authored_by || fm.authored_by || fm.participants || fm.session || '').trim()
+    if (!authoredBy) {
+      res.status(422).json({ error: 'authored_by unresolved (pass authored_by, or frontmatter participants/session)' })
+      return
+    }
+    const fmEnd = /^---\n[\s\S]*?\n---\s*\n?/.exec(text)
+    const body = fmEnd && text.slice(fmEnd[0].length).trim() ? text.slice(fmEnd[0].length) : text
+    const data: AnyObj = {
+      title, body, authored_by: authoredBy,
+      doc_status: String(b.doc_status || fm.doc_status || 'published'),
+    }
+    if (b.topic || fm.topic) data.topic = String(b.topic || fm.topic)
+    const chat = String(b.chat_date || fm.chat_date || fm.time || '').slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(chat)) data.chat_date = chat
+    if (typeof b.root === 'boolean') data.root = b.root
+    const tags = Array.isArray(b.tags) ? b.tags.map(String)
+      : (fm.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean)
+    if (tags.length) data.tags = tags
+    const tid = await templateId('FIRESIDE', ns, key)
+    const d = await wipReq('POST', '/api/document-store/documents', key, [{
+      template_id: tid, namespace: ns, created_by: 'kb-gateway',
+      data,
+      metadata: { session_id: b.session_id || fm.session || null, flat_file_mirror: b.path || null, loader: 'kb-gateway' },
+    }])
+    const r = (d.results || [])[0] || {}
+    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status)) {
+      res.status(502).json({ error: `fireside mirror failed: ${r.error || JSON.stringify(r)}` })
+      return
+    }
+    res.json({ title, document_id: r.document_id, result: r.status })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
