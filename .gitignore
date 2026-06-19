@@ -11,6 +11,12 @@ dist/
 .claude/.session-id
 yac-discussions
 
+# Local/instance-specific — not tracked (durability is the kb mirror for reports;
+# .mcp.json carries instance URLs + key-file paths; commands are refresh-delivered)
+reports/
+.mcp.json
+.claude/commands/
+
 # Python (kb-client loaders)
 __pycache__/
 *.pyc
