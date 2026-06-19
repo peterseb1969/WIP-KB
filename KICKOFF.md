@@ -13,7 +13,7 @@ You are APP-KB-YAC, building the **WIP-hosted Knowledge Base** — the first dog
 | `wip-kb` k8s instance on Pi cluster | **Live.** 13/13 pods Running. Reachable from this Mac at `https://wip-kb.local`. |
 | Document-relationships API (Phases 0–7 + 9) | Shipped. Edge types are first-class templates (PoNIF #7), `versioned: false` (PoNIF #8). |
 | Full-text search architecture | **Decided.** Per-field `full_text_indexed`, Postgres tsvector via reporting-sync, single endpoint `/api/reporting-sync/search?mode=auto\|fts\|substring`. Read `papers/fts-architecture-fireside.md`. |
-| MCP server `wip-kb` | Wired in `.mcp.json` via `WIP_API_KEY_FILE`. Tools surface as `mcp__wip-kb__*`. |
+| MCP server `wip` | Wired in `.mcp.json` via `WIP_API_KEY_FILE` (points at `kb.internal`). Tools surface as `mcp__wip__*`. |
 | `dev-kb` namespace on `wip-kb` | Created by FRanC. **Do all your iteration work here**, not in `kb`. |
 | Runtime API key scoped to `dev-kb` | In `.env` as `WIP_API_KEY`. |
 | Design package | `papers/` — five docs, copied from FRanC. |
@@ -41,14 +41,14 @@ Don't shortcut this. Each layer informs the next.
 4. **`papers/v2-archetypes.md` §4 (`knowledgebase`)** — archetype defaults to inherit.
 5. **`papers/relationships-glossary.md`** — relation vs relationship vocabulary, graph-theory primer. Required before touching edge types.
 6. **`papers/fts-architecture-fireside.md`** — FTS endpoint shape and which fields to flag.
-7. **MCP resources via the `wip-kb` server:**
+7. **MCP resources via the `wip` server:**
    - `wip://development-guide`
    - `wip://data-model`
    - `wip://conventions`
    - `wip://ponifs`
 8. **The scaffold itself** — `src/`, `server/`, `templates/bootstrap/*.template`, `package.json`. Understand what `--preset query` gave you.
 
-Then run `mcp__wip-kb__list_namespaces` to confirm connectivity. You should see `wip`, `testfts`, and `dev-kb`. The `kb` namespace should **not** exist yet — it's created by the app's BootstrapGate at runtime.
+Then run `mcp__wip__list_namespaces` to confirm connectivity. You should see `wip`, `testfts`, and `dev-kb`. The `kb` namespace should **not** exist yet — it's created by the app's BootstrapGate at runtime.
 
 ---
 

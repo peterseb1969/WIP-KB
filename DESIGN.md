@@ -458,7 +458,7 @@ Surfaced here as candidates for v2 promotion if use reveals the need:
 
 When Peter signs off:
 
-1. Create the 2 terminologies in `dev-kb` via `mcp__wip-kb__create_terminology` + `create_terms` (`KB_DOC_STATUS`, `KB_TARGET_YAC` — `KB_AGENT_KIND` dropped per Q17).
+1. Create the 2 terminologies in `dev-kb` via `mcp__wip__create_terminology` + `create_terms` (`KB_DOC_STATUS`, `KB_TARGET_YAC` — `KB_AGENT_KIND` dropped per Q17).
 2. Create the 9 templates in `dev-kb` via `create_templates_bulk` (use draft mode per `wip://development-guide` if circular references — likely none here).
 3. Create the 10 edge types in `dev-kb` via `create_edge_type` (PoNIF #7 — this tool surfaces the `usage: relationship` distinction at the API ingress).
 4. Smoke-test: create one document of each type; create one of each edge type; verify FTS via `/api/reporting-sync/search`; verify orphan query returns expected.
@@ -490,7 +490,7 @@ Persisted the model to `dev-kb` per §10 and ran the smoke. Status: **clean**.
 
 ### Tooling note for future-you
 
-`mcp__wip-kb__create_namespace` is POST-only (409 on existing). The PUT-upsert documented in `wip://conventions` is not surfaced as an MCP tool yet, so flipping `deletion_mode` requires direct REST. Worth filing as a tooling gap if it bites again.
+`mcp__wip__create_namespace` is POST-only (409 on existing). The PUT-upsert documented in `wip://conventions` is not surfaced as an MCP tool yet, so flipping `deletion_mode` requires direct REST. Worth filing as a tooling gap if it bites again.
 
 ### Next step
 

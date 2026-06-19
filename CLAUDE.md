@@ -28,14 +28,14 @@ Don't shortcut. Each layer informs the next.
 4. **`papers/v2-archetypes.md` §4** — the `knowledgebase` archetype defaults to inherit (components, modules, `deletion_mode: retain`, mutable terminologies).
 5. **`papers/relationships-glossary.md`** — disambiguates "relation" (term ↔ term) vs "relationship" (doc ↔ doc). Required reading before you build edge-type definitions.
 6. **`papers/fts-architecture-fireside.md`** — full-text search architecture. `/api/reporting-sync/search` shape, `mode=auto|fts|substring` semantics, snippet sanitisation.
-7. **MCP resources via the `wip-kb` server:**
+7. **MCP resources via the `wip` server:**
    - `wip://conventions` — bulk-first API, identity hashing, versioning
    - `wip://data-model` — terminologies, templates, documents, fields, term-relations
    - `wip://ponifs` — eight non-intuitive behaviours
    - `wip://development-guide` — full 4-phase workflow
 8. **The scaffold** — `src/`, `server/`, `templates/bootstrap/*.template`, `package.json`. Understand what `--preset query` gave you.
 
-Then run `mcp__wip-kb__list_namespaces` to confirm connectivity. You should see `wip`, `testfts`, and `dev-kb`. The `kb` namespace must **not** exist yet — it's created by the app's BootstrapGate at runtime.
+Then run `mcp__wip__list_namespaces` to confirm connectivity. You should see `wip`, `testfts`, and `dev-kb`. The `kb` namespace must **not** exist yet — it's created by the app's BootstrapGate at runtime.
 
 The spec is authoritative. If FRanC's papers and this CLAUDE.md disagree on anything, follow the spec.
 
@@ -46,8 +46,8 @@ The spec is authoritative. If FRanC's papers and this CLAUDE.md disagree on anyt
 This app talks to the **`wip-kb` instance** on the Pi cluster, not local-dev. Concretely:
 
 - **Base URL:** `https://kb.internal` (port 443; self-signed cert). *(Canonical since the 2026-06-19 cutover; was `wip-kb.local`.)* The single source of truth for the instance is `.claude/kb.json` (`kb_app_url` + `kb_api_key_file`) — the served KB client reads it, so a future rename is one edit there. Runtime/ops key: `~/.wip-deploy/kb/secrets/api-key`.
-- **MCP server name** is `wip-kb` (not `wip`). Tool calls surface as `mcp__wip-kb__<tool>`. Many gene-pool docs reference `mcp__wip__*` — translate.
-- **`.mcp.json`** uses `WIP_API_KEY_FILE` pointing at `~/.wip-deploy/wip-kb/secrets/api-key` (privileged admin key). Key rotation is one file write; do not paste literal keys into `.mcp.json`.
+- **MCP server name** is `wip` (as wired in `.mcp.json`). Tool calls surface as `mcp__wip__<tool>`. (This app once used a `wip-kb`-named server; `.mcp.json` now names it `wip` and points every store URL at `kb.internal`. Gene-pool docs that say `mcp__wip__*` are therefore correct as-is — no translation needed.)
+- **`.mcp.json`** uses `WIP_API_KEY_FILE` pointing at `~/.wip-deploy/kb/secrets/api-key` (privileged admin key). Key rotation is one file write; do not paste literal keys into `.mcp.json`.
 - **`.env`** carries the runtime key scoped to `dev-kb` (already provisioned during spawn — see `.env` for the value, on disk at `~/.wip-deploy/wip-kb/secrets/api-key-dev-kb`).
 
 ### TLS gotcha for the Node server
@@ -65,9 +65,9 @@ This app talks to the **`wip-kb` instance** on the Pi cluster, not local-dev. Co
 
 **Never bootstrap `kb` from your dev workflow.** That's BootstrapGate's job. `kb` exists only when a user (Peter) confirms the bootstrap offer in the running app.
 
-**To clean up `dev-kb` during iteration:** use the namespace management API (`mcp__wip-kb__delete_namespace` with `deletion_mode: retain` semantics, then re-`create_namespace`). Do **not** invoke `tools/dev-delete.py` — it bypasses the API and points at MongoDB directly. Proper NS management is via API.
+**To clean up `dev-kb` during iteration:** use the namespace management API (`mcp__wip__delete_namespace` with `deletion_mode: retain` semantics, then re-`create_namespace`). Do **not** invoke `tools/dev-delete.py` — it bypasses the API and points at MongoDB directly. Proper NS management is via API.
 
-**MCP key derivation note.** The privileged MCP admin key is unrestricted across namespaces, so always pass `namespace="dev-kb"` explicitly on MCP tool calls. The app's runtime key in `.env` is namespace-scoped, so the python client derives the namespace automatically — but only for runtime calls, not for `mcp__wip-kb__*` tool calls in this Claude session.
+**MCP key derivation note.** The privileged MCP admin key is unrestricted across namespaces, so always pass `namespace="dev-kb"` explicitly on MCP tool calls. The app's runtime key in `.env` is namespace-scoped, so the python client derives the namespace automatically — but only for runtime calls, not for `mcp__wip__*` tool calls in this Claude session.
 
 ---
 
@@ -148,7 +148,7 @@ Read each template's header comment, fill in the TODOs (namespace = `kb`, app ti
 
 ## MCP
 
-WIP is accessed exclusively via MCP tools (88 tools, 5 resources) under the **`wip-kb`** server. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
+WIP is accessed exclusively via MCP tools (88 tools, 5 resources) under the **`wip`** server. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
 
 Required reads before writing any code:
 - `wip://conventions` — bulk-first API, identity hashing, versioning
