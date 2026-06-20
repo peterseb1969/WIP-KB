@@ -104,6 +104,24 @@ async function maxCaseNumber(ns: string, key: string): Promise<number> {
   return mx
 }
 
+// best-effort seed for the per-case response sequence; the CASE-<n>#<seq>
+// synonym claim is the atomic correctness guard (mirrors maxCaseNumber).
+async function maxResponseSeq(caseNumber: number, ns: string, key: string): Promise<number> {
+  let mx = 0, page = 1
+  for (;;) {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'CASE_RESPONSE', filters: [{ field: 'data.case_number', operator: 'eq', value: caseNumber }], page, page_size: 100 })
+    const items: AnyObj[] = d.items || []
+    for (const it of items) {
+      const s = it.data?.response_seq
+      if (typeof s === 'number' && s > mx) mx = s
+    }
+    if (page >= (d.pages || 1) || items.length === 0) break
+    page += 1
+  }
+  return mx
+}
+
 // derive REFERENCES edges from related CASE-<n> mentions (unresolved -> skipped,
 // same contract as the loaders; re-runs dedup via the edge's identity fields)
 async function deriveReferences(sourceId: string, related: string[], ns: string, key: string): Promise<number> {
@@ -135,16 +153,6 @@ function nowStamp(): string {
   const d = new Date()
   const p = (x: number) => String(x).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
-// rewrite the `status:` line inside the body's YAML frontmatter so the stored
-// flat-file text and data.status cannot diverge (the CASE-462 drift class)
-function rewriteFrontmatterStatus(body: string, to: string): string {
-  const m = /^---\n([\s\S]*?)\n---/.exec(body)
-  if (!m || m[1] === undefined) return body
-  const inner = m[1]
-  const fm = inner.replace(/^status:.*$/m, `status: ${to}`)
-  return body.slice(0, 4) + fm + body.slice(4 + inner.length)
 }
 
 const router = Router()
@@ -214,9 +222,11 @@ router.post('/cases', async (req, res) => {
   }
 })
 
-// POST /cases/:n/<verb> — append a section, apply the status machine.
-// Optimistic concurrency: read -> append -> PATCH with if_match; retry on
-// concurrency_conflict so concurrent writers both land.
+// POST /cases/:n/<verb> — v3 (CASE-481 fork 3): discourse becomes its own
+// CASE_RESPONSE doc + RESPONDS_TO edge (append-only, immutable); status changes
+// are a field update on the CASE_RECORD (which now has identity, so this is a
+// clean versioned PATCH, not the old zero-identity loophole). The case body is
+// NO LONGER appended to — status lives on the case, conversation in response docs.
 router.post('/cases/:n/:verb', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
@@ -237,46 +247,87 @@ router.post('/cases/:n/:verb', async (req, res) => {
     return
   }
   try {
-    const docId = await resolveCase(n, ns, key)
-    if (!docId) {
+    const caseDocId = await resolveCase(n, ns, key)
+    if (!caseDocId) {
       res.status(404).json({ error: `CASE-${n} not found in ${ns}` })
       return
     }
-    for (let attempt = 0; attempt < PATCH_MAX_RETRIES; attempt++) {
-      const doc = await getDoc(docId, ns, key)
-      const data: AnyObj = doc.data || {}
-      const current = String(data.status || 'open')
-      if (verb.to) {
-        const legal = TRANSITIONS[current] ?? []
-        if (!legal.includes(verb.to)) {
-          res.status(422).json({
-            error: `illegal transition: ${current} -> ${verb.to} for CASE-${n}`,
-            legal_transitions: legal,
-          })
-          return
-        }
-      }
-      const section = `\n## ${verb.heading} — ${b.author} (${nowStamp()})\n\n${String(b.text).trim()}\n`
-      let newBody = String(data.body || '') + section
-      const patch: AnyObj = { body: newBody }
-      if (verb.to) {
-        newBody = rewriteFrontmatterStatus(newBody, verb.to)
-        patch.body = newBody
-        patch.status = verb.to
-        patch.tags = [...(data.tags || []).filter((t: string) => !t.startsWith('status-')), `status-${verb.to}`]
-      }
-      const d = await wipReq('PATCH', `/api/document-store/documents?namespace=${ns}`, key,
-        [{ document_id: docId, patch, if_match: doc.version }])
-      const r = (d.results || [])[0] || {}
-      if (r.status === 'updated' || r.status === 'unchanged') {
-        res.json({ case: n, document_id: docId, status: verb.to || current, doc_version: (doc.version || 0) + 1 })
+    // Status transition check against the case's current status.
+    const caseDoc = await getDoc(caseDocId, ns, key)
+    const current = String((caseDoc.data || {}).status || 'open')
+    if (verb.to) {
+      const legal = TRANSITIONS[current] ?? []
+      if (!legal.includes(verb.to)) {
+        res.status(422).json({
+          error: `illegal transition: ${current} -> ${verb.to} for CASE-${n}`,
+          legal_transitions: legal,
+        })
         return
       }
-      if (r.error_code === 'concurrency_conflict') continue // raced — re-read and retry
-      res.status(502).json({ error: `patch failed: ${r.error || JSON.stringify(r)}` })
+    }
+
+    // 1) Create the CASE_RESPONSE. response_seq is per-case monotonic; the
+    //    CASE-<n>#<seq> synonym claim is the atomic guard + the human handle.
+    const respTid = await templateId('CASE_RESPONSE', ns, key)
+    let seq = (await maxResponseSeq(n, ns, key)) + 1
+    let responseId = ''
+    for (let i = 0; i < ALLOC_MAX_RETRIES; i++) {
+      const d = await wipReq('POST', '/api/document-store/documents', key, [{
+        template_id: respTid, namespace: ns, created_by: 'kb-gateway',
+        data: {
+          case_number: n, response_seq: seq, response_kind: req.params.verb,
+          body: String(b.text).trim(), author: String(b.author), doc_status: 'published',
+        },
+        synonyms: [{ value: `CASE-${n}#${seq}` }],
+      }])
+      const r = (d.results || [])[0] || {}
+      if (r.status === 'created' || r.status === 'updated') { responseId = r.document_id; break }
+      if (r.error_code === 'synonym_conflict' || /different entry/.test(r.error || '')) { seq += 1; continue }
+      res.status(502).json({ error: `response create failed at CASE-${n}#${seq}: ${r.error || JSON.stringify(r)}` })
       return
     }
-    res.status(409).json({ error: `CASE-${n}: still conflicting after ${PATCH_MAX_RETRIES} retries` })
+    if (!responseId) {
+      res.status(503).json({ error: `response allocation exhausted ${ALLOC_MAX_RETRIES} retries` })
+      return
+    }
+
+    // 2) RESPONDS_TO edge: response -> case (idempotent on [source_ref, target_ref]).
+    const edgeTid = await templateId('RESPONDS_TO', ns, key)
+    await wipReq('POST', '/api/document-store/documents', key, [{
+      template_id: edgeTid, namespace: ns, created_by: 'kb-gateway',
+      data: { source_ref: responseId, target_ref: caseDocId },
+    }])
+
+    // 3) Status transition (respond/close/implement) — a versioned field update
+    //    on the case; the body is untouched. if_match + retry on concurrency.
+    let newStatus = current
+    if (verb.to) {
+      let ok = false
+      for (let attempt = 0; attempt < PATCH_MAX_RETRIES; attempt++) {
+        const fresh = await getDoc(caseDocId, ns, key)
+        const fdata: AnyObj = fresh.data || {}
+        const patch: AnyObj = {
+          status: verb.to,
+          tags: [...(fdata.tags || []).filter((t: string) => !t.startsWith('status-')), `status-${verb.to}`],
+        }
+        const d = await wipReq('PATCH', `/api/document-store/documents?namespace=${ns}`, key,
+          [{ document_id: caseDocId, patch, if_match: fresh.version }])
+        const r = (d.results || [])[0] || {}
+        if (r.status === 'updated' || r.status === 'unchanged') { newStatus = verb.to; ok = true; break }
+        if (r.error_code === 'concurrency_conflict') continue
+        res.status(502).json({ error: `status update failed: ${r.error || JSON.stringify(r)}` })
+        return
+      }
+      if (!ok) {
+        res.status(409).json({ error: `CASE-${n}: status update still conflicting after ${PATCH_MAX_RETRIES} retries (response CASE-${n}#${seq} was recorded)` })
+        return
+      }
+    }
+
+    res.json({
+      case: n, response_seq: seq, response_handle: `CASE-${n}#${seq}`,
+      response_document_id: responseId, status: newStatus,
+    })
   } catch (e) {
     const s = e instanceof WipError ? 502 : 500
     res.status(s).json({ error: (e as Error).message })
