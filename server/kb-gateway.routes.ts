@@ -732,7 +732,17 @@ router.get('/cases', async (req, res) => {
   const ns = String(req.query.namespace || NS_DEFAULT)
   const { page, pageSize } = pageParams(req)
   const filters: AnyObj[] = []
-  if (req.query.status) filters.push({ field: 'data.status', operator: 'eq', value: String(req.query.status) })
+  // status accepts a comma list (eq for one, in for many); the rest are exact
+  // matches on the first-class CASE_RECORD facets (CASE-482 — server-side
+  // faceted filtering so the client never queries the store directly).
+  if (req.query.status) {
+    const vals = String(req.query.status).split(',').map((s) => s.trim()).filter(Boolean)
+    if (vals.length === 1) filters.push({ field: 'data.status', operator: 'eq', value: vals[0] })
+    else if (vals.length > 1) filters.push({ field: 'data.status', operator: 'in', value: vals })
+  }
+  for (const f of ['filed_by', 'severity', 'type', 'component', 'app']) {
+    if (req.query[f]) filters.push({ field: `data.${f}`, operator: 'eq', value: String(req.query[f]) })
+  }
   if (req.query.since) filters.push({ field: 'updated_at', operator: 'gte', value: String(req.query.since) })
   try {
     const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,

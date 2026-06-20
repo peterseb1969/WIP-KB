@@ -39,7 +39,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 
-from kb_write_core import DEV_ROOT, resolve_key_file
+from kb_client_core import DEV_ROOT, resolve_key_file
 
 # Canonical repo name → filesystem path (under DEV_ROOT, env: KB_DEV_ROOT).
 # Names use the same canonical form as kb_write_core.APP_ALIASES where they
