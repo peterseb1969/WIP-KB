@@ -46,7 +46,10 @@ The spec is authoritative. If FRanC's papers and this CLAUDE.md disagree on anyt
 This app talks to the **`wip-kb` instance** on the Pi cluster, not local-dev. Concretely:
 
 - **Base URL:** `https://kb.internal` (port 443; self-signed cert). *(Canonical since the 2026-06-19 cutover; was `wip-kb.local`.)* The single source of truth for the instance is `.claude/kb.json` (`kb_app_url` + `kb_api_key_file`) — the served KB client reads it, so a future rename is one edit there. Runtime/ops key: `~/.wip-deploy/kb/secrets/api-key`.
-- **MCP server name** is `wip` (as wired in `.mcp.json`). Tool calls surface as `mcp__wip__<tool>`. (This app once used a `wip-kb`-named server; `.mcp.json` now names it `wip` and points every store URL at `kb.internal`. Gene-pool docs that say `mcp__wip__*` are therefore correct as-is — no translation needed.)
+- **Two MCP servers** in `.mcp.json` (local/gitignored), so destructive/dev work targets the right instance — Peter toggles which is active:
+  - **`wip`** → canonical **kb.internal** (tools surface as `mcp__wip__<tool>`). The default; gene-pool docs that say `mcp__wip__*` mean this one.
+  - **`wip-local`** → dev sandbox **localhost:8443** (prod restore; key `~/.wip-deploy/wip-local/secrets/api-key`). Tools surface as `mcp__wip-local__<tool>`.
+  - **Discipline:** schema/data iteration and any destructive op (delete/create namespace, template churn) go through **`wip-local`**; `wip` is read-mostly against canonical. Never run a namespace/template mutation without confirming which server you're on — a wrong-target `delete_namespace` against `wip` hits production. (This app once used a `wip-kb`-named server; ignore that — it's `wip` + `wip-local` now.)
 - **`.mcp.json`** uses `WIP_API_KEY_FILE` pointing at `~/.wip-deploy/kb/secrets/api-key` (privileged admin key). Key rotation is one file write; do not paste literal keys into `.mcp.json`.
 - **`.env`** carries the runtime key scoped to `dev-kb` (already provisioned during spawn — see `.env` for the value, on disk at `~/.wip-deploy/wip-kb/secrets/api-key-dev-kb`).
 
@@ -148,7 +151,7 @@ Read each template's header comment, fill in the TODOs (namespace = `kb`, app ti
 
 ## MCP
 
-WIP is accessed exclusively via MCP tools (88 tools, 5 resources) under the **`wip`** server. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
+WIP is accessed exclusively via MCP tools (88 tools, 5 resources) under the **`wip`** server (canonical kb.internal) or **`wip-local`** server (dev localhost:8443) — see "Backend Target" for the toggle/discipline. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
 
 Required reads before writing any code:
 - `wip://conventions` — bulk-first API, identity hashing, versioning
