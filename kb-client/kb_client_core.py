@@ -131,6 +131,12 @@ def targets() -> list[tuple[str, str, Path]]:
 
 
 def _gw_url(base_url: str, path: str) -> str:
+    # Pin every call to the configured namespace. In prod KB_NAMESPACE is 'kb'
+    # (== the gateway default, so a no-op); set it to a dev namespace (e.g.
+    # kb-redesign) to point the whole client there. The gateway treats
+    # ?namespace as the explicit override.
+    sep = "&" if "?" in path else "?"
+    path = f"{path}{sep}namespace={urllib.parse.quote(NAMESPACE)}"
     return f"{base_url}{GW_BASE_PATH}/server-api/kb{path}"
 
 

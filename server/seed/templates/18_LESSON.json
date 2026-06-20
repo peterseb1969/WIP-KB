@@ -4,7 +4,6 @@
   "description": "Lessons-learned entries (DESIGN.md §5.3). lessons.md content + ongoing /lesson captures. v3 (CASE-481): identity is the KB-minted `lesson_number` (per-type sequence, synonym LESSON-<n>) — title becomes mutable.",
   "usage": "entity",
   "identity_fields": ["lesson_number"],
-  "metadata": { "custom": { "write": { "number_field": "lesson_number", "synonym_prefix": "LESSON", "search_key": ["title"] } } },
   "fields": [
     { "name": "lesson_number", "label": "Lesson Number", "type": "integer", "mandatory": true },
     { "name": "title",       "label": "Title",       "type": "string",  "mandatory": true, "full_text_indexed": true },

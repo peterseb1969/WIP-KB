@@ -1,0 +1,15 @@
+{
+  "value": "WRITE_POLICY",
+  "label": "Write Policy",
+  "description": "Per-doc-type write rules the KB gateway derives behaviour from (CASE-482). FIRST-CLASS config DATA — one WRITE_POLICY document per doc_type — not gateway code and not template metadata (metadata is a throwaway scratchpad; load-bearing config lives in documents). A 'mint' policy tells the gateway to allocate a per-type number (number_field) and claim a <synonym_prefix>-<n> Registry synonym, resolving-then-minting on search_key. Absence of a policy doc for a type means natural-identity upsert.",
+  "usage": "entity",
+  "identity_fields": ["doc_type"],
+  "header_fields": ["doc_type", "write_mode"],
+  "fields": [
+    { "name": "doc_type",       "label": "Doc Type",       "type": "string", "mandatory": true },
+    { "name": "write_mode",     "label": "Write Mode",     "type": "term",   "mandatory": true, "reference_type": "term", "terminology_ref": "KB_WRITE_MODE" },
+    { "name": "number_field",   "label": "Number Field",   "type": "string" },
+    { "name": "synonym_prefix", "label": "Synonym Prefix", "type": "string" },
+    { "name": "search_key",     "label": "Search Key",     "type": "array",  "array_item_type": "string" }
+  ]
+}

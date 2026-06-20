@@ -5,7 +5,6 @@
   "usage": "entity",
   "identity_fields": ["case_number"],
   "header_fields": ["title", "case_number", "status"],
-  "metadata": { "custom": { "write": { "number_field": "case_number", "synonym_prefix": "CASE", "search_key": [] } } },
   "fields": [
     { "name": "title",       "label": "Title",        "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "body",        "label": "Body",         "type": "string",  "mandatory": true, "full_text_indexed": true },

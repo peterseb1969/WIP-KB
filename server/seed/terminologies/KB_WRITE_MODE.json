@@ -1,0 +1,10 @@
+{
+  "value": "KB_WRITE_MODE",
+  "label": "KB Write Mode",
+  "description": "How the KB gateway writes a given doc type (CASE-482). Term-backed so the vocabulary is constrained and discoverable; consumed by WRITE_POLICY documents, not by gateway code.",
+  "mutable": true,
+  "terms": [
+    { "value": "mint",    "label": "Mint",    "sort_order": 10, "description": "Gateway allocates a per-type contiguous number (written as the identity field) and claims a <PREFIX>-<n> Registry synonym atomically. Resolve-then-mint on the policy's search_key; empty search_key always mints fresh." },
+    { "value": "natural", "label": "Natural", "sort_order": 20, "description": "Upsert by the template's own identity_fields (a caller-provided natural key). The default behaviour when no WRITE_POLICY doc exists for a type." }
+  ]
+}

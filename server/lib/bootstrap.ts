@@ -219,10 +219,6 @@ export async function runBootstrap(
       if (data.header_fields) template.header_fields = data.header_fields
       if (data.reporting) template.reporting = data.reporting
 
-      // Forward template-level metadata — carries metadata.custom.write, the
-      // generic-write config the gateway derives per type (CASE-482).
-      if (data.metadata) template.metadata = data.metadata
-
       const tmplResult = await wipPost(
         '/api/template-store/templates?on_conflict=validate',
         [template],
@@ -237,7 +233,12 @@ export async function runBootstrap(
     progress('cache', 'Waiting for template cache to refresh...')
     await new Promise((resolve) => setTimeout(resolve, 6000))
 
-    // Step 6: Write the BOOTSTRAP_RECORD audit doc.
+    // Step 6: Seed the WRITE_POLICY config docs (CASE-482) — first-class data
+    // the gateway derives per-type write behaviour from.
+    progress('write-policies', 'Seeding WRITE_POLICY config docs...')
+    await writeWritePolicies()
+
+    // Step 7: Write the BOOTSTRAP_RECORD audit doc.
     progress('audit', 'Writing BOOTSTRAP_RECORD audit doc...')
     await writeBootstrapRecord({
       startedAt,
@@ -256,6 +257,33 @@ export async function runBootstrap(
     })
     throw err
   }
+}
+
+/**
+ * Seed the WRITE_POLICY config documents (CASE-482).
+ *
+ * One doc per doc_type that needs non-default write behaviour, from
+ * seed/write-policies.json. These ARE the source the gateway reads to decide
+ * mint-vs-natural per type — config as first-class data, not gateway code or
+ * template metadata. Idempotent: identity is doc_type, so re-bootstrap updates
+ * in place. Types absent here write by natural identity.
+ */
+async function writeWritePolicies(): Promise<void> {
+  const policies: AnyObj[] = JSON.parse(
+    readFileSync(join(SEED_DIR, 'write-policies.json'), 'utf-8'),
+  )
+  if (!policies.length) return
+  const tmpl = (await wipGet(
+    `/api/template-store/templates/by-value/WRITE_POLICY?namespace=${NAMESPACE}`,
+  )) as { template_id: string; version: number }
+  const docs = policies.map((p) => ({
+    template_id: tmpl.template_id,
+    template_version: tmpl.version,
+    namespace: NAMESPACE,
+    data: p,
+  }))
+  const result = await wipPost('/api/document-store/documents', docs)
+  assertBulkSuccess(result, 'WRITE_POLICY docs')
 }
 
 /**

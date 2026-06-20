@@ -169,18 +169,36 @@ async function mintNumberedDoc(opts: {
   throw new WipError(503, `${templateValue} allocation exhausted ${ALLOC_MAX_RETRIES} retries`)
 }
 
-// Per-type write config (CASE-481/482), DERIVED from the template's
-// metadata.custom.write — the schema is the single source, no in-gateway map to
-// drift. Shape persisted at bootstrap: { number_field, synonym_prefix, search_key }.
-// Present → mint a per-type number; absent → the type writes by its natural
-// identity (upsert). A new mint type is added by seeding metadata.custom.write,
-// never by editing the gateway.
-async function writeConfig(type: string, ns: string, key: string): Promise<{ numberField: string; prefix: string; searchKey: string[] } | null> {
-  const t = await getTemplate(type, ns, key)
-  const w = t.metadata?.custom?.write
-  if (w && w.number_field && w.synonym_prefix)
-    return { numberField: w.number_field, prefix: w.synonym_prefix, searchKey: w.search_key || [] }
-  return null
+// Per-type write config (CASE-481/482) lives as first-class WRITE_POLICY
+// DOCUMENTS — not gateway code, not template metadata. Each policy doc is
+// { doc_type, write_mode, number_field, synonym_prefix, search_key }; a
+// write_mode of 'mint' means allocate a per-type number, else (or absent) the
+// type writes by its natural identity. Loaded once per namespace and cached.
+// Adding a mint type = add a WRITE_POLICY doc (a bootstrap seed), never a code edit.
+type MintCfg = { numberField: string; prefix: string; searchKey: string[] }
+const policyCache = new Map<string, Map<string, MintCfg>>()
+async function loadPolicies(ns: string, key: string): Promise<Map<string, MintCfg>> {
+  const hit = policyCache.get(ns)
+  if (hit) return hit
+  const m = new Map<string, MintCfg>()
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'WRITE_POLICY', filters: [], page: 1, page_size: 100 })
+    for (const it of (d.items || []) as AnyObj[]) {
+      const p = it.data || {}
+      if (p.doc_type && p.write_mode === 'mint' && p.number_field)
+        m.set(p.doc_type, { numberField: p.number_field, prefix: p.synonym_prefix, searchKey: p.search_key || [] })
+    }
+    policyCache.set(ns, m)  // cache only on success — a transient error retries next write
+  } catch (e) {
+    // No WRITE_POLICY template/docs (un-migrated namespace) → every type writes
+    // natural. Warn so a missing-policy misconfiguration isn't silent.
+    console.warn(`[kb-gateway] WRITE_POLICY load failed for ns=${ns}; treating all types as natural: ${(e as Error).message}`)
+  }
+  return m
+}
+async function writeConfig(type: string, ns: string, key: string): Promise<MintCfg | null> {
+  return (await loadPolicies(ns, key)).get(type) || null
 }
 
 // The single generic write seam (CASE-482): mint a per-type number when the type
@@ -877,6 +895,39 @@ router.get('/firesides/:id', async (req, res) => {
       res.status(404).json({ error: `fireside ${req.params.id} not found in ${ns}` })
       return
     }
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// GET /types — the doc-type manifest the write client lists/validates against
+// (CASE-482). Entity templates only; write_mode is derived from the same
+// metadata.custom.write the gateway mints from ('mint' when present, else
+// 'natural' upsert by identity). The schema is the single source — this just
+// surfaces it, so the client never hand-maintains a type list.
+router.get('/types', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  try {
+    const [d, policies] = await Promise.all([
+      wipReq('GET', `/api/template-store/templates?namespace=${ns}&page_size=100`, key),
+      loadPolicies(ns, key),
+    ])
+    const types = (d.items || [])
+      .filter((t: AnyObj) => (t.usage || 'entity') !== 'relationship')
+      .map((t: AnyObj) => {
+        const cfg = policies.get(t.value)
+        return {
+          type: t.value,
+          label: t.label || t.value,
+          write_mode: cfg ? 'mint' : 'natural',
+          synonym_prefix: cfg?.prefix || null,
+          identity_fields: t.identity_fields || [],
+        }
+      })
+      .sort((a: AnyObj, b: AnyObj) => String(a.type).localeCompare(String(b.type)))
+    res.json({ namespace: ns, total: types.length, types })
+  } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
 })
