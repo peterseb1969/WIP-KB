@@ -1,10 +1,11 @@
 {
   "value": "DESIGN_DECISION",
   "label": "Design Decision",
-  "description": "Architectural decision documents (DESIGN.md §5.2). Examples: archetypes paper, FTS fireside outcomes. Identity by title — re-filing under the same title creates a new version.",
+  "description": "Architectural decision documents (DESIGN.md §5.2). Examples: archetypes paper, FTS fireside outcomes. v3 (CASE-481): identity is the KB-minted `decision_number` (per-type sequence, synonym DECISION-<n>) — title becomes mutable.",
   "usage": "entity",
-  "identity_fields": ["title"],
+  "identity_fields": ["decision_number"],
   "fields": [
+    { "name": "decision_number", "label": "Decision Number", "type": "integer", "mandatory": true },
     { "name": "title",       "label": "Title",       "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "body",        "label": "Body",        "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "authored_by", "label": "Authored By", "type": "string",  "mandatory": true },

@@ -1,11 +1,12 @@
 {
   "value": "DOCUMENT",
   "label": "Document",
-  "description": "Mirror of a human-targeted markdown file from a source repo (CASE-346). Source-of-truth lives at `path` in the originating repo; this record is the kb-resident copy for FTS / cross-reference / graph traversal. Generic — discriminated per-instance by `kind`. Distinct from the entity templates (DESIGN_DECISION, FIRESIDE, LESSON) which are written-from-YAC via slash commands and carry their own structured fields.",
+  "description": "Mirror of a human-targeted markdown file from a source repo (CASE-346). v3 (CASE-481): identity is the KB-minted `paper_number` (per-type sequence, synonym PAPER-<n>) — NOT `path` (which collides across repos and breaks on rename). On first contact the gateway resolves by the composite search key (repo_origin, path) → adopts the existing paper_number or mints a new one; thereafter path/repo_origin are mutable non-identity fields. Generic — discriminated per-instance by `kind`.",
   "usage": "entity",
-  "identity_fields": ["path"],
+  "identity_fields": ["paper_number"],
   "header_fields": ["title", "kind"],
   "fields": [
+    { "name": "paper_number",    "label": "Paper Number",    "type": "integer", "mandatory": true },
     { "name": "path",            "label": "Path",            "type": "string",  "mandatory": true,  "full_text_indexed": true },
     { "name": "repo_origin",     "label": "Repo Origin",     "type": "string",  "mandatory": true },
     { "name": "title",           "label": "Title",           "type": "string",  "mandatory": true,  "full_text_indexed": true },

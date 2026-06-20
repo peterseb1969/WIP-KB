@@ -1,10 +1,11 @@
 {
   "value": "FIRESIDE",
   "label": "Fireside",
-  "description": "Design-chat / fireside transcripts (DESIGN.md §5.4). topic gets FTS weight A for topic-page aggregation. chat_date separates when-the-chat-happened from when-it-was-persisted.",
+  "description": "Design-chat / fireside transcripts (DESIGN.md §5.4). v3 (CASE-481): identity is the KB-minted `fireside_number` (per-type sequence, synonym FIRESIDE-<n>) — title/topic become mutable. topic gets FTS weight A for topic-page aggregation. chat_date separates when-the-chat-happened from when-it-was-persisted.",
   "usage": "entity",
-  "identity_fields": ["title"],
+  "identity_fields": ["fireside_number"],
   "fields": [
+    { "name": "fireside_number", "label": "Fireside Number", "type": "integer", "mandatory": true },
     { "name": "title",       "label": "Title",       "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "body",        "label": "Body",        "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "authored_by", "label": "Authored By", "type": "string",  "mandatory": true },
