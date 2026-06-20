@@ -41,9 +41,9 @@ The spec is authoritative. If FRanC's papers and this CLAUDE.md disagree on anyt
 
 ---
 
-## Backend Target — wip-kb
+## Backend Target — kb
 
-This app talks to the **`wip-kb` instance** on the Pi cluster, not local-dev. Concretely:
+This app talks to the **`kb` instance** on the Pi cluster, not local-dev. Concretely:
 
 - **Base URL:** `https://kb.internal` (port 443; self-signed cert). *(Canonical since the 2026-06-19 cutover; was `wip-kb.local`.)* The single source of truth for the instance is `.claude/kb.json` (`kb_app_url` + `kb_api_key_file`) — the served KB client reads it, so a future rename is one edit there. Runtime/ops key: `~/.wip-deploy/kb/secrets/api-key`.
 - **Two MCP servers** in `.mcp.json` (local/gitignored), so destructive/dev work targets the right instance — Peter toggles which is active:
@@ -51,11 +51,11 @@ This app talks to the **`wip-kb` instance** on the Pi cluster, not local-dev. Co
   - **`wip-local`** → dev sandbox **localhost:8443** (prod restore; key `~/.wip-deploy/wip-local/secrets/api-key`). Tools surface as `mcp__wip-local__<tool>`.
   - **Discipline:** schema/data iteration and any destructive op (delete/create namespace, template churn) go through **`wip-local`**; `wip` is read-mostly against canonical. Never run a namespace/template mutation without confirming which server you're on — a wrong-target `delete_namespace` against `wip` hits production. (This app once used a `wip-kb`-named server; ignore that — it's `wip` + `wip-local` now.)
 - **`.mcp.json`** uses `WIP_API_KEY_FILE` pointing at `~/.wip-deploy/kb/secrets/api-key` (privileged admin key). Key rotation is one file write; do not paste literal keys into `.mcp.json`.
-- **`.env`** carries the runtime key scoped to `dev-kb` (already provisioned during spawn — see `.env` for the value, on disk at `~/.wip-deploy/wip-kb/secrets/api-key-dev-kb`).
+- **`.env`** carries the runtime key scoped to `dev-kb` (already provisioned during spawn — see `.env` for the value, on disk at `~/.wip-deploy/kb/secrets/`).
 
 ### TLS gotcha for the Node server
 
-`kb.internal` (like `wip-kb.local` before it) uses a self-signed cert. Node.js `fetch()` rejects it by default. Add `NODE_TLS_REJECT_UNAUTHORIZED=0` to the `dev:server` script (NOT `start`/production). The python MCP client uses `WIP_VERIFY_TLS=false` (already set in `.mcp.json` and `.env`).
+`kb.internal` uses a self-signed cert. Node.js `fetch()` rejects it by default. Add `NODE_TLS_REJECT_UNAUTHORIZED=0` to the `dev:server` script (NOT `start`/production). The python MCP client uses `WIP_VERIFY_TLS=false` (already set in `.mcp.json` and `.env`).
 
 ---
 
