@@ -180,6 +180,46 @@ async function mintNumberedDoc(opts: {
   throw new WipError(503, `${templateValue} allocation exhausted ${ALLOC_MAX_RETRIES} retries`)
 }
 
+// Per-type write config (CASE-481/482). END-STATE: derive from the template's
+// metadata.custom.write (templates persist a metadata.custom slot) so the schema
+// is the single source — kept behind writeConfig() so that move is one function,
+// no call-site churn. Types absent here write by their natural identity (upsert).
+const WRITE_CONFIG: Record<string, { numberField: string; prefix: string; searchKey: string[] }> = {
+  CASE_RECORD:     { numberField: 'case_number',     prefix: 'CASE',     searchKey: [] },
+  FIRESIDE:        { numberField: 'fireside_number', prefix: 'FIRESIDE', searchKey: ['title'] },
+  DESIGN_DECISION: { numberField: 'decision_number', prefix: 'DECISION', searchKey: ['title'] },
+  LESSON:          { numberField: 'lesson_number',   prefix: 'LESSON',   searchKey: ['title'] },
+  DOCUMENT:        { numberField: 'paper_number',    prefix: 'PAPER',    searchKey: ['repo_origin', 'path'] },
+}
+function writeConfig(type: string): { numberField: string; prefix: string; searchKey: string[] } | null {
+  return WRITE_CONFIG[type] || null
+}
+
+// The single generic write seam (CASE-482): mint a per-type number when the type
+// has write config (resolve-then-mint by its search key), else upsert by the
+// template's natural identity. Every write verb routes through here — no bespoke
+// per-type mint/upsert logic survives in the handlers.
+async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyObj; ns: string; key: string }): Promise<{ document_id: string; result: string; number?: number; synonym?: string }> {
+  const { ns, key, metadata } = opts
+  const cfg = writeConfig(type)
+  if (cfg) {
+    const searchFilters = cfg.searchKey.map((f) => ({ field: `data.${f}`, operator: 'eq', value: data[f] }))
+    const m = await mintNumberedDoc({
+      templateValue: type, numberField: cfg.numberField, synonymPrefix: cfg.prefix,
+      searchFilters, data, metadata, ns, key,
+    })
+    return { document_id: m.document_id, result: m.result, number: m.number, synonym: m.synonym }
+  }
+  const tid = await templateId(type, ns, key)
+  const d = await wipReq('POST', '/api/document-store/documents', key, [{
+    template_id: tid, namespace: ns, created_by: 'kb-gateway', data, ...(metadata ? { metadata } : {}),
+  }])
+  const r = (d.results || [])[0] || {}
+  if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
+    throw new WipError(502, `${type} write failed: ${r.error || JSON.stringify(r)}`)
+  return { document_id: r.document_id, result: r.status }
+}
+
 // derive REFERENCES edges from related CASE-<n> mentions (unresolved -> skipped,
 // same contract as the loaders; re-runs dedup via the edge's identity fields)
 async function deriveReferences(sourceId: string, related: string[], ns: string, key: string): Promise<number> {
@@ -534,22 +574,13 @@ router.post('/journeys/mirror', async (req, res) => {
       const mo = String(months.indexOf(dm[1]) + 1).padStart(2, '0')
       journeyDate = `${year}-${mo}-${dm[2].padStart(2, '0')}`
     }
-    const tid = await templateId('JOURNEY_ENTRY', ns, key)
-    const d = await wipReq('POST', '/api/document-store/documents', key, [{
-      template_id: tid, namespace: ns, created_by: 'kb-gateway',
-      data: {
-        title, body: text, authored_by: String(b.authored_by || 'FRanC'),
-        doc_status: 'published', tags: ['journey-mirror', `day-${dayNum}`],
-        root: true, journey_date: journeyDate, day_number: dayNum,
-      },
-      metadata: { flat_file_mirror: `dayJournals/${fname}`, loader: 'kb-gateway' },
-    }])
-    const r = (d.results || [])[0] || {}
-    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status)) { // skipped = identical re-mirror, a success for upserts
-      res.status(502).json({ error: `journey mirror failed: ${r.error || JSON.stringify(r)}` })
-      return
-    }
-    res.json({ title, document_id: r.document_id, result: r.status })
+    // Generic write (JOURNEY_ENTRY has no write config → natural upsert by day_number).
+    const w = await genericWrite('JOURNEY_ENTRY', {
+      title, body: text, authored_by: String(b.authored_by || 'FRanC'),
+      doc_status: 'published', tags: ['journey-mirror', `day-${dayNum}`],
+      root: true, journey_date: journeyDate, day_number: dayNum,
+    }, { metadata: { flat_file_mirror: `dayJournals/${fname}`, loader: 'kb-gateway' }, ns, key })
+    res.json({ title, document_id: w.document_id, result: w.result })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
@@ -588,15 +619,9 @@ router.post('/documents/mirror', async (req, res) => {
     const tags = Array.isArray(b.tags) ? b.tags.map(String)
       : (fm.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean)
     if (tags.length) data.tags = tags
-    // Mint paper_number; first-contact dedup by the (repo_origin, path) search key
-    // (path is no longer identity — it collides across repos + breaks on rename).
-    const minted = await mintNumberedDoc({
-      templateValue: 'DOCUMENT', numberField: 'paper_number', synonymPrefix: 'PAPER',
-      searchFilters: [
-        { field: 'data.repo_origin', operator: 'eq', value: repoOrigin },
-        { field: 'data.path', operator: 'eq', value: relPath },
-      ],
-      data,
+    // Generic write (DOCUMENT config = mint paper_number, dedup by repo_origin+path;
+    // path is no longer identity — collides across repos + breaks on rename).
+    const minted = await genericWrite('DOCUMENT', data, {
       metadata: { flat_file_mirror: relPath, kind, loader: 'kb-gateway' },
       ns, key,
     })
@@ -652,16 +677,37 @@ router.post('/firesides/mirror', async (req, res) => {
     const tags = Array.isArray(b.tags) ? b.tags.map(String)
       : (fm.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean)
     if (tags.length) data.tags = tags
-    // Mint fireside_number; first-contact dedup by title (title is no longer
-    // identity — re-mirror with the same title reuses the number/versions).
-    const minted = await mintNumberedDoc({
-      templateValue: 'FIRESIDE', numberField: 'fireside_number', synonymPrefix: 'FIRESIDE',
-      searchFilters: [{ field: 'data.title', operator: 'eq', value: title }],
-      data,
+    // Generic write (FIRESIDE config = mint fireside_number, dedup by title).
+    const minted = await genericWrite('FIRESIDE', data, {
       metadata: { session_id: b.session_id || fm.session || null, flat_file_mirror: b.path || null, loader: 'kb-gateway' },
       ns, key,
     })
     res.json({ title, fireside_number: minted.number, synonym: minted.synonym, document_id: minted.document_id, result: minted.result })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// POST /write/:type — the generic typed-write surface (CASE-482). The uniform
+// migration target for every doc type: mint or natural-upsert per the type's
+// config/identity. Body = { data: {...}, metadata?: {...} }. Type-specific source
+// parsing (frontmatter→fields) is the caller's job; this is the write seam itself.
+// Makes any template writable — incl. the previously-orphaned DESIGN_DECISION /
+// LESSON (no bespoke verb needed).
+router.post('/write/:type', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const type = req.params.type
+  const b: AnyObj = req.body || {}
+  const data: AnyObj = b.data || {}
+  if (typeof data !== 'object' || Array.isArray(data) || !Object.keys(data).length) {
+    res.status(422).json({ error: 'data (non-empty object) is required' })
+    return
+  }
+  try {
+    const w = await genericWrite(type, data, { metadata: b.metadata, ns, key })
+    res.json({ type, ...w })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
