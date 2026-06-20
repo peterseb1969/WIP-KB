@@ -87,23 +87,6 @@ async function getDoc(id: string, ns: string, key: string): Promise<AnyObj> {
   return wipReq('GET', `/api/document-store/documents/${id}?namespace=${ns}`, key)
 }
 
-// best-effort seed; the atomic synonym claim is the correctness guard
-async function maxCaseNumber(ns: string, key: string): Promise<number> {
-  let mx = 0, page = 1
-  for (;;) {
-    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
-      { template_id: 'CASE_RECORD', filters: [], page, page_size: 100 })
-    const items: AnyObj[] = d.items || []
-    for (const it of items) {
-      const n = it.data?.case_number
-      if (typeof n === 'number' && n > mx) mx = n
-    }
-    if (page >= (d.pages || 1) || items.length === 0) break
-    page += 1
-  }
-  return mx
-}
-
 // best-effort seed for the per-case response sequence; the CASE-<n>#<seq>
 // synonym claim is the atomic correctness guard (mirrors maxCaseNumber).
 async function maxResponseSeq(caseNumber: number, ns: string, key: string): Promise<number> {
@@ -275,7 +258,6 @@ router.post('/cases', async (req, res) => {
     return
   }
   try {
-    const tid = await templateId('CASE_RECORD', ns, key)
     const data = {
       title: String(b.title), body: String(b.body || ''),
       authored_by: String(b.filed_by), doc_status: 'published',
@@ -285,35 +267,13 @@ router.post('/cases', async (req, res) => {
       component: String(b.component || ''), filed_by: String(b.filed_by),
       app: String(b.app || ''),
     }
-    // Capture the filing timestamp into metadata.custom.filed_at — the durable,
-    // never-re-mirrored field the loaders set and the UI's "Filed" sort reads.
-    // Prefer the body frontmatter `filed:` (what the operator wrote); else stamp now.
+    // Capture the filing timestamp into metadata.custom.filed_at (the UI's "Filed" sort reads it).
     const fm = parseFrontmatter(String(b.body || ''))
     const filedAt = fm.filed && /^\d{4}-\d{2}-\d{2}/.test(fm.filed) ? fm.filed : nowStamp()
-    let n = (await maxCaseNumber(ns, key)) + 1
-    for (let i = 0; i < ALLOC_MAX_RETRIES; i++) {
-      const d = await wipReq('POST', '/api/document-store/documents', key, [{
-        template_id: tid, namespace: ns, created_by: 'kb-gateway',
-        // NOTE: case_ref search-handle is HELD pending the KB identity decision
-        // (CASE-481/477) — not written here so this firesides roll doesn't ship it.
-        data: { ...data, case_number: n },
-        metadata: { custom: { filed_at: filedAt }, loader: 'kb-gateway' },
-        synonyms: [{ value: `CASE-${n}` }],
-      }])
-      const r = (d.results || [])[0] || {}
-      if (r.status === 'created' || r.status === 'updated') {
-        const edges = await deriveReferences(r.document_id, parseRelated(b.related), ns, key)
-        res.status(201).json({ case: n, synonym: `CASE-${n}`, document_id: r.document_id, edges })
-        return
-      }
-      if (r.error_code === 'synonym_conflict' || /different entry/.test(r.error || '')) {
-        n += 1 // concurrent filer claimed CASE-n — advance and retry
-        continue
-      }
-      res.status(502).json({ error: `allocate failed at CASE-${n}: ${r.error || JSON.stringify(r)}` })
-      return
-    }
-    res.status(503).json({ error: `allocation exhausted ${ALLOC_MAX_RETRIES} retries` })
+    // Generic write (CASE_RECORD config = mint case_number; empty search key → always a fresh number).
+    const w = await genericWrite('CASE_RECORD', data, { metadata: { custom: { filed_at: filedAt }, loader: 'kb-gateway' }, ns, key })
+    const edges = await deriveReferences(w.document_id, parseRelated(b.related), ns, key)
+    res.status(201).json({ case: w.number, synonym: w.synonym, document_id: w.document_id, edges })
   } catch (e) {
     const s = e instanceof WipError ? 502 : 500
     res.status(s).json({ error: (e as Error).message })
@@ -498,17 +458,8 @@ router.post('/sessions/mirror', async (req, res) => {
     if (fm.continues_from) data.continues_from = fm.continues_from.trim()
     if (fm.ended_at) data.ended_at = normalizeIsoDt(fm.ended_at)
 
-    const tid = await templateId('SESSION', ns, key)
-    const d = await wipReq('POST', '/api/document-store/documents', key, [{
-      template_id: tid, namespace: ns, created_by: 'kb-gateway',
-      data,
-      metadata: { flat_file_mirror: `reports/${sessionId}/session.md`, loader: 'kb-gateway' },
-    }])
-    const r = (d.results || [])[0] || {}
-    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status)) { // skipped = identical re-mirror, a success for upserts
-      res.status(502).json({ error: `session mirror failed: ${r.error || JSON.stringify(r)}` })
-      return
-    }
+    // Generic write (SESSION has no write config → natural upsert by session_id).
+    const w = await genericWrite('SESSION', data, { metadata: { flat_file_mirror: `reports/${sessionId}/session.md`, loader: 'kb-gateway' }, ns, key })
     // CONTINUES_FROM edge (CASE-389 §D): this session -> the prior one.
     // Prior not mirrored yet -> skipped; the next re-mirror converges.
     let edge = 'none'
@@ -523,7 +474,7 @@ router.post('/sessions/mirror', async (req, res) => {
         const cfTpl = await templateId('CONTINUES_FROM', ns, key)
         const ed = await wipReq('POST', '/api/document-store/documents', key, [{
           template_id: cfTpl, namespace: ns, created_by: 'kb-gateway',
-          data: { source_ref: r.document_id, target_ref: prior.document_id },
+          data: { source_ref: w.document_id, target_ref: prior.document_id },
           metadata: { edge_kind: 'CONTINUES_FROM', loader: 'kb-gateway' },
         }])
         const er = (ed.results || [])[0] || {}
@@ -532,7 +483,7 @@ router.post('/sessions/mirror', async (req, res) => {
         edge = 'target-not-in-kb-skipped'
       }
     }
-    res.json({ session_id: sessionId, document_id: r.document_id, result: r.status, continues_from_edge: edge })
+    res.json({ session_id: sessionId, document_id: w.document_id, result: w.result, continues_from_edge: edge })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
@@ -736,22 +687,13 @@ router.post('/stats/snapshot', async (req, res) => {
     ints[f] = v
   }
   try {
-    const tid = await templateId('GIT_STATS_SNAPSHOT', ns, key)
-    const d = await wipReq('POST', '/api/document-store/documents', key, [{
-      template_id: tid, namespace: ns, created_by: 'kb-gateway',
-      data: {
-        title: `${repo} — ${date}`, authored_by: String(b.authored_by || 'FRanC'),
-        doc_status: 'published', tags: ['git-stats', `repo-${repo}`, `date-${date}`],
-        root: false, snapshot_date: date, repo, ...ints,
-      },
-      metadata: { loader: 'kb-gateway' },
-    }])
-    const r = (d.results || [])[0] || {}
-    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status)) { // skipped = identical re-mirror, a success for upserts
-      res.status(502).json({ error: `stats snapshot failed: ${r.error || JSON.stringify(r)}` })
-      return
-    }
-    res.json({ repo, snapshot_date: date, document_id: r.document_id, result: r.status })
+    // Generic write (GIT_STATS_SNAPSHOT has no write config → natural upsert by [snapshot_date, repo]).
+    const w = await genericWrite('GIT_STATS_SNAPSHOT', {
+      title: `${repo} — ${date}`, authored_by: String(b.authored_by || 'FRanC'),
+      doc_status: 'published', tags: ['git-stats', `repo-${repo}`, `date-${date}`],
+      root: false, snapshot_date: date, repo, ...ints,
+    }, { metadata: { loader: 'kb-gateway' }, ns, key })
+    res.json({ repo, snapshot_date: date, document_id: w.document_id, result: w.result })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
