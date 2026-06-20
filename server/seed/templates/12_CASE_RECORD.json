@@ -1,9 +1,9 @@
 {
   "value": "CASE_RECORD",
   "label": "Case Record",
-  "description": "Cross-agent case filed by a YAC (DESIGN.md §5.1). Knowledge artifact / write-once breadcrumb. v2 (CASE-425): identity is the registry-assigned document_id (UUID); case_number is a display field whose uniqueness + human-handle role is carried by a `CASE-<n>` Registry synonym, allocated atomically via create-with-inline-synonym (fail-on-conflict → retry, CASE-436). Re-mirror resolves the CASE-<n> synonym to the document_id and updates in place. Supersedes the case_number-as-identity model (CASE-306 FS noclobber claim retired).",
+  "description": "Cross-agent case filed by a YAC (DESIGN.md §5.1). v3 redesign (CASE-481): identity is `case_number` — the KB-minted handle, written into the doc as THE identity field AND registered as the `CASE-<n>` Registry synonym atomically at creation (the synonym claim is the race/uniqueness guard, CASE-427/436). The case body + all classification fields are the mutable, versioned current statement of the case (PoNIF #2); discourse lives in separate CASE_RESPONSE docs (RESPONDS_TO). Supersedes the v2 `identity_fields: []` loophole model (CASE-477/478).",
   "usage": "entity",
-  "identity_fields": [],
+  "identity_fields": ["case_number"],
   "header_fields": ["title", "case_number", "status"],
   "fields": [
     { "name": "title",       "label": "Title",        "type": "string",  "mandatory": true, "full_text_indexed": true },

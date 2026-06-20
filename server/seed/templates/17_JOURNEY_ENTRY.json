@@ -1,9 +1,9 @@
 {
   "value": "JOURNEY_ENTRY",
   "label": "Journey Entry",
-  "description": "Day-journal entries persisted by FRanC via /kb-persist journey (DESIGN.md §5.5). Identity by title (CASE-310 corrects CASE-309's flat_file_mirror choice — the durable atomic identifier per template, not the filename string). FRanC's day-numbering convention prepends 'Day N:' to every journal title, making titles unique by construction. journey_date and day_number are non-identity fields for sort/filter only.",
+  "description": "Day-journal entries persisted by FRanC via /kb-persist journey (DESIGN.md §5.5). v3 redesign (CASE-481): identity is `day_number` — a genuine natural key (one entry per day, never renamed, meaningful as 'Day N'), replacing the fragile title-as-identity. title/body remain mutable, versioned. Half-days use fractional day_number (e.g. 7.5).",
   "usage": "entity",
-  "identity_fields": ["title"],
+  "identity_fields": ["day_number"],
   "fields": [
     { "name": "title",        "label": "Title",         "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "body",         "label": "Body",          "type": "string",  "mandatory": true, "full_text_indexed": true },
@@ -12,6 +12,6 @@
     { "name": "tags",         "label": "Tags",          "type": "array",   "array_item_type": "string" },
     { "name": "root",         "label": "Root",          "type": "boolean", "default_value": false },
     { "name": "journey_date", "label": "Journey Date",  "type": "date",    "mandatory": true },
-    { "name": "day_number",   "label": "Day Number",    "type": "number" }
+    { "name": "day_number",   "label": "Day Number",    "type": "number",  "mandatory": true }
   ]
 }

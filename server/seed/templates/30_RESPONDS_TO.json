@@ -1,0 +1,14 @@
+{
+  "value": "RESPONDS_TO",
+  "label": "Responds To",
+  "description": "Links a CASE_RESPONSE to the CASE_RECORD it belongs to (CASE-481 fork 3). The discussion-thread edge; the case's responses are traversed via this relationship.",
+  "usage": "relationship",
+  "versioned": false,
+  "identity_fields": ["source_ref", "target_ref"],
+  "source_templates": ["CASE_RESPONSE"],
+  "target_templates": ["CASE_RECORD"],
+  "fields": [
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RESPONSE"] },
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD"] }
+  ]
+}

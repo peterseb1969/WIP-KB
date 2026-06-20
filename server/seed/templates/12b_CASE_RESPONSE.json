@@ -1,0 +1,16 @@
+{
+  "value": "CASE_RESPONSE",
+  "label": "Case Response",
+  "description": "An entry in a case's discussion thread (CASE-481 fork 3): respond / comment / close / implement. Append-only, immutable event — you never edit a posted response, you add another (so the case body stops re-versioning per comment; status changes live on CASE_RECORD, discourse lives here). Identity is the composite [case_number, response_seq] — response_seq is a gateway-assigned monotonic sequence per case, giving an addressable human handle ('CASE-478 #3'), dedup safety, and no timestamp-in-identity (PoNIF #3). Linked to its case by the RESPONDS_TO edge.",
+  "usage": "entity",
+  "identity_fields": ["case_number", "response_seq"],
+  "header_fields": ["case_number", "response_seq", "response_kind"],
+  "fields": [
+    { "name": "case_number",   "label": "Case Number",   "type": "integer", "mandatory": true },
+    { "name": "response_seq",  "label": "Response Seq",  "type": "integer", "mandatory": true },
+    { "name": "response_kind", "label": "Response Kind", "type": "string",  "mandatory": true },
+    { "name": "body",          "label": "Body",          "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "author",        "label": "Author",        "type": "string",  "mandatory": true },
+    { "name": "doc_status",    "label": "Doc Status",    "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "published" }
+  ]
+}

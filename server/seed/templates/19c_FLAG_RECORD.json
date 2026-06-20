@@ -1,0 +1,18 @@
+{
+  "value": "FLAG_RECORD",
+  "label": "Flag Record",
+  "description": "The flag-for-YAC UI write surface (DESIGN.md §5.8). v3 redesign (CASE-481): identity is the composite natural key [flag_type, flagged_document] — 'Ready-for-discussion on CASE-478' is unique, and re-flagging the same type on the same doc is an idempotent version, not a duplicate. flag_type is the intent; flagged_document is the doc being flagged (the FLAGGED_FROM edge derives from it). doc_status defaults to 'published' (flags are dispatched events; the create path must set it — the v2 'doc_status required' failure is fixed by the gateway flag verb supplying it).",
+  "usage": "entity",
+  "identity_fields": ["flag_type", "flagged_document"],
+  "fields": [
+    { "name": "flag_type",        "label": "Flag Type",        "type": "string",  "mandatory": true },
+    { "name": "flagged_document", "label": "Flagged Document", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "BOOTSTRAP_RECORD", "DOCUMENT"] },
+    { "name": "title",       "label": "Title",       "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "body",        "label": "Body",        "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "authored_by", "label": "Authored By", "type": "string",  "mandatory": true },
+    { "name": "doc_status",  "label": "Doc Status",  "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "published" },
+    { "name": "tags",        "label": "Tags",        "type": "array",   "array_item_type": "string" },
+    { "name": "root",        "label": "Root",        "type": "boolean", "default_value": false },
+    { "name": "target_yac",  "label": "Target YAC",  "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_TARGET_YAC" }
+  ]
+}
