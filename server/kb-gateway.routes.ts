@@ -60,17 +60,23 @@ async function wipReq(method: string, path: string, key: string, body?: unknown)
   return data
 }
 
-// template_id cache — template_id is stable across versions (PoNIF #2 corollary)
-const tplCache = new Map<string, string>()
-async function templateId(value: string, ns: string, key: string): Promise<string> {
+// Full-template cache — keyed by ns/value. template_id is stable across versions
+// (PoNIF #2 corollary), and metadata.custom.write (the generic-write config) is
+// fixed at bootstrap, so caching the whole template is safe and lets writeConfig()
+// derive from it without a second fetch.
+const tplCache = new Map<string, AnyObj>()
+async function getTemplate(value: string, ns: string, key: string): Promise<AnyObj> {
   const ck = `${ns}/${value}`
   const hit = tplCache.get(ck)
   if (hit) return hit
   const t = await wipReq('GET', `/api/template-store/templates/by-value/${value}?namespace=${ns}`, key)
-  const id = t.id || t.template_id
-  if (!id) throw new WipError(502, `template ${value} has no id in ${ns}`)
-  tplCache.set(ck, id)
-  return id
+  if (!(t.id || t.template_id)) throw new WipError(502, `template ${value} has no id in ${ns}`)
+  tplCache.set(ck, t)
+  return t
+}
+async function templateId(value: string, ns: string, key: string): Promise<string> {
+  const t = await getTemplate(value, ns, key)
+  return t.id || t.template_id
 }
 
 // CASE-<n> Registry synonym -> document_id (the v2 resolution handle, CASE-425)
@@ -163,19 +169,18 @@ async function mintNumberedDoc(opts: {
   throw new WipError(503, `${templateValue} allocation exhausted ${ALLOC_MAX_RETRIES} retries`)
 }
 
-// Per-type write config (CASE-481/482). END-STATE: derive from the template's
-// metadata.custom.write (templates persist a metadata.custom slot) so the schema
-// is the single source — kept behind writeConfig() so that move is one function,
-// no call-site churn. Types absent here write by their natural identity (upsert).
-const WRITE_CONFIG: Record<string, { numberField: string; prefix: string; searchKey: string[] }> = {
-  CASE_RECORD:     { numberField: 'case_number',     prefix: 'CASE',     searchKey: [] },
-  FIRESIDE:        { numberField: 'fireside_number', prefix: 'FIRESIDE', searchKey: ['title'] },
-  DESIGN_DECISION: { numberField: 'decision_number', prefix: 'DECISION', searchKey: ['title'] },
-  LESSON:          { numberField: 'lesson_number',   prefix: 'LESSON',   searchKey: ['title'] },
-  DOCUMENT:        { numberField: 'paper_number',    prefix: 'PAPER',    searchKey: ['repo_origin', 'path'] },
-}
-function writeConfig(type: string): { numberField: string; prefix: string; searchKey: string[] } | null {
-  return WRITE_CONFIG[type] || null
+// Per-type write config (CASE-481/482), DERIVED from the template's
+// metadata.custom.write — the schema is the single source, no in-gateway map to
+// drift. Shape persisted at bootstrap: { number_field, synonym_prefix, search_key }.
+// Present → mint a per-type number; absent → the type writes by its natural
+// identity (upsert). A new mint type is added by seeding metadata.custom.write,
+// never by editing the gateway.
+async function writeConfig(type: string, ns: string, key: string): Promise<{ numberField: string; prefix: string; searchKey: string[] } | null> {
+  const t = await getTemplate(type, ns, key)
+  const w = t.metadata?.custom?.write
+  if (w && w.number_field && w.synonym_prefix)
+    return { numberField: w.number_field, prefix: w.synonym_prefix, searchKey: w.search_key || [] }
+  return null
 }
 
 // The single generic write seam (CASE-482): mint a per-type number when the type
@@ -184,7 +189,7 @@ function writeConfig(type: string): { numberField: string; prefix: string; searc
 // per-type mint/upsert logic survives in the handlers.
 async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyObj; ns: string; key: string }): Promise<{ document_id: string; result: string; number?: number; synonym?: string }> {
   const { ns, key, metadata } = opts
-  const cfg = writeConfig(type)
+  const cfg = await writeConfig(type, ns, key)
   if (cfg) {
     const searchFilters = cfg.searchKey.map((f) => ({ field: `data.${f}`, operator: 'eq', value: data[f] }))
     const m = await mintNumberedDoc({

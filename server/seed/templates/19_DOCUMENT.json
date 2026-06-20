@@ -5,6 +5,7 @@
   "usage": "entity",
   "identity_fields": ["paper_number"],
   "header_fields": ["title", "kind"],
+  "metadata": { "custom": { "write": { "number_field": "paper_number", "synonym_prefix": "PAPER", "search_key": ["repo_origin", "path"] } } },
   "fields": [
     { "name": "paper_number",    "label": "Paper Number",    "type": "integer", "mandatory": true },
     { "name": "path",            "label": "Path",            "type": "string",  "mandatory": true,  "full_text_indexed": true },

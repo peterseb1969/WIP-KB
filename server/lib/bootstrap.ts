@@ -219,6 +219,10 @@ export async function runBootstrap(
       if (data.header_fields) template.header_fields = data.header_fields
       if (data.reporting) template.reporting = data.reporting
 
+      // Forward template-level metadata — carries metadata.custom.write, the
+      // generic-write config the gateway derives per type (CASE-482).
+      if (data.metadata) template.metadata = data.metadata
+
       const tmplResult = await wipPost(
         '/api/template-store/templates?on_conflict=validate',
         [template],
