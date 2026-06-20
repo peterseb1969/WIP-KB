@@ -22,7 +22,11 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="mx-auto w-full max-w-6xl">{children}</div>
         </main>
       </div>
-      <WipFooter appName="Knowledgebase" />
+      <WipFooter
+        appName="Knowledgebase"
+        buildStamp={import.meta.env.VITE_BUILD_STAMP}
+        buildSha={import.meta.env.VITE_BUILD_SHA}
+      />
     </div>
   )
 }

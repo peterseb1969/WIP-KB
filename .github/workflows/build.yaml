@@ -57,5 +57,7 @@ jobs:
           docker buildx build \
             --platform "${{ inputs.platforms }}" \
             --build-arg VITE_BASE_PATH=/apps/kb/ \
+            --build-arg VITE_BUILD_STAMP="$(date -u +%FT%TZ)" \
+            --build-arg VITE_BUILD_SHA="$(git rev-parse --short HEAD)" \
             -t "ghcr.io/${{ github.repository_owner }}/wip-kb:${{ steps.tag.outputs.tag }}" \
             --push .
