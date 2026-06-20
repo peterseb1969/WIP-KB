@@ -122,6 +122,64 @@ async function maxResponseSeq(caseNumber: number, ns: string, key: string): Prom
   return mx
 }
 
+// generic per-type max(numberField) seed (best-effort; the synonym claim guards)
+async function maxNumberField(templateValue: string, field: string, ns: string, key: string): Promise<number> {
+  let mx = 0, page = 1
+  for (;;) {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: templateValue, filters: [], page, page_size: 100 })
+    const items: AnyObj[] = d.items || []
+    for (const it of items) { const v = it.data?.[field]; if (typeof v === 'number' && v > mx) mx = v }
+    if (page >= (d.pages || 1) || items.length === 0) break
+    page += 1
+  }
+  return mx
+}
+
+// Resolve-then-mint a per-type numbered, gateway-born doc (CASE-481). On first
+// contact (nothing matches searchFilters) → allocate per-type max+1 and claim the
+// <PREFIX>-<n> synonym atomically (retry on conflict = the uniqueness guard). On
+// re-contact → reuse the existing number → versions in place (idempotent). The
+// minted number is THE identity field; searchFilters is only the dedup key.
+async function mintNumberedDoc(opts: {
+  templateValue: string; numberField: string; synonymPrefix: string;
+  searchFilters: AnyObj[]; data: AnyObj; metadata?: AnyObj; ns: string; key: string;
+}): Promise<{ number: number; synonym: string; document_id: string; result: string }> {
+  const { templateValue, numberField, synonymPrefix, searchFilters, data, metadata, ns, key } = opts
+  const tid = await templateId(templateValue, ns, key)
+  const meta = metadata ? { metadata } : {}
+
+  if (searchFilters.length) {
+    const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: templateValue, filters: searchFilters, page: 1, page_size: 1 })
+    const existing = (q.items || [])[0]
+    if (existing && typeof existing.data?.[numberField] === 'number') {
+      const num = existing.data[numberField]
+      const d = await wipReq('POST', '/api/document-store/documents', key, [{
+        template_id: tid, namespace: ns, created_by: 'kb-gateway', data: { ...data, [numberField]: num }, ...meta,
+      }])
+      const r = (d.results || [])[0] || {}
+      if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
+        throw new WipError(502, `${templateValue} re-mint failed: ${r.error || JSON.stringify(r)}`)
+      return { number: num, synonym: `${synonymPrefix}-${num}`, document_id: r.document_id, result: r.status }
+    }
+  }
+
+  let n = (await maxNumberField(templateValue, numberField, ns, key)) + 1
+  for (let i = 0; i < ALLOC_MAX_RETRIES; i++) {
+    const d = await wipReq('POST', '/api/document-store/documents', key, [{
+      template_id: tid, namespace: ns, created_by: 'kb-gateway',
+      data: { ...data, [numberField]: n }, ...meta, synonyms: [{ value: `${synonymPrefix}-${n}` }],
+    }])
+    const r = (d.results || [])[0] || {}
+    if (r.status === 'created' || r.status === 'updated')
+      return { number: n, synonym: `${synonymPrefix}-${n}`, document_id: r.document_id, result: r.status }
+    if (r.error_code === 'synonym_conflict' || /different entry/.test(r.error || '')) { n += 1; continue }
+    throw new WipError(502, `${templateValue} mint failed at ${synonymPrefix}-${n}: ${r.error || JSON.stringify(r)}`)
+  }
+  throw new WipError(503, `${templateValue} allocation exhausted ${ALLOC_MAX_RETRIES} retries`)
+}
+
 // derive REFERENCES edges from related CASE-<n> mentions (unresolved -> skipped,
 // same contract as the loaders; re-runs dedup via the edge's identity fields)
 async function deriveReferences(sourceId: string, related: string[], ns: string, key: string): Promise<number> {
@@ -530,18 +588,19 @@ router.post('/documents/mirror', async (req, res) => {
     const tags = Array.isArray(b.tags) ? b.tags.map(String)
       : (fm.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean)
     if (tags.length) data.tags = tags
-    const tid = await templateId('DOCUMENT', ns, key)
-    const d = await wipReq('POST', '/api/document-store/documents', key, [{
-      template_id: tid, namespace: ns, created_by: 'kb-gateway',
+    // Mint paper_number; first-contact dedup by the (repo_origin, path) search key
+    // (path is no longer identity — it collides across repos + breaks on rename).
+    const minted = await mintNumberedDoc({
+      templateValue: 'DOCUMENT', numberField: 'paper_number', synonymPrefix: 'PAPER',
+      searchFilters: [
+        { field: 'data.repo_origin', operator: 'eq', value: repoOrigin },
+        { field: 'data.path', operator: 'eq', value: relPath },
+      ],
       data,
       metadata: { flat_file_mirror: relPath, kind, loader: 'kb-gateway' },
-    }])
-    const r = (d.results || [])[0] || {}
-    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status)) {
-      res.status(502).json({ error: `document mirror failed: ${r.error || JSON.stringify(r)}` })
-      return
-    }
-    res.json({ path: relPath, title, document_id: r.document_id, result: r.status })
+      ns, key,
+    })
+    res.json({ path: relPath, title, paper_number: minted.number, synonym: minted.synonym, document_id: minted.document_id, result: minted.result })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
@@ -593,18 +652,16 @@ router.post('/firesides/mirror', async (req, res) => {
     const tags = Array.isArray(b.tags) ? b.tags.map(String)
       : (fm.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean)
     if (tags.length) data.tags = tags
-    const tid = await templateId('FIRESIDE', ns, key)
-    const d = await wipReq('POST', '/api/document-store/documents', key, [{
-      template_id: tid, namespace: ns, created_by: 'kb-gateway',
+    // Mint fireside_number; first-contact dedup by title (title is no longer
+    // identity — re-mirror with the same title reuses the number/versions).
+    const minted = await mintNumberedDoc({
+      templateValue: 'FIRESIDE', numberField: 'fireside_number', synonymPrefix: 'FIRESIDE',
+      searchFilters: [{ field: 'data.title', operator: 'eq', value: title }],
       data,
       metadata: { session_id: b.session_id || fm.session || null, flat_file_mirror: b.path || null, loader: 'kb-gateway' },
-    }])
-    const r = (d.results || [])[0] || {}
-    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status)) {
-      res.status(502).json({ error: `fireside mirror failed: ${r.error || JSON.stringify(r)}` })
-      return
-    }
-    res.json({ title, document_id: r.document_id, result: r.status })
+      ns, key,
+    })
+    res.json({ title, fireside_number: minted.number, synonym: minted.synonym, document_id: minted.document_id, result: minted.result })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
