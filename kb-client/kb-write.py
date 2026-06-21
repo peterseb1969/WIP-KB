@@ -180,12 +180,67 @@ def _parse_edges(edge_args: list | None) -> list:
     return out
 
 
+_EDITOR_BACKUP = re.compile(r"(~|\.bak|\.swp|\.orig)$")
+
+
+def _norm_iso(s: str) -> str:
+    """Strip a trailing timezone to the naive YYYY-MM-DDTHH:MM[:SS] the SESSION
+    datetime fields expect (mirrors the gateway's normalizeIsoDt)."""
+    t = (s or "").strip()
+    m = re.match(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?)(?:[Zz]|[+-]\d{2}:?\d{2})?$", t)
+    return m.group(1).replace(" ", "T") if m else t
+
+
+def _session_records(dirpath: str, fields: dict) -> tuple[dict, list]:
+    """A reports/<session-id>/ dir → SESSION data + CONTINUES_FROM edge intent.
+    session.md frontmatter carries the fields; the *.md siblings bundle into the
+    body. Replaces the gateway-side parsing in /sessions/mirror (CASE-482 (A))."""
+    names = sorted(n for n in os.listdir(dirpath)
+                   if n.endswith(".md") and not _EDITOR_BACKUP.search(n))
+    if "session.md" not in names:
+        raise ValueError(f"SESSION: {dirpath} has no session.md")
+    contents = {n: open(os.path.join(dirpath, n), encoding="utf-8").read() for n in names}
+    fm, _ = parse_frontmatter(contents["session.md"])
+    session_id = str(fields.get("session_id") or fm.get("session_id") or os.path.basename(dirpath.rstrip("/")))
+    role = str(fields.get("role") or fm.get("role") or "")
+    if not role:
+        m = re.match(r"^([A-Z][A-Z-]+?)-\d{8}", session_id)
+        role = m.group(1) if m else ""
+    if not role:
+        raise ValueError("SESSION: role unresolved (frontmatter role, or a ROLE-YYYYMMDD session_id)")
+    started_at = str(fm.get("started_at") or "")
+    if not started_at:
+        m = re.search(r"(\d{8})-(\d{4,6})$", session_id)
+        if m:
+            d, t = m.group(1), m.group(2).ljust(6, "0")
+            started_at = f"{d[:4]}-{d[4:6]}-{d[6:8]}T{t[:2]}:{t[2:4]}:{t[4:6]}"
+    ordered = ["session.md"] + [n for n in names if n != "session.md"]
+    body = "\n\n".join(f"## {n}\n\n{contents[n]}" for n in ordered)
+    data = {"session_id": session_id, "role": role, "status": str(fm.get("status") or "active"),
+            "started_at": _norm_iso(started_at), "body": body}
+    if fm.get("continues_from"):
+        data["continues_from"] = str(fm["continues_from"]).strip()
+    if fm.get("ended_at"):
+        data["ended_at"] = _norm_iso(str(fm["ended_at"]))
+    edges = []
+    if data.get("continues_from"):
+        edges.append({"type": "CONTINUES_FROM", "target_type": "SESSION", "target_key": data["continues_from"]})
+    return data, edges
+
+
 def build_records(type_: str, args: argparse.Namespace) -> tuple[dict, list]:
     """Produce (data, edges) for a write. A per-type extractor maps the source to
     fields (validating); --field overrides win; edges come from --edge plus the
     continues_from / responds_to frontmatter conventions."""
     fields = _parse_fields(args.field)
     edges = _parse_edges(args.edge)
+    # A directory source = a session report dir → SESSION (only SESSION bundles a dir).
+    if args.file and args.file != "-" and os.path.isdir(args.file):
+        if type_ != "SESSION":
+            raise SystemExit(f"ERROR: a directory source is only valid for SESSION (got {type_})")
+        data, dedges = _session_records(args.file, fields)
+        data.update(fields)
+        return data, edges + dedges
     if args.json is not None:
         data = json.loads(args.json)
         if not isinstance(data, dict):
