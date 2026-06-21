@@ -139,14 +139,23 @@ def write_snapshot(repo_name: str, repo_path: Path, snapshot_date: date) -> int:
     if stats is None:
         print(f"[skip] {repo_name}: not a git repo at {repo_path}", file=sys.stderr)
         return 1
-    payload = {
-        "repo": repo_name, "snapshot_date": snapshot_date.isoformat(),
+    # Compose the full GIT_STATS_SNAPSHOT record client-side (the roster shape,
+    # CASE-453) and persist via the one generic write path (CASE-482 (A) — the
+    # gateway no longer composes; it just persists). Natural upsert by
+    # [snapshot_date, repo], so re-runs are idempotent.
+    date = snapshot_date.isoformat()
+    data = {
+        "repo": repo_name, "snapshot_date": date,
         "commits": stats.commits, "lines_added": stats.lines_added,
         "lines_removed": stats.lines_removed, "files_changed": stats.files_changed,
         "contributors": stats.contributors,
+        "title": f"{repo_name} — {date}", "authored_by": "FRanC",
+        "doc_status": "published", "root": False,
+        "tags": ["git-stats", f"repo-{repo_name}", f"date-{date}"],
     }
     try:
-        result = gw_post("/stats/snapshot", payload).get("result", "?")
+        result = gw_post("/write/GIT_STATS_SNAPSHOT",
+                         {"data": data, "metadata": {"loader": "kb-client"}}).get("result", "?")
     except RuntimeError as e:
         print(f"[gateway] {e}", file=sys.stderr)
         return 2
