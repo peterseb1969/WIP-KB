@@ -33,9 +33,10 @@ import datetime
 import json
 import os
 import re
+import subprocess
 import sys
 
-from kb_client_core import gw_get, gw_post
+from kb_client_core import DEV_ROOT, gw_get, gw_post
 
 
 def _coerce(v: str) -> object:
@@ -267,6 +268,125 @@ def build_records(type_: str, args: argparse.Namespace) -> tuple[dict, list]:
     return data, edges
 
 
+def _post_write(type_: str, data: dict, edges: list, metadata: dict | None, fmt: str) -> int:
+    """The single write call: { data, edges?, metadata? } → POST /write/:type."""
+    body: dict = {"data": data}
+    if edges:
+        body["edges"] = edges
+    if metadata:
+        body["metadata"] = metadata
+    result = gw_post(f"/write/{type_}", body)
+    if fmt == "json":
+        sys.stdout.write(json.dumps(result, indent=2) + "\n")
+    else:
+        syn = result.get("synonym")
+        tag = f" {syn}" if syn else ""
+        eg = result.get("edges") or []
+        egtxt = "  edges: " + ", ".join(f"{e['type']}→{e['target_key']}={e['status']}" for e in eg) if eg else ""
+        sys.stdout.write(f"{result.get('result', '?')}{tag} ({result.get('document_id', '')}){egtxt}\n")
+    return 0
+
+
+# --- GIT_STATS_SNAPSHOT source: computed from git, not a file ------------------
+# Git lives on this machine, so computing the per-day stats is this type's
+# "extractor"; the WRITE still goes through the one path (_post_write). This is
+# why there is no separate stats writer — git-stats is just another type the one
+# client handles (CASE-482 (A)).
+REPOS: dict[str, object] = {
+    "World-in-a-Pie": DEV_ROOT / "World-in-a-Pie",
+    "FR-YAC":         DEV_ROOT / "FR-YAC",
+    "KB":             DEV_ROOT / "WIP-KB",
+    "ClinTrial":      DEV_ROOT / "WIP-ClinTrial",
+    "DnD":            DEV_ROOT / "WIP-DnD",
+    "AuthorAssist":   DEV_ROOT / "WIP-AA",
+    "Song":           DEV_ROOT / "WIP-Song",
+    "Validator":      DEV_ROOT / "WIP-VAL",
+    "ReactConsole":   DEV_ROOT / "WIP-ReactConsole",
+}
+
+
+def _gather_git_stats(repo_path, day: datetime.date) -> dict | None:
+    """Per-day commit/line/file/contributor counts for one repo. None if not a
+    git repo; zero-filled if the repo exists but had no commits that day."""
+    if not (repo_path / ".git").exists():
+        return None
+    since = f"{day.isoformat()} 00:00:00"  # explicit time — git's bare date is "now-of-day"
+    until = f"{(day + datetime.timedelta(days=1)).isoformat()} 00:00:00"
+    out = subprocess.run(["git", "log", f"--since={since}", f"--until={until}",
+                          "--shortstat", "--no-merges", "--pretty=format:%H"],
+                         cwd=repo_path, capture_output=True, text=True, check=False)
+    if out.returncode != 0:
+        return {"commits": 0, "lines_added": 0, "lines_removed": 0, "files_changed": 0, "contributors": 0}
+    commits = added = removed = files = 0
+    for line in out.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if len(line) == 40 and all(c in "0123456789abcdef" for c in line):
+            commits += 1
+            continue
+        for tok in line.split(","):
+            parts = tok.strip().split()
+            if not parts:
+                continue
+            try:
+                n = int(parts[0])
+            except ValueError:
+                continue
+            if "file" in tok:
+                files += n
+            elif "insertion" in tok:
+                added += n
+            elif "deletion" in tok:
+                removed += n
+    sl = subprocess.run(["git", "shortlog", "-sn", f"--since={since}", f"--until={until}", "--no-merges", "HEAD"],
+                        cwd=repo_path, capture_output=True, text=True, check=False)
+    contributors = len([ln for ln in sl.stdout.splitlines() if ln.strip()]) if sl.returncode == 0 else 0
+    return {"commits": commits, "lines_added": added, "lines_removed": removed,
+            "files_changed": files, "contributors": contributors}
+
+
+def cmd_gitstats(args: argparse.Namespace) -> int:
+    """Compute git stats and write each (repo, date) snapshot through the one
+    write path. --git-repo <name|all>, --git-date YYYY-MM-DD, --git-backfill N."""
+    if args.git_list_repos:
+        for name, path in REPOS.items():
+            print(f"  {'✓' if (path / '.git').exists() else '✗'} {name:18}  {path}")
+        return 0
+    if args.git_repo and args.git_repo != "all" and args.git_repo not in REPOS:
+        print(f"ERROR: unknown repo {args.git_repo!r}. Known: {', '.join(REPOS)}", file=sys.stderr)
+        return 2
+    repos = list(REPOS.items()) if (args.git_repo in (None, "all")) else [(args.git_repo, REPOS[args.git_repo])]
+    if args.git_backfill:
+        today = datetime.date.today()
+        dates = [today - datetime.timedelta(days=i) for i in range(args.git_backfill)]
+    elif args.git_date:
+        try:
+            dates = [datetime.date.fromisoformat(args.git_date)]
+        except ValueError:
+            print(f"ERROR: --git-date must be YYYY-MM-DD (got {args.git_date!r})", file=sys.stderr)
+            return 2
+    else:
+        dates = [datetime.date.today()]
+    failures = 0
+    for d in dates:
+        ds = d.isoformat()
+        for name, path in repos:
+            s = _gather_git_stats(path, d)
+            if s is None:
+                print(f"[skip] {name}: not a git repo at {path}", file=sys.stderr)
+                continue
+            data = {"repo": name, "snapshot_date": ds, **s,
+                    "title": f"{name} — {ds}", "authored_by": "FRanC", "doc_status": "published",
+                    "root": False, "tags": ["git-stats", f"repo-{name}", f"date-{ds}"]}
+            try:
+                _post_write("GIT_STATS_SNAPSHOT", data, [], {"loader": "kb-client"}, args.format)
+            except RuntimeError as e:
+                print(f"[gateway] {name} {ds}: {e}", file=sys.stderr)
+                failures += 1
+    return 0 if failures == 0 else 2
+
+
 def cmd_list(fmt: str) -> int:
     payload = gw_get("/types") or {}
     types = payload.get("types") or []
@@ -292,25 +412,10 @@ def cmd_write(type_: str, args: argparse.Namespace) -> int:
     if not data:
         print("ERROR: empty data — nothing to write", file=sys.stderr)
         return 2
-    body: dict = {"data": data}
-    if edges:
-        body["edges"] = edges
-    if args.metadata:
-        md = json.loads(args.metadata)
-        if not isinstance(md, dict):
-            raise SystemExit("ERROR: --metadata must be a JSON object")
-        body["metadata"] = md
-    result = gw_post(f"/write/{type_}", body)
-    if args.format == "json":
-        sys.stdout.write(json.dumps(result, indent=2) + "\n")
-    else:
-        syn = result.get("synonym")
-        tag = f" {syn}" if syn else ""
-        eg = result.get("edges") or []
-        egtxt = "  edges: " + ", ".join(f"{e['type']}→{e['target_key']}={e['status']}" for e in eg) if eg else ""
-        sys.stdout.write(f"{result.get('result', '?')}{tag} "
-                         f"({result.get('document_id', '')}){egtxt}\n")
-    return 0
+    md = json.loads(args.metadata) if args.metadata else None
+    if md is not None and not isinstance(md, dict):
+        raise SystemExit("ERROR: --metadata must be a JSON object")
+    return _post_write(type_, data, edges, md, args.format)
 
 
 def cmd_patch(type_: str, args: argparse.Namespace) -> int:
@@ -340,12 +445,19 @@ def main() -> int:
     ap.add_argument("--metadata", help="JSON object merged into the write metadata")
     ap.add_argument("--patch", action="append", help="partial-update field k=v (repeatable; with --match)")
     ap.add_argument("--match", help="locate the doc to patch by k=v")
+    # GIT_STATS_SNAPSHOT source (computed from git, not a file)
+    ap.add_argument("--git-repo", help="git-stats: canonical repo name, or 'all'")
+    ap.add_argument("--git-date", help="git-stats: snapshot date YYYY-MM-DD (default today)")
+    ap.add_argument("--git-backfill", type=int, metavar="N", help="git-stats: last N days")
+    ap.add_argument("--git-list-repos", action="store_true", help="git-stats: print the known repo set")
     ap.add_argument("--format", choices=["text", "json"], default="text")
     args = ap.parse_args()
 
     try:
         if args.list:
             return cmd_list(args.format)
+        if args.git_list_repos or args.git_repo or args.git_backfill:
+            return cmd_gitstats(args)
         if not args.type:
             ap.error("a doc TYPE is required (or use --list)")
         if args.patch:

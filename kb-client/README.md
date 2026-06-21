@@ -20,8 +20,7 @@ one-shot JSON bundle — or `/files/<name>` per file) and runs it, refreshing on
 |---|---|
 | `kb_client_core.py` | Shared core (stdlib-only): `.claude/kb.json` + API-key resolution (CASE-444/471), target config, and the gateway transport — `gw_get`/`gw_post` with local→remote failover. Imported by every script. |
 | `case-fetch.py` | Read commands — `case` / `journey` / `list` / `fireside` — over the gateway (CASE-393/479/482). |
-| `kb-write.py` | Write client — one generic surface over `POST /write/:type`; `--list` shows writable types via `GET /types` (CASE-482). |
-| `stats-to-kb.py` | Git-stats snapshot computer — computes locally, writes via `/write/GIT_STATS_SNAPSHOT` (roster title/tags composed client-side). |
+| `kb-write.py` | **The** write client — one generic surface over `POST /write/:type` for every type (file/dir/`--json` sources, `--patch`/`--edge`, and git-stats via `--git-repo`/`--git-date`/`--git-backfill`). `--list` shows writable types via `GET /types` (CASE-482). |
 | `kb-client.sh` | The runner (CASE-440): fetch/refresh the bundle on `bundle_digest` change, then run a script with `PYTHONPATH` set. Ships inside the bundle — relocated out of FR-YAC. |
 | `install.sh` | One-liner bootstrap (CASE-440): `curl -fsSk -H "X-API-Key: $KEY" {BASE_PATH}/server-api/kb-client/install \| sh` materializes the bundle to `~/.cache/wip-kb-client`. |
 | `case-workflow.md` | The cross-YAC case playbook, served with the client (single source: `docs/playbooks/case-workflow.md`, synced from the gene-pool master). |
@@ -73,8 +72,8 @@ Env:
   fails loud instead of silently 401-ing with the canonical instance's key.
   No `/Users/<user>` literals — defaults derive from `$HOME`.
 - `KB_LOCAL_URL` / `KB_LOCAL_KEY_FILE` — the optional local fast-path instance
-  (`case-fetch` `KB_PREFER_LOCAL=1`, `stats-to-kb` local target);
-  defaults `https://localhost:8443` + `~/.wip-deploy/wip-local/secrets/api-key`,
+  (`KB_PREFER_LOCAL=1`); defaults `https://localhost:8443` +
+  `~/.wip-deploy/wip-local/secrets/api-key`,
   same pairing guard.
 - `KB_NAMESPACE` (default `kb`), `KB_VERIFY_TLS` (default `false`),
   `KB_DEV_ROOT` (default `~/Development` — flat-file repo roots).

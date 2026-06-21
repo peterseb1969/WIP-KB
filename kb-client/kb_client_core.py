@@ -19,7 +19,7 @@ CASE-482 retired the raw document-store reads and folded the per-script transpor
 boilerplate in here, and renamed the module to what it actually is — the client
 core, not a write core.
 
-Consumed by: case-fetch.py (reads), kb-write.py (writes), stats-to-kb.py (stats).
+Consumed by: case-fetch.py (reads) and kb-write.py (all writes, incl. git-stats).
 """
 from __future__ import annotations
 
