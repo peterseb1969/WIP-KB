@@ -226,6 +226,50 @@ async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyOb
   return { document_id: r.document_id, result: r.status }
 }
 
+// Resolve a logical reference to a document_id, generically: query the target
+// template by its FIRST-CLASS identity field (identity_fields[0]). No per-type
+// knowledge — the schema says how a type is identified. (CASE-482 edge-intent.)
+async function resolveRef(targetType: string, targetKey: unknown, ns: string, key: string): Promise<string | null> {
+  const t = await getTemplate(targetType, ns, key)
+  const idField = (t.identity_fields || [])[0]
+  if (!idField || targetKey === undefined || targetKey === null) return null
+  const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key, {
+    template_id: targetType,
+    filters: [{ field: `data.${idField}`, operator: 'eq', value: targetKey }],
+    page: 1, page_size: 1,
+  })
+  return (q.items || [])[0]?.document_id || null
+}
+
+// Persist one edge (source -> target) of an edge type. Idempotent: edge identity
+// is [source_ref, target_ref], versioned:false → re-writes overwrite in place.
+async function writeEdge(edgeType: string, sourceId: string, targetId: string, ns: string, key: string): Promise<void> {
+  const tid = await templateId(edgeType, ns, key)
+  const d = await wipReq('POST', '/api/document-store/documents', key, [{
+    template_id: tid, namespace: ns, created_by: 'kb-gateway',
+    data: { source_ref: sourceId, target_ref: targetId },
+    metadata: { edge_kind: edgeType, loader: 'kb-gateway' },
+  }])
+  const r = (d.results || [])[0] || {}
+  if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
+    throw new WipError(502, `${edgeType} edge failed: ${r.error || JSON.stringify(r)}`)
+}
+
+// Apply a list of logical edge-intents from a just-written source doc. Each is
+// { type, target_type, target_key }; the source is always the written doc
+// (source -> target). Unresolved targets are reported, not fatal (mirrors the
+// loaders' "prior not present yet -> skipped; converges on re-write").
+async function applyEdges(sourceId: string, edges: AnyObj[], ns: string, key: string): Promise<AnyObj[]> {
+  const out: AnyObj[] = []
+  for (const e of edges) {
+    const targetId = await resolveRef(String(e.target_type), e.target_key, ns, key)
+    if (!targetId) { out.push({ type: e.type, target_key: e.target_key, status: 'target_not_found' }); continue }
+    await writeEdge(String(e.type), sourceId, targetId, ns, key)
+    out.push({ type: e.type, target_key: e.target_key, status: 'linked' })
+  }
+  return out
+}
+
 // derive REFERENCES edges from related CASE-<n> mentions (unresolved -> skipped,
 // same contract as the loaders; re-runs dedup via the edge's identity fields)
 async function deriveReferences(sourceId: string, related: string[], ns: string, key: string): Promise<number> {
@@ -662,12 +706,12 @@ router.post('/firesides/mirror', async (req, res) => {
   }
 })
 
-// POST /write/:type — the generic typed-write surface (CASE-482). The uniform
-// migration target for every doc type: mint or natural-upsert per the type's
-// config/identity. Body = { data: {...}, metadata?: {...} }. Type-specific source
-// parsing (frontmatter→fields) is the caller's job; this is the write seam itself.
-// Makes any template writable — incl. the previously-orphaned DESIGN_DECISION /
-// LESSON (no bespoke verb needed).
+// POST /write/:type — the single typed-write surface (CASE-482). Structured data
+// in (the client owns all source parsing/validation); the gateway persists:
+// mint or natural-upsert per the type's WRITE_POLICY, then links any edge-intents.
+// Body = { data: {...}, metadata?: {...}, edges?: [{type, target_type, target_key}] }.
+// Each edge is written source(the new doc) -> target(resolved by the target
+// type's identity field). Unresolved targets are reported, not fatal.
 router.post('/write/:type', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
@@ -679,9 +723,11 @@ router.post('/write/:type', async (req, res) => {
     res.status(422).json({ error: 'data (non-empty object) is required' })
     return
   }
+  const edges: AnyObj[] = Array.isArray(b.edges) ? b.edges : []
   try {
     const w = await genericWrite(type, data, { metadata: b.metadata, ns, key })
-    res.json({ type, ...w })
+    const edgeResults = edges.length ? await applyEdges(w.document_id, edges, ns, key) : []
+    res.json({ type, ...w, ...(edges.length ? { edges: edgeResults } : {}) })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
