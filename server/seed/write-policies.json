@@ -3,5 +3,6 @@
   { "doc_type": "FIRESIDE",        "write_mode": "mint", "number_field": "fireside_number", "synonym_prefix": "FIRESIDE", "search_key": ["title"] },
   { "doc_type": "DESIGN_DECISION", "write_mode": "mint", "number_field": "decision_number", "synonym_prefix": "DECISION", "search_key": ["title"] },
   { "doc_type": "LESSON",          "write_mode": "mint", "number_field": "lesson_number",   "synonym_prefix": "LESSON",   "search_key": ["title"] },
-  { "doc_type": "DOCUMENT",        "write_mode": "mint", "number_field": "paper_number",    "synonym_prefix": "PAPER",    "search_key": ["repo_origin", "path"] }
+  { "doc_type": "DOCUMENT",        "write_mode": "mint", "number_field": "paper_number",    "synonym_prefix": "PAPER",    "search_key": ["repo_origin", "path"] },
+  { "doc_type": "CASE_RESPONSE",   "write_mode": "mint", "number_field": "response_seq",    "scope_field": "case_number", "synonym_template": "CASE-{case_number}#{response_seq}", "search_key": [] }
 ]

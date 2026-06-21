@@ -26,20 +26,6 @@ const NS_DEFAULT = 'kb' // namespace discipline; ?namespace= override exists for
 const ALLOC_MAX_RETRIES = 100
 const PATCH_MAX_RETRIES = 3
 
-// verb -> { section heading, target status (null = no transition) }
-const VERBS: Record<string, { heading: string; to: string | null }> = {
-  respond: { heading: 'Response', to: 'responded' },
-  comment: { heading: 'Comment', to: null },
-  close: { heading: 'Resolution', to: 'closed' },
-  implement: { heading: 'Implementation', to: 'implemented' },
-}
-// status machine: which target statuses are legal from a given current status
-const TRANSITIONS: Record<string, string[]> = {
-  open: ['responded', 'closed', 'implemented'],
-  responded: ['closed', 'implemented'],
-  closed: [],
-  implemented: [],
-}
 
 type AnyObj = Record<string, any>
 
@@ -93,36 +79,31 @@ async function getDoc(id: string, ns: string, key: string): Promise<AnyObj> {
   return wipReq('GET', `/api/document-store/documents/${id}?namespace=${ns}`, key)
 }
 
-// best-effort seed for the per-case response sequence; the CASE-<n>#<seq>
-// synonym claim is the atomic correctness guard (mirrors maxCaseNumber).
-async function maxResponseSeq(caseNumber: number, ns: string, key: string): Promise<number> {
+// generic max(numberField) seed (best-effort; the synonym claim guards). When
+// scope is given, the max is taken only within docs sharing that parent value
+// (a per-parent sequence, e.g. response_seq within one case).
+async function maxNumberField(templateValue: string, field: string, ns: string, key: string,
+  scope?: { field: string; value: unknown }): Promise<number> {
+  const filters = scope ? [{ field: `data.${scope.field}`, operator: 'eq', value: scope.value }] : []
   let mx = 0, page = 1
   for (;;) {
     const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
-      { template_id: 'CASE_RESPONSE', filters: [{ field: 'data.case_number', operator: 'eq', value: caseNumber }], page, page_size: 100 })
-    const items: AnyObj[] = d.items || []
-    for (const it of items) {
-      const s = it.data?.response_seq
-      if (typeof s === 'number' && s > mx) mx = s
-    }
-    if (page >= (d.pages || 1) || items.length === 0) break
-    page += 1
-  }
-  return mx
-}
-
-// generic per-type max(numberField) seed (best-effort; the synonym claim guards)
-async function maxNumberField(templateValue: string, field: string, ns: string, key: string): Promise<number> {
-  let mx = 0, page = 1
-  for (;;) {
-    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
-      { template_id: templateValue, filters: [], page, page_size: 100 })
+      { template_id: templateValue, filters, page, page_size: 100 })
     const items: AnyObj[] = d.items || []
     for (const it of items) { const v = it.data?.[field]; if (typeof v === 'number' && v > mx) mx = v }
     if (page >= (d.pages || 1) || items.length === 0) break
     page += 1
   }
   return mx
+}
+
+// Build a minted doc's synonym: a {field}-placeholder template ({<numberField>}=n,
+// other keys from the doc), else the simple "<prefix>-<n>".
+function buildSynonym(cfg: { prefix?: string; synonymTemplate?: string; numberField: string },
+  n: number, data: AnyObj): string {
+  if (cfg.synonymTemplate)
+    return cfg.synonymTemplate.replace(/\{(\w+)\}/g, (_m, k) => String(k === cfg.numberField ? n : (data[k] ?? '')))
+  return `${cfg.prefix}-${n}`
 }
 
 // Resolve-then-mint a per-type numbered, gateway-born doc (CASE-481). On first
@@ -133,10 +114,13 @@ async function maxNumberField(templateValue: string, field: string, ns: string, 
 async function mintNumberedDoc(opts: {
   templateValue: string; numberField: string; synonymPrefix: string;
   searchFilters: AnyObj[]; data: AnyObj; metadata?: AnyObj; ns: string; key: string;
+  scopeField?: string; synonymTemplate?: string;
 }): Promise<{ number: number; synonym: string; document_id: string; result: string }> {
-  const { templateValue, numberField, synonymPrefix, searchFilters, data, metadata, ns, key } = opts
+  const { templateValue, numberField, synonymPrefix, searchFilters, data, metadata, ns, key, scopeField, synonymTemplate } = opts
   const tid = await templateId(templateValue, ns, key)
   const meta = metadata ? { metadata } : {}
+  const synCfg = { prefix: synonymPrefix, synonymTemplate, numberField }
+  const scope = scopeField ? { field: scopeField, value: data[scopeField] } : undefined
 
   if (searchFilters.length) {
     const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
@@ -150,21 +134,22 @@ async function mintNumberedDoc(opts: {
       const r = (d.results || [])[0] || {}
       if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
         throw new WipError(502, `${templateValue} re-mint failed: ${r.error || JSON.stringify(r)}`)
-      return { number: num, synonym: `${synonymPrefix}-${num}`, document_id: r.document_id, result: r.status }
+      return { number: num, synonym: buildSynonym(synCfg, num, data), document_id: r.document_id, result: r.status }
     }
   }
 
-  let n = (await maxNumberField(templateValue, numberField, ns, key)) + 1
+  let n = (await maxNumberField(templateValue, numberField, ns, key, scope)) + 1
   for (let i = 0; i < ALLOC_MAX_RETRIES; i++) {
+    const synonym = buildSynonym(synCfg, n, data)
     const d = await wipReq('POST', '/api/document-store/documents', key, [{
       template_id: tid, namespace: ns, created_by: 'kb-gateway',
-      data: { ...data, [numberField]: n }, ...meta, synonyms: [{ value: `${synonymPrefix}-${n}` }],
+      data: { ...data, [numberField]: n }, ...meta, synonyms: [{ value: synonym }],
     }])
     const r = (d.results || [])[0] || {}
     if (r.status === 'created' || r.status === 'updated')
-      return { number: n, synonym: `${synonymPrefix}-${n}`, document_id: r.document_id, result: r.status }
+      return { number: n, synonym, document_id: r.document_id, result: r.status }
     if (r.error_code === 'synonym_conflict' || /different entry/.test(r.error || '')) { n += 1; continue }
-    throw new WipError(502, `${templateValue} mint failed at ${synonymPrefix}-${n}: ${r.error || JSON.stringify(r)}`)
+    throw new WipError(502, `${templateValue} mint failed at ${synonym}: ${r.error || JSON.stringify(r)}`)
   }
   throw new WipError(503, `${templateValue} allocation exhausted ${ALLOC_MAX_RETRIES} retries`)
 }
@@ -175,7 +160,12 @@ async function mintNumberedDoc(opts: {
 // write_mode of 'mint' means allocate a per-type number, else (or absent) the
 // type writes by its natural identity. Loaded once per namespace and cached.
 // Adding a mint type = add a WRITE_POLICY doc (a bootstrap seed), never a code edit.
-type MintCfg = { numberField: string; prefix: string; searchKey: string[] }
+// scopeField: when set, the number is a per-parent sequence (max within docs
+// sharing the same data[scopeField]) — e.g. CASE_RESPONSE.response_seq scoped by
+// case_number. synonymTemplate: when set, the synonym is the template with {field}
+// placeholders filled from the doc ({<numberField>} = the minted n) — e.g.
+// "CASE-{case_number}#{response_seq}"; else it is "<prefix>-<n>".
+type MintCfg = { numberField: string; prefix: string; searchKey: string[]; scopeField?: string; synonymTemplate?: string }
 const policyCache = new Map<string, Map<string, MintCfg>>()
 async function loadPolicies(ns: string, key: string): Promise<Map<string, MintCfg>> {
   const hit = policyCache.get(ns)
@@ -187,7 +177,10 @@ async function loadPolicies(ns: string, key: string): Promise<Map<string, MintCf
     for (const it of (d.items || []) as AnyObj[]) {
       const p = it.data || {}
       if (p.doc_type && p.write_mode === 'mint' && p.number_field)
-        m.set(p.doc_type, { numberField: p.number_field, prefix: p.synonym_prefix, searchKey: p.search_key || [] })
+        m.set(p.doc_type, {
+          numberField: p.number_field, prefix: p.synonym_prefix, searchKey: p.search_key || [],
+          scopeField: p.scope_field || undefined, synonymTemplate: p.synonym_template || undefined,
+        })
     }
     policyCache.set(ns, m)  // cache only on success — a transient error retries next write
   } catch (e) {
@@ -213,6 +206,7 @@ async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyOb
     const m = await mintNumberedDoc({
       templateValue: type, numberField: cfg.numberField, synonymPrefix: cfg.prefix,
       searchFilters, data, metadata, ns, key,
+      scopeField: cfg.scopeField, synonymTemplate: cfg.synonymTemplate,
     })
     return { document_id: m.document_id, result: m.result, number: m.number, synonym: m.synonym }
   }
@@ -270,38 +264,6 @@ async function applyEdges(sourceId: string, edges: AnyObj[], ns: string, key: st
   return out
 }
 
-// derive REFERENCES edges from related CASE-<n> mentions (unresolved -> skipped,
-// same contract as the loaders; re-runs dedup via the edge's identity fields)
-async function deriveReferences(sourceId: string, related: string[], ns: string, key: string): Promise<number> {
-  const targets: string[] = []
-  for (const m of related) {
-    const num = /CASE-?(\d+)/i.exec(m)?.[1]
-    if (!num) continue
-    const tid = await resolveCase(parseInt(num, 10), ns, key)
-    if (tid && tid !== sourceId && !targets.includes(tid)) targets.push(tid)
-  }
-  if (targets.length === 0) return 0
-  const refTpl = await templateId('REFERENCES', ns, key)
-  const edges = targets.map((t) => ({
-    template_id: refTpl, namespace: ns, created_by: 'kb-gateway',
-    data: { source_ref: sourceId, target_ref: t },
-    metadata: { edge_kind: 'REFERENCES', loader: 'kb-gateway' },
-  }))
-  const d = await wipReq('POST', '/api/document-store/documents', key, edges)
-  return (d.results || []).filter((r: AnyObj) => ['created', 'updated', 'skipped', 'unchanged'].includes(r.status)).length
-}
-
-function parseRelated(rel: unknown): string[] {
-  if (Array.isArray(rel)) return rel.map(String)
-  if (typeof rel === 'string') return rel.split(/[,\s]+/).filter(Boolean)
-  return []
-}
-
-function nowStamp(): string {
-  const d = new Date()
-  const p = (x: number) => String(x).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
 
 const router = Router()
 
@@ -314,172 +276,14 @@ function callerKey(req: Request, res: Response): string | null {
   return key
 }
 
-// POST /cases — file flow: allocate-then-create on the atomic synonym claim
-router.post('/cases', async (req, res) => {
-  const key = callerKey(req, res)
-  if (!key) return
-  const ns = String(req.query.namespace || NS_DEFAULT)
-  const b: AnyObj = req.body || {}
-  if (!b.title || !b.filed_by) {
-    res.status(422).json({ error: 'title and filed_by are required' })
-    return
-  }
-  try {
-    const data = {
-      title: String(b.title), body: String(b.body || ''),
-      authored_by: String(b.filed_by), doc_status: 'published',
-      tags: ['case-mirror', 'status-open'], root: true,
-      source_yac: String(b.filed_by), target_yac: String(b.target_yac || 'any'),
-      status: 'open', severity: String(b.severity || ''), type: String(b.type || ''),
-      component: String(b.component || ''), filed_by: String(b.filed_by),
-      app: String(b.app || ''),
-    }
-    // Capture the filing timestamp into metadata.custom.filed_at (the UI's "Filed" sort reads it).
-    const fm = parseFrontmatter(String(b.body || ''))
-    const filedAt = fm.filed && /^\d{4}-\d{2}-\d{2}/.test(fm.filed) ? fm.filed : nowStamp()
-    // Generic write (CASE_RECORD config = mint case_number; empty search key → always a fresh number).
-    const w = await genericWrite('CASE_RECORD', data, { metadata: { custom: { filed_at: filedAt }, loader: 'kb-gateway' }, ns, key })
-    const edges = await deriveReferences(w.document_id, parseRelated(b.related), ns, key)
-    res.status(201).json({ case: w.number, synonym: w.synonym, document_id: w.document_id, edges })
-  } catch (e) {
-    const s = e instanceof WipError ? 502 : 500
-    res.status(s).json({ error: (e as Error).message })
-  }
-})
-
-// POST /cases/:n/<verb> — v3 (CASE-481 fork 3): discourse becomes its own
-// CASE_RESPONSE doc + RESPONDS_TO edge (append-only, immutable); status changes
-// are a field update on the CASE_RECORD (which now has identity, so this is a
-// clean versioned PATCH, not the old zero-identity loophole). The case body is
-// NO LONGER appended to — status lives on the case, conversation in response docs.
-router.post('/cases/:n/:verb', async (req, res) => {
-  const key = callerKey(req, res)
-  if (!key) return
-  const verb = VERBS[req.params.verb]
-  if (!verb) {
-    res.status(404).json({ error: `unknown verb '${req.params.verb}' (respond|comment|close|implement)` })
-    return
-  }
-  const n = parseInt(req.params.n, 10)
-  if (!Number.isFinite(n)) {
-    res.status(422).json({ error: 'case number must be an integer' })
-    return
-  }
-  const ns = String(req.query.namespace || NS_DEFAULT)
-  const b: AnyObj = req.body || {}
-  if (!b.text || !b.author) {
-    res.status(422).json({ error: 'text and author are required' })
-    return
-  }
-  try {
-    const caseDocId = await resolveCase(n, ns, key)
-    if (!caseDocId) {
-      res.status(404).json({ error: `CASE-${n} not found in ${ns}` })
-      return
-    }
-    // Status transition check against the case's current status.
-    const caseDoc = await getDoc(caseDocId, ns, key)
-    const current = String((caseDoc.data || {}).status || 'open')
-    if (verb.to) {
-      const legal = TRANSITIONS[current] ?? []
-      if (!legal.includes(verb.to)) {
-        res.status(422).json({
-          error: `illegal transition: ${current} -> ${verb.to} for CASE-${n}`,
-          legal_transitions: legal,
-        })
-        return
-      }
-    }
-
-    // 1) Create the CASE_RESPONSE. response_seq is per-case monotonic; the
-    //    CASE-<n>#<seq> synonym claim is the atomic guard + the human handle.
-    const respTid = await templateId('CASE_RESPONSE', ns, key)
-    let seq = (await maxResponseSeq(n, ns, key)) + 1
-    let responseId = ''
-    for (let i = 0; i < ALLOC_MAX_RETRIES; i++) {
-      const d = await wipReq('POST', '/api/document-store/documents', key, [{
-        template_id: respTid, namespace: ns, created_by: 'kb-gateway',
-        data: {
-          case_number: n, response_seq: seq, response_kind: req.params.verb,
-          body: String(b.text).trim(), author: String(b.author), doc_status: 'published',
-        },
-        synonyms: [{ value: `CASE-${n}#${seq}` }],
-      }])
-      const r = (d.results || [])[0] || {}
-      if (r.status === 'created' || r.status === 'updated') { responseId = r.document_id; break }
-      if (r.error_code === 'synonym_conflict' || /different entry/.test(r.error || '')) { seq += 1; continue }
-      res.status(502).json({ error: `response create failed at CASE-${n}#${seq}: ${r.error || JSON.stringify(r)}` })
-      return
-    }
-    if (!responseId) {
-      res.status(503).json({ error: `response allocation exhausted ${ALLOC_MAX_RETRIES} retries` })
-      return
-    }
-
-    // 2) RESPONDS_TO edge: response -> case (idempotent on [source_ref, target_ref]).
-    const edgeTid = await templateId('RESPONDS_TO', ns, key)
-    await wipReq('POST', '/api/document-store/documents', key, [{
-      template_id: edgeTid, namespace: ns, created_by: 'kb-gateway',
-      data: { source_ref: responseId, target_ref: caseDocId },
-    }])
-
-    // 3) Status transition (respond/close/implement) — a versioned field update
-    //    on the case; the body is untouched. if_match + retry on concurrency.
-    let newStatus = current
-    if (verb.to) {
-      let ok = false
-      for (let attempt = 0; attempt < PATCH_MAX_RETRIES; attempt++) {
-        const fresh = await getDoc(caseDocId, ns, key)
-        const fdata: AnyObj = fresh.data || {}
-        const patch: AnyObj = {
-          status: verb.to,
-          tags: [...(fdata.tags || []).filter((t: string) => !t.startsWith('status-')), `status-${verb.to}`],
-        }
-        const d = await wipReq('PATCH', `/api/document-store/documents?namespace=${ns}`, key,
-          [{ document_id: caseDocId, patch, if_match: fresh.version }])
-        const r = (d.results || [])[0] || {}
-        if (r.status === 'updated' || r.status === 'unchanged') { newStatus = verb.to; ok = true; break }
-        if (r.error_code === 'concurrency_conflict') continue
-        res.status(502).json({ error: `status update failed: ${r.error || JSON.stringify(r)}` })
-        return
-      }
-      if (!ok) {
-        res.status(409).json({ error: `CASE-${n}: status update still conflicting after ${PATCH_MAX_RETRIES} retries (response CASE-${n}#${seq} was recorded)` })
-        return
-      }
-    }
-
-    res.json({
-      case: n, response_seq: seq, response_handle: `CASE-${n}#${seq}`,
-      response_document_id: responseId, status: newStatus,
-    })
-  } catch (e) {
-    const s = e instanceof WipError ? 502 : 500
-    res.status(s).json({ error: (e as Error).message })
-  }
-})
-
-// ---------------------------------------------------------------------------
-// Phase 2 (CASE-464): session / journey / stats mirror verbs. All three are
-// create-upserts on templates that KEEP their identity_fields (Mixed model,
-// C7) — the platform's identity hash is the dedup; re-mirrors converge.
-
-function parseFrontmatter(text: string): Record<string, string> {
-  const m = /^---\n([\s\S]*?)\n---/.exec(text)
-  const fm: Record<string, string> = {}
-  if (!m || !m[1]) return fm
-  for (const line of m[1].split('\n')) {
-    const i = line.indexOf(':')
-    if (i < 1 || line.trimStart().startsWith('#')) continue
-    fm[line.slice(0, i).trim()] = line.slice(i + 1).trim()
-  }
-  return fm
-}
-
 // POST /write/:type — the single typed-write surface (CASE-482). Structured data
 // in (the client owns all source parsing/validation); the gateway persists:
 // mint or natural-upsert per the type's WRITE_POLICY, then links any edge-intents.
-// Body = { data: {...}, metadata?: {...}, edges?: [{type, target_type, target_key}] }.
+// Two shapes:
+//   create/upsert: { data: {...}, metadata?, edges?: [{type, target_type, target_key}] }
+//   partial patch: { patch: {...}, match: {<field>: value} } — resolve the doc by
+//                  the match field, apply an RFC-7396 merge patch (if_match + retry
+//                  on concurrency). Used for field updates like a case status change.
 // Each edge is written source(the new doc) -> target(resolved by the target
 // type's identity field). Unresolved targets are reported, not fatal.
 router.post('/write/:type', async (req, res) => {
@@ -488,6 +292,43 @@ router.post('/write/:type', async (req, res) => {
   const ns = String(req.query.namespace || NS_DEFAULT)
   const type = req.params.type
   const b: AnyObj = req.body || {}
+
+  // --- patch mode: partial update of an existing doc, located by a match field ---
+  if (b.patch && typeof b.patch === 'object' && !Array.isArray(b.patch)) {
+    const match: AnyObj = b.match || {}
+    const mf = Object.keys(match)[0]
+    if (!mf) {
+      res.status(422).json({ error: 'patch requires match: {<field>: value} to locate the doc' })
+      return
+    }
+    try {
+      for (let attempt = 0; attempt < PATCH_MAX_RETRIES; attempt++) {
+        const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+          { template_id: type, filters: [{ field: `data.${mf}`, operator: 'eq', value: match[mf] }], page: 1, page_size: 1 })
+        const doc = (q.items || [])[0]
+        if (!doc) {
+          res.status(404).json({ error: `${type} where ${mf}=${match[mf]} not found in ${ns}` })
+          return
+        }
+        const d = await wipReq('PATCH', `/api/document-store/documents?namespace=${ns}`, key,
+          [{ document_id: doc.document_id, patch: b.patch, if_match: doc.version }])
+        const r = (d.results || [])[0] || {}
+        if (r.status === 'updated' || r.status === 'unchanged') {
+          res.json({ type, document_id: doc.document_id, result: r.status, patched: true })
+          return
+        }
+        if (r.error_code === 'concurrency_conflict') continue
+        res.status(502).json({ error: `${type} patch failed: ${r.error || JSON.stringify(r)}` })
+        return
+      }
+      res.status(409).json({ error: `${type} patch still conflicting after ${PATCH_MAX_RETRIES} retries` })
+    } catch (e) {
+      res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    }
+    return
+  }
+
+  // --- create / upsert mode ---
   const data: AnyObj = b.data || {}
   if (typeof data !== 'object' || Array.isArray(data) || !Object.keys(data).length) {
     res.status(422).json({ error: 'data (non-empty object) is required' })

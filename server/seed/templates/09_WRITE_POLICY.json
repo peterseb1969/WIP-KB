@@ -6,10 +6,12 @@
   "identity_fields": ["doc_type"],
   "header_fields": ["doc_type", "write_mode"],
   "fields": [
-    { "name": "doc_type",       "label": "Doc Type",       "type": "string", "mandatory": true },
-    { "name": "write_mode",     "label": "Write Mode",     "type": "term",   "mandatory": true, "reference_type": "term", "terminology_ref": "KB_WRITE_MODE" },
-    { "name": "number_field",   "label": "Number Field",   "type": "string" },
-    { "name": "synonym_prefix", "label": "Synonym Prefix", "type": "string" },
-    { "name": "search_key",     "label": "Search Key",     "type": "array",  "array_item_type": "string" }
+    { "name": "doc_type",         "label": "Doc Type",         "type": "string", "mandatory": true },
+    { "name": "write_mode",       "label": "Write Mode",       "type": "term",   "mandatory": true, "reference_type": "term", "terminology_ref": "KB_WRITE_MODE" },
+    { "name": "number_field",     "label": "Number Field",     "type": "string" },
+    { "name": "synonym_prefix",   "label": "Synonym Prefix",   "type": "string" },
+    { "name": "synonym_template", "label": "Synonym Template", "type": "string" },
+    { "name": "scope_field",      "label": "Scope Field",      "type": "string" },
+    { "name": "search_key",       "label": "Search Key",       "type": "array",  "array_item_type": "string" }
   ]
 }
