@@ -13,7 +13,6 @@ const KBC = `${SERVER_API}/kb-client`
 interface Manifest {
   client?: string
   client_version?: string
-  schema_version?: string
   install_endpoint?: string
   served_from?: string
   manifest_endpoint?: string
@@ -42,7 +41,7 @@ const FILE_ROLES: Record<string, Role> = {
 const EXTRA_ORDER = ['kb-client.sh', 'install.sh', 'case-workflow.md', 'README.md', 'manifest.json']
 
 const SERVING_ENDPOINTS: Array<[string, string, string]> = [
-  ['GET', 'kb-client/manifest', 'schema_version, files[], bundle_digest (derived at serve time)'],
+  ['GET', 'kb-client/manifest', 'files[] + bundle_digest (derived at serve time)'],
   ['GET', 'kb-client/download', 'whole bundle as one-shot JSON { files: {name: content} }'],
   ['GET', 'kb-client/files/:name', 'a single whitelisted bundle file (text/plain)'],
   ['GET', 'kb-client/install', 'the bootstrap shell script (curl | sh target)'],
@@ -124,7 +123,8 @@ export default function ClientPage() {
   const origin = window.location.origin
   const installUrl = `${origin}${m?.install_endpoint ?? `${KBC}/install`}`
   const oneLiner = `curl -fsSk -H "X-API-Key: $(cat ~/.wip-deploy/kb/secrets/api-key)" \\\n  ${installUrl} | sh`
-  const runCmd = `bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 471`
+  const readCmd = `bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 471`
+  const writeCmd = `bash ~/.cache/wip-kb-client/kb-client.sh kb-write.py DESIGN_DECISION decision.md`
 
   // The served bundle: scripts (manifest files[]) + the served extras. Reads and
   // writes both go through the gateway over one shared core; kb-write.py is the
@@ -155,8 +155,13 @@ export default function ClientPage() {
           ); the key is read from a file, never shown:
         </p>
         <Copyable text={oneLiner} label="Copy install one-liner" />
-        <p className="mb-2 mt-3 text-sm text-text-muted">Then run any script through the runner:</p>
-        <Copyable text={runCmd} label="Copy run command" />
+        <p className="mb-2 mt-3 text-sm text-text-muted">Read through the runner:</p>
+        <Copyable text={readCmd} label="Copy read command" />
+        <p className="mb-2 mt-3 text-sm text-text-muted">
+          …or write any doc type (<code className="font-mono text-xs">kb-write.py --list</code> shows
+          them):
+        </p>
+        <Copyable text={writeCmd} label="Copy write command" />
         <p className="mt-3 text-sm text-text-muted">
           The instance the client targets is the single source of truth in{' '}
           <code className="font-mono text-xs">.claude/kb.json</code> (
@@ -173,9 +178,8 @@ export default function ClientPage() {
         )}
         {m && (
           <>
-            <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <Stat label="client_version" value={m.client_version ?? '—'} />
-              <Stat label="schema_version" value={m.schema_version ?? '—'} hint="write-safety / identity signal" />
+            <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Stat label="client_version" value={m.client_version ?? '—'} hint="informational semver" />
               <Stat
                 label="bundle_digest"
                 value={m.bundle_digest ? `${m.bundle_digest.slice(0, 12)}…` : '—'}
@@ -253,7 +257,7 @@ export default function ClientPage() {
             for URL + key file; the runner and the python client derive both from it.
           </li>
           <li>
-            • Pairing guard (CASE-444): overriding the base URL without the matching key fails loud —
+            • Pairing guard: overriding the base URL without the matching key fails loud —
             it will not silently pair the canonical key with a different instance.
           </li>
         </ul>
