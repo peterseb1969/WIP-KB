@@ -1,32 +1,26 @@
-# kb-client — the KB write/ingest client
+# kb-client — the KB read/write client
 
-> **CASE-464 Phase 4 (Roll B): ALL writes have moved to the KB write-gateway.**
-> cases: `POST {BASE_PATH}/server-api/kb/cases` + `/cases/<n>/(respond|comment|close|implement)` ·
-> sessions: `POST /sessions/mirror` · journals: `POST /journeys/mirror` ·
-> papers: `POST /documents/mirror` · git stats: `POST /stats/snapshot`
-> (X-API-Key; see the served `case-workflow.md` + command playbooks).
-> The loaders below REFUSE writes with those pointers; the schema handshake is
-> deleted (a thin HTTP caller has nothing to skew). Still runnable:
-> `case-fetch.py` (reads; the gateway read API is the forward path) and
-> `stats-to-kb.py` (computes locally, posts the verb).
+The client every YAC uses to talk to a KB instance. **All calls go through the
+KB gateway API** (`{BASE_PATH}/server-api/kb/…`) — never the document-store
+backend (CASE-482, the "straight to MongoDB" anti-pattern). Reads: cases,
+journals, firesides, faceted lists. Writes: the generic `POST /write/:type`
+surface (the gateway mints or natural-upserts per the type's `WRITE_POLICY` doc)
+plus the git-stats verb.
 
-The loaders that ingest cases / journals / sessions / stats into a KB instance's
-`kb` namespace. **Owned by APP-KB-YAC** and **served from the running KB instance**
-(downloadable from the app, versioned with the server) — see CASE-437 and
-`FR-YAC/papers/kb-client-ownership-and-distribution.md`.
-
-Any client of a KB instance fetches *this* client from *that* instance
-(`GET {BASE_PATH}/server-api/kb-client/download` — one-shot JSON bundle — or
-`/files/<name>` per file) and runs it, refreshing on `bundle_digest` change.
-Since Roll B the bundle has no write paths, so version-skew is moot for
-writes — the gateway verbs inherit the platform's real validation.
+**Owned by APP-KB-YAC** and **served from the running KB instance** (downloadable,
+versioned with the server) — see CASE-437 and
+`FR-YAC/papers/kb-client-ownership-and-distribution.md`. Any client fetches *this*
+client from *that* instance (`GET {BASE_PATH}/server-api/kb-client/download` —
+one-shot JSON bundle — or `/files/<name>` per file) and runs it, refreshing on
+`bundle_digest` change.
 
 ## Roster
 | File | Role |
 |---|---|
-| `kb_write_core.py` | Shared core (stdlib-only): `.claude/kb.json` + API-key resolution (CASE-444/471), imported by the read/stats scripts. |
-| `case-fetch.py` | REST-canonical case/journal read (CASE-393). |
-| `stats-to-kb.py` | Git-stats snapshot computer — computes locally, POSTs the `/stats/snapshot` gateway verb. |
+| `kb_client_core.py` | Shared core (stdlib-only): `.claude/kb.json` + API-key resolution (CASE-444/471), target config, and the gateway transport — `gw_get`/`gw_post` with local→remote failover. Imported by every script. |
+| `case-fetch.py` | Read commands — `case` / `journey` / `list` / `fireside` — over the gateway (CASE-393/479/482). |
+| `kb-write.py` | Write client — one generic surface over `POST /write/:type`; `--list` shows writable types via `GET /types` (CASE-482). |
+| `stats-to-kb.py` | Git-stats snapshot computer — computes locally, POSTs `/stats/snapshot` via the core. |
 | `kb-client.sh` | The runner (CASE-440): fetch/refresh the bundle on `bundle_digest` change, then run a script with `PYTHONPATH` set. Ships inside the bundle — relocated out of FR-YAC. |
 | `install.sh` | One-liner bootstrap (CASE-440): `curl -fsSk -H "X-API-Key: $KEY" {BASE_PATH}/server-api/kb-client/install \| sh` materializes the bundle to `~/.cache/wip-kb-client`. |
 | `case-workflow.md` | The cross-YAC case playbook, served with the client (single source: `docs/playbooks/case-workflow.md`, synced from the gene-pool master). |
@@ -65,7 +59,7 @@ instance from `.claude/kb.json`), e.g.
 
 Env:
 - **Single source of truth: `.claude/kb.json`** (`kb_app_url` + `kb_api_key_file`,
-  CASE-471). The runner and `kb_write_core.py` derive `KB_BASE_URL` +
+  CASE-471). The runner and `kb_client_core.py` derive `KB_BASE_URL` +
   `KB_API_KEY_FILE` from it when unset, so a hostname cutover is one edit there.
 - `KB_BASE_URL` — the canonical instance (default `https://kb.internal`).
 - `KB_API_KEY_FILE` — its key file (default `~/.wip-deploy/kb/secrets/api-key`).
@@ -76,10 +70,10 @@ Env:
   No `/Users/<user>` literals — defaults derive from `$HOME`.
 - `KB_LOCAL_URL` / `KB_LOCAL_KEY_FILE` — the optional local fast-path instance
   (`case-fetch` `KB_PREFER_LOCAL=1`, `stats-to-kb` local target);
-  defaults `https://localhost:8443` + `~/.wip-deploy/wip-dev-local/secrets/api-key`,
+  defaults `https://localhost:8443` + `~/.wip-deploy/wip-local/secrets/api-key`,
   same pairing guard.
 - `KB_NAMESPACE` (default `kb`), `KB_VERIFY_TLS` (default `false`),
   `KB_DEV_ROOT` (default `~/Development` — flat-file repo roots).
 - `KB_APP_URL` / `KB_APP_BASE_PATH` — the KB app endpoint (gateway verbs +
   served bundle), distinct from the WIP backend `KB_BASE_URL`. Default
-  `https://wip-kb.local` + `/apps/kb`.
+  `https://kb.internal` + `/apps/kb`.

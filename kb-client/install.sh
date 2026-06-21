@@ -1,8 +1,8 @@
 #!/bin/sh
 # install.sh (CASE-440) — bootstrap the served KB client onto this machine.
 #
-#   curl -fsSk -H "X-API-Key: $(cat ~/.wip-deploy/wip-kb/secrets/api-key)" \
-#     https://wip-kb.local/apps/kb/server-api/kb-client/install | sh
+#   curl -fsSk -H "X-API-Key: $(cat ~/.wip-deploy/kb/secrets/api-key)" \
+#     https://kb.internal/apps/kb/server-api/kb-client/install | sh
 #
 # Materializes the version-matched client bundle (loaders + kb-client.sh runner +
 # case-workflow.md) into ${KB_CLIENT_CACHE:-$HOME/.cache/wip-kb-client}, digest-
@@ -12,8 +12,8 @@
 #   bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 437
 #
 # Env (same family as kb-client.sh):
-#   KB_APP_URL        https://wip-kb.local      KB_APP_BASE_PATH  /apps/kb
-#   KB_API_KEY_FILE   ~/.wip-deploy/wip-kb/secrets/api-key
+#   KB_APP_URL        https://kb.internal      KB_APP_BASE_PATH  /apps/kb
+#   KB_API_KEY_FILE   ~/.wip-deploy/kb/secrets/api-key
 #   KB_CLIENT_CACHE   ~/.cache/wip-kb-client
 #
 # POSIX sh (curl|sh target) — no bashisms.

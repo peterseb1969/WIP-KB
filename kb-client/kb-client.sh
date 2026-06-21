@@ -11,15 +11,15 @@
 #   e.g.  bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 437
 #         bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py list --status open
 #
-# Env (defaults target the canonical wip-kb.local KB app):
-#   KB_APP_URL        https://wip-kb.local
+# Env (defaults target the canonical kb.internal KB app):
+#   KB_APP_URL        https://kb.internal
 #   KB_APP_BASE_PATH  /apps/kb
-#   KB_API_KEY_FILE   ~/.wip-deploy/wip-kb/secrets/api-key
+#   KB_API_KEY_FILE   ~/.wip-deploy/kb/secrets/api-key
 #   KB_CLIENT_CACHE   ~/.cache/wip-kb-client
 #   KB_VERIFY_TLS     false (self-signed dev certs)
 #
 # Runs from the CALLER's cwd (so relative file args resolve against the calling
-# repo) with PYTHONPATH=$KBC (so `from kb_write_core import …` resolves). The
+# repo) with PYTHONPATH=$KBC (so `from kb_client_core import …` resolves). The
 # served scripts handshake against the instance manifest and refuse to write on
 # schema_version skew because this wrapper exports KB_APP_URL/KB_APP_BASE_PATH.
 #

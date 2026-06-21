@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-stats-to-kb.py — write per-day GIT_STATS_SNAPSHOT records to wip-kb.
+stats-to-kb.py — write per-day GIT_STATS_SNAPSHOT records to the KB.
 
 Closes CASE-412. The GIT_STATS_SNAPSHOT template was seeded at kb
 bootstrap (identity_fields=["snapshot_date","repo"]) but no writer
@@ -19,32 +19,23 @@ Usage:
     stats-to-kb.py --backfill 7                     # last 7 days, all repos
     stats-to-kb.py --backfill 7 --repo FR-YAC       # last 7 days, one repo
 
-Env vars (CASE-464 Roll B — writes go through the KB write-gateway):
-    KB_APP_URL           default https://wip-kb.local (the KB app)
-    KB_APP_BASE_PATH     default /apps/kb
-    KB_API_KEY_FILE      default ~/.wip-deploy/wip-kb/secrets/api-key
-                         (KB_KEY_FILE accepted as deprecated alias — CASE-444)
+Connection env is resolved by kb_client_core (KB_BASE_URL / KB_API_KEY_FILE from
+.claude/kb.json — canonical kb.internal; KB_PREFER_LOCAL for a dev instance):
     KB_DEV_ROOT          default ~/Development (repo roots for REPOS)
 """
 import argparse
-import json
-import os
-import ssl
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
 
-from kb_client_core import DEV_ROOT, resolve_key_file
+from kb_client_core import DEV_ROOT, gw_post
 
 # Canonical repo name → filesystem path (under DEV_ROOT, env: KB_DEV_ROOT).
-# Names use the same canonical form as kb_write_core.APP_ALIASES where they
-# overlap (e.g. "KB" not "wip-kb") so joins between GIT_STATS_SNAPSHOT.repo
-# and CASE_RECORD.data.app work.
+# Names are the canonical app form (e.g. "KB" not "wip-kb") so joins between
+# GIT_STATS_SNAPSHOT.repo and CASE_RECORD.data.app line up.
 REPOS: dict[str, Path] = {
     "World-in-a-Pie": DEV_ROOT / "World-in-a-Pie",
     "FR-YAC":         DEV_ROOT / "FR-YAC",
@@ -60,17 +51,9 @@ REPOS: dict[str, Path] = {
 }
 
 
-# CASE-464 Phase 4 (Roll B): computation stays here (git lives on this
-# machine); the WRITE goes through the KB write-gateway verb. The gateway
-# composes title/tags/shape server-side (the CASE-453 roster class).
-GW_APP_URL = os.environ.get("KB_APP_URL", "https://wip-kb.local")
-GW_BASE_PATH = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")
-GW_KEY_FILE = resolve_key_file(GW_APP_URL, "https://wip-kb.local", "wip-kb",
-                               "KB_API_KEY_FILE", "KB_KEY_FILE")
-
-ssl_ctx = ssl.create_default_context()
-ssl_ctx.check_hostname = False
-ssl_ctx.verify_mode = ssl.CERT_NONE
+# Computation stays here (git lives on this machine); the WRITE goes through the
+# KB gateway verb via core.gw_post. The gateway composes title/tags/shape
+# server-side (the CASE-453 roster class).
 
 
 @dataclass
@@ -162,19 +145,10 @@ def write_snapshot(repo_name: str, repo_path: Path, snapshot_date: date) -> int:
         "lines_removed": stats.lines_removed, "files_changed": stats.files_changed,
         "contributors": stats.contributors,
     }
-    url = f"{GW_APP_URL}{GW_BASE_PATH}/server-api/kb/stats/snapshot"
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode(), method="POST",
-        headers={"Content-Type": "application/json",
-                 "X-API-Key": GW_KEY_FILE.read_text().strip()})
     try:
-        resp = urllib.request.urlopen(req, context=ssl_ctx, timeout=20)
-        result = json.loads(resp.read()).get("result", "?")
-    except urllib.error.HTTPError as e:
-        print(f"[gateway] FAILED {e.code}: {e.read()[:200].decode(errors='replace')}", file=sys.stderr)
-        return 2
-    except (urllib.error.URLError, OSError) as e:
-        print(f"[gateway] unreachable: {e}", file=sys.stderr)
+        result = gw_post("/stats/snapshot", payload).get("result", "?")
+    except RuntimeError as e:
+        print(f"[gateway] {e}", file=sys.stderr)
         return 2
     print(
         f"[stats-to-kb] {repo_name} {snapshot_date.isoformat()}: "
