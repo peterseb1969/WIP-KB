@@ -24,18 +24,20 @@ interface Manifest {
 }
 
 // Roles for the served files (the manifest derives files[] from disk but carries
-// no per-file role). `retired` writers are flagged — writes go through the
-// gateway verbs now (CASE-464). `extra` = served alongside the .py files[].
+// no per-file role). The client is gateway-only over one transport core; writes
+// go through the single POST /write/:type (CASE-482). `extra` = served alongside
+// the .py files[].
 type Role = { role: string; extra?: boolean }
 const FILE_ROLES: Record<string, Role> = {
   'kb-client.sh': { role: 'Runner — fetches/refreshes the bundle; run scripts via it', extra: true },
   'install.sh': { role: 'Bootstrap — `curl | sh` materializes the bundle', extra: true },
-  'case-fetch.py': { role: 'Read — fetch a case / list cases' },
-  'kb_write_core.py': { role: 'Shared core — kb.json / API-key resolution (CASE-444)' },
-  'stats-to-kb.py': { role: 'Stats — computes locally, POSTs /stats/snapshot' },
+  'kb_client_core.py': { role: 'Shared core — kb.json/API-key resolution + gateway transport (gw_get/gw_post, failover)' },
+  'case-fetch.py': { role: 'Read — case / journey / list / fireside, all via the gateway' },
+  'kb-write.py': { role: 'Write — any doc type via POST /write/:type (parse + validate + edges + patch)' },
+  'stats-to-kb.py': { role: 'Stats — computes locally, writes via /write/GIT_STATS_SNAPSHOT' },
   'case-workflow.md': { role: 'Playbook — authoritative case how-to (rendered below)', extra: true },
   'README.md': { role: 'Bundle readme', extra: true },
-  'manifest.json': { role: 'Manifest (schema_version, version_contract)', extra: true },
+  'manifest.json': { role: 'Manifest (version_contract, bundle_digest)', extra: true },
 }
 // Order extras after the scripts; manifest.json last.
 const EXTRA_ORDER = ['kb-client.sh', 'install.sh', 'case-workflow.md', 'README.md', 'manifest.json']
@@ -47,13 +49,12 @@ const SERVING_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb-client/install', 'the bootstrap shell script (curl | sh target)'],
 ]
 const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
-  ['GET', 'kb/cases?status=&since=', 'list cases (projections)'],
+  ['GET', 'kb/cases?status=&filed_by=&severity=&type=&component=&app=', 'list cases (faceted, server-side)'],
   ['GET', 'kb/cases/:n', 'one case incl. body (CASE-<n> synonym)'],
   ['GET', 'kb/sessions  ·  kb/journeys/:day', 'list sessions / a journey day'],
-  ['POST', 'kb/cases', 'file a case (allocates number + synonym + REFERENCES)'],
-  ['POST', 'kb/cases/:n/{respond,comment,close,implement}', 'append a section + drive the status machine'],
-  ['POST', 'kb/{sessions,journeys,documents}/mirror', 'upsert a session / journey / document'],
-  ['POST', 'kb/stats/snapshot', 'record a GIT_STATS_SNAPSHOT'],
+  ['GET', 'kb/firesides  ·  kb/firesides/:id', 'list firesides / one fireside body'],
+  ['GET', 'kb/types', 'doc-type manifest — write_mode per type (from WRITE_POLICY docs)'],
+  ['POST', 'kb/write/:type', 'THE write path — {data, edges[]} (create/mint/upsert) or {patch, match} (partial update)'],
 ]
 
 function Copyable({ text, label }: { text: string; label?: string }) {
@@ -126,9 +127,9 @@ export default function ClientPage() {
   const oneLiner = `curl -fsSk -H "X-API-Key: $(cat ~/.wip-deploy/kb/secrets/api-key)" \\\n  ${installUrl} | sh`
   const runCmd = `bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 471`
 
-  // The served bundle: scripts (manifest files[]) + the served extras. Every file
-  // here is current — retired writers were removed from the bundle (CASE-464:
-  // writes go through the gateway verbs).
+  // The served bundle: scripts (manifest files[]) + the served extras. Reads and
+  // writes both go through the gateway over one shared core; kb-write.py is the
+  // single write client (POST /write/:type) — CASE-482.
   const fileHref = (name: string) => `${KBC}/files/${encodeURIComponent(name)}`
   const fileRows = [
     ...(m?.files ?? []).filter((n) => !EXTRA_ORDER.includes(n)),
@@ -233,8 +234,11 @@ export default function ClientPage() {
         <div className="h-4" />
         <EndpointTable caption="Gateway — reading & writing KB" base={`${SERVER_API}/`} rows={GATEWAY_ENDPOINTS} />
         <p className="mt-3 text-sm text-text-muted">
-          Writes are gateway verbs (CASE-464); the bundle has no write paths left. The playbook below
-          is the authoritative how-to for filing and transitioning cases.
+          One write endpoint: <code className="font-mono text-xs">POST kb/write/:type</code>. The client
+          (<code className="font-mono text-xs">kb-write.py</code>) parses + validates the source and the
+          gateway persists — mint or upsert per the type's <code className="font-mono text-xs">WRITE_POLICY</code>,
+          link any edge-intents, or apply a <code className="font-mono text-xs">{'{patch, match}'}</code> field
+          update. The playbook below is the authoritative how-to for filing and transitioning cases.
         </p>
       </Section>
 
