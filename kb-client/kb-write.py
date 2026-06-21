@@ -313,6 +313,22 @@ def cmd_write(type_: str, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_patch(type_: str, args: argparse.Namespace) -> int:
+    """Partial update of an existing doc: --patch k=v (repeatable) located by
+    --match k=v. Posts { patch, match } to /write/:type (e.g. a case status change)."""
+    patch = _parse_fields(args.patch)
+    match = _parse_fields([args.match]) if args.match else {}
+    if not patch or not match:
+        print("ERROR: --patch k=v and --match k=v are both required", file=sys.stderr)
+        return 2
+    result = gw_post(f"/write/{type_}", {"patch": patch, "match": match})
+    if args.format == "json":
+        sys.stdout.write(json.dumps(result, indent=2) + "\n")
+    else:
+        sys.stdout.write(f"{result.get('result', '?')} ({result.get('document_id', '')})\n")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="KB write client (gateway-only).")
     ap.add_argument("type", nargs="?", help="doc type (e.g. DESIGN_DECISION); omit with --list")
@@ -322,6 +338,8 @@ def main() -> int:
     ap.add_argument("--field", action="append", help="add/override a data field k=v (repeatable)")
     ap.add_argument("--edge", action="append", help="edge intent TYPE:target_type:target_key (repeatable)")
     ap.add_argument("--metadata", help="JSON object merged into the write metadata")
+    ap.add_argument("--patch", action="append", help="partial-update field k=v (repeatable; with --match)")
+    ap.add_argument("--match", help="locate the doc to patch by k=v")
     ap.add_argument("--format", choices=["text", "json"], default="text")
     args = ap.parse_args()
 
@@ -330,6 +348,8 @@ def main() -> int:
             return cmd_list(args.format)
         if not args.type:
             ap.error("a doc TYPE is required (or use --list)")
+        if args.patch:
+            return cmd_patch(args.type, args)
         return cmd_write(args.type, args)
     except RuntimeError as e:
         print(f"ERROR: transport failure: {e}", file=sys.stderr)
