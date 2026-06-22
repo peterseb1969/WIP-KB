@@ -20,3 +20,6 @@ reports/
 # Python (kb-client loaders)
 __pycache__/
 *.pyc
+
+# KB data exports / backups — data lives in the kb namespace, never the app repo
+backup-files/
