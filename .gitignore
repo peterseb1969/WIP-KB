@@ -23,3 +23,7 @@ __pycache__/
 
 # KB data exports / backups — data lives in the kb namespace, never the app repo
 backup-files/
+
+# Local-only: machine-specific session hooks + scratch evidence (screenshots etc.)
+.claude/hooks/
+evidence/
