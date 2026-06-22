@@ -33,6 +33,27 @@ class WipError extends Error {
   constructor(public status: number, message: string) { super(message) }
 }
 
+// Map document-store per-item error_codes to a precise client status (CASE-490
+// fix #1, kb-gateway remainder). document-store is bulk-first (HTTP 200 with a
+// per-item error_code), so a write the platform rejected on a precondition —
+// e.g. `template_inactive`, a frozen template version — must surface as a
+// branchable 4xx here, not a blanket 502 that reads as "the backend is down".
+const ERROR_CODE_STATUS: Record<string, number> = {
+  not_found: 404,
+  forbidden: 403,
+  archived: 409,
+  template_inactive: 409,    // frozen template version (CASE-490)
+  append_only: 409,          // identity-less template can't be PATCHed (CASE-478)
+  concurrency_conflict: 409,
+  identity_field_change: 422,
+  validation_failed: 422,
+  reference_violation: 422,
+  internal_error: 502,
+}
+function statusForErrorCode(code?: string): number {
+  return (code && ERROR_CODE_STATUS[code]) || 502
+}
+
 async function wipReq(method: string, path: string, key: string, body?: unknown): Promise<AnyObj> {
   const resp = await fetch(`${WIP_BASE}${path}`, {
     method,
@@ -318,12 +339,15 @@ router.post('/write/:type', async (req, res) => {
           return
         }
         if (r.error_code === 'concurrency_conflict') continue
-        res.status(502).json({ error: `${type} patch failed: ${r.error || JSON.stringify(r)}` })
+        res.status(statusForErrorCode(r.error_code)).json({
+          error_code: r.error_code || undefined,
+          error: `${type} patch failed: ${r.error || JSON.stringify(r)}`,
+        })
         return
       }
       res.status(409).json({ error: `${type} patch still conflicting after ${PATCH_MAX_RETRIES} retries` })
     } catch (e) {
-      res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+      res.status(e instanceof WipError ? e.status : 500).json({ error: (e as Error).message })
     }
     return
   }
