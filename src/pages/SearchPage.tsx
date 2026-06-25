@@ -381,6 +381,17 @@ export default function SearchPage() {
   type Hit = { doc: DocItem; score: number | null; snippet: string | null }
   const hits: Hit[] = useMemo(() => {
     if (query.trim()) {
+      // Case-number jump: "457" / "CASE-457" / "#457" → the case with that number.
+      // case_number is an integer (not an FTS-indexed string field), so a bare
+      // number never matches FTS — resolve it directly against the loaded docs.
+      const m = query.trim().match(/^(?:case-?|#)?(\d+)$/i)
+      if (m) {
+        const n = Number(m[1])
+        const doc = filterableDocs.find(
+          (d) => d.template_value === 'CASE_RECORD' && d.data.case_number === n,
+        )
+        if (doc) return [{ doc, score: null, snippet: null }]
+      }
       const ftsHits = Object.values(searchQ.data?.results ?? {}).flatMap((b) => b.items)
       const seen = new Set<string>()
       const result: Hit[] = []

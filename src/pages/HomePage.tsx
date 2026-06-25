@@ -7,6 +7,10 @@ import { CaseLabel } from '../components/CaseLabel'
 
 const NAMESPACE = 'kb'
 
+// Structural / config doc types — not KB content, hidden from the start page.
+// (Edge types are filtered separately via the template usage flag.)
+const HIDDEN_TYPES = new Set(['BOOTSTRAP_RECORD', 'WRITE_POLICY'])
+
 interface DocItem {
   document_id: string
   template_value: string
@@ -347,10 +351,11 @@ export default function HomePage() {
   )
 
   const allItems = data ?? []
-  const items = allItems.filter((d) => !edgeTypes.has(d.template_value))
-  const userContent = items.filter((d) => d.template_value !== 'BOOTSTRAP_RECORD')
+  const items = allItems.filter(
+    (d) => !edgeTypes.has(d.template_value) && !HIDDEN_TYPES.has(d.template_value),
+  )
 
-  if (userContent.length === 0) {
+  if (items.length === 0) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <p className="max-w-md text-center text-text-muted">
