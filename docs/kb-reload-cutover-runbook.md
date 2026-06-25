@@ -14,6 +14,15 @@ primitives.
 Tools: `tools/bootstrap-ns.ts` (real `runBootstrap` into a throwaway ns) and
 `tools/kb-reload.py` (the loader). Both are **localhost-only** by guardrail.
 
+**Folded in since the draft (all on `origin/main`, localhost-validated):**
+- **CASE-422** — `app` is now a `KB_APP` term-ref; the reload canonicalizes app
+  values in the same pass (synonyms resolve: `kb`→KB, `Song`→wip-song, …). No
+  separate migration.
+- **kb-reload.py empty-strip** — empty-string/null values are dropped before
+  write (an optional term-ref rejects `""`); empties become absent.
+- **Gateway 502→4xx (CASE-490 #1)** — document-store per-item errors now surface
+  as branchable 4xx, so a coverage failure during the run reads cleanly.
+
 ---
 
 ## What the reload does (recap)
@@ -21,6 +30,11 @@ Tools: `tools/bootstrap-ns.ts` (real `runBootstrap` into a throwaway ns) and
 1. Bootstrap a fresh namespace with the current (A) `server/seed/` schema.
 2. Delete the `CASE_RECORD` `WRITE_POLICY` doc → case auto-numbering OFF.
 3. Load entities through the gateway single-write-path:
+   - empty-string/null fields dropped (→ absent) so optional term-refs don't
+     reject `""`.
+   - `app` resolves against `KB_APP` at write (synonyms canonicalize: `kb`→KB,
+     `Song`→wip-song); `data.app` keeps the raw input (Preserve-Original), the
+     canonical lives in `term_references` (CASE-422).
    - `CASE_RECORD` written **natural** → `case_number` preserved exactly (sparse
      1–492 with gaps); `DOCUMENT`/`FIRESIDE` **minted** (their identity *is* the
      minted number, absent in old data); others natural. `BOOTSTRAP_RECORD` skipped.
@@ -32,7 +46,14 @@ Tools: `tools/bootstrap-ns.ts` (real `runBootstrap` into a throwaway ns) and
 7. Verify per-type counts, edge links, and `GET /cases/<n>` resolution.
 
 Validated on localhost: 393 cases + 729 edges + 393 synonyms, `GET /cases/457`
-resolves (the CASE-490 victim).
+resolves (the CASE-490 victim); `app` folds `kb`→KB / `Song`→wip-song with zero
+non-canonical leak.
+
+> **Iteration hygiene — use a FRESH namespace name each run.** Re-using a
+> torn-down namespace name serves a **stale gateway template cache**
+> (`Template '…' not found`), because the gateway caches templates per namespace
+> *name* and the rebuild mints new template_ids. The cutover uses a new namespace
+> anyway; the gateway restart (step 4) clears the cache.
 
 ---
 
@@ -57,12 +78,20 @@ resolves (the CASE-490 victim).
 - [ ] Sanity-check counts vs. expectation (cases ≈ 39x, edges, etc.).
 
 ### 2. Build + load into a NEW namespace — **on localhost first, against THIS export**
-- [ ] Run the full reload into a throwaway localhost ns using the *canonical*
-      export, to confirm this specific snapshot loads clean (catches any new
-      data that drifted since the last localhost run):
-      `python3 tools/kb-reload.py --backup backup-files/<new>.zip --namespace kb-mig-canary --phase all`
+- [ ] Run the full reload into a throwaway localhost ns (a **fresh name** — see
+      iteration hygiene above) using the *canonical* export, to confirm this
+      specific snapshot loads clean (catches any data that drifted since the last
+      localhost run):
+      `python3 tools/kb-reload.py --backup backup-files/<new>.zip --namespace kb-canary-<ts> --phase all`
 - [ ] Verify: all per-type counts OK (or expected mismatches understood), edges
-      linked, `GET /cases/<n>` resolves. Teardown the canary.
+      linked, `GET /cases/<n>` resolves.
+- [ ] **`KB_APP` coverage gate (CASE-422):** zero `CASE_RECORD` errors of the
+      form `Value '…' is not valid for terminology` — i.e. every `data.app`
+      spelling in *this* export is a `KB_APP` term or synonym. If a NEW spelling
+      appears (a new app filed since the last corpus check), **add it to
+      `server/seed/terminologies/KB_APP.json`** (canonical term or synonym) and
+      re-run the canary before cutover. (Empty `app` is fine — dropped to absent.)
+- [ ] Teardown the canary.
 
 ### 3. Cutover against canonical
 > The loader is localhost-pinned by guardrail. Running against canonical
@@ -100,7 +129,14 @@ resolves (the CASE-490 victim).
 - **JOURNEY Day-61** resolved via renumber-to-61.5 (option 2). If the new
   `JOURNEY_ENTRY` identity is later widened (e.g. `day_number,title`), drop the
   override.
+- **`KB_APP` coverage** (CASE-422) must cover every `data.app` spelling in the
+  canonical export at cutover time. The canary's coverage gate (step 2) is the
+  go/no-go; new apps filed since the last corpus check need a `KB_APP` synonym
+  first. `data.app` stays raw (Preserve-Original); consumers read the canonical
+  from `term_references` (the SearchPage facet already does).
 - **`localhost` guardrail removal** for the canonical run — the one deliberate,
   reviewed unsafety in the whole procedure. Keep it explicit.
 - **Write-freeze window** length — bounded by export + load time (~minutes for
   ~1.4k docs); confirm acceptable.
+- **Fresh namespace name per reload run** — re-use serves a stale gateway
+  template cache (see iteration hygiene).
