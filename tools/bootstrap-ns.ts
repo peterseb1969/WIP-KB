@@ -23,14 +23,25 @@ import { runBootstrap } from '../server/lib/bootstrap.js'
 const ns = process.env.KB_BOOTSTRAP_NAMESPACE
 const url = process.env.WIP_BASE_URL || ''
 
-// Guardrails — this harness must never touch canonical or the real kb namespace.
-if (!ns || ns === 'kb') {
-  console.error('REFUSE: set KB_BOOTSTRAP_NAMESPACE to a throwaway namespace (not "kb").')
+// Guardrails — localhost + a throwaway namespace by default. A remote target
+// and/or the real 'kb' namespace (the cutover) is a DELIBERATE opt-in:
+// KB_BOOTSTRAP_CONFIRM must equal WIP_BASE_URL (kb-reload.py sets this when it
+// shells out with a remote target).
+const allowRemote = url !== '' && process.env.KB_BOOTSTRAP_CONFIRM === url
+if (!ns) {
+  console.error('REFUSE: set KB_BOOTSTRAP_NAMESPACE.')
   process.exit(2)
 }
-if (!/localhost|127\.0\.0\.1/.test(url)) {
-  console.error(`REFUSE: WIP_BASE_URL must be localhost for the migration harness (got "${url}").`)
+if (ns === 'kb' && !allowRemote) {
+  console.error('REFUSE: namespace "kb" requires KB_BOOTSTRAP_CONFIRM=WIP_BASE_URL (deliberate cutover).')
   process.exit(2)
+}
+if (!/localhost|127\.0\.0\.1/.test(url) && !allowRemote) {
+  console.error(`REFUSE: non-localhost WIP_BASE_URL ("${url}") requires KB_BOOTSTRAP_CONFIRM to match it.`)
+  process.exit(2)
+}
+if (allowRemote) {
+  console.error(`*** REMOTE BOOTSTRAP — ${url} namespace=${ns} (cutover op) ***`)
 }
 
 let failed = false

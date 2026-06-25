@@ -42,8 +42,14 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SEED = REPO / "server" / "seed"
-BASE_URL = "https://localhost:8443"
-KEY_FILE = Path.home() / ".wip-deploy" / "wip-local" / "secrets" / "api-key"
+# Default target is the localhost dev sandbox. A remote target (the cutover —
+# e.g. the test Pi, or the cluster, at https://kb.internal:8443) is a DELIBERATE
+# opt-in: set KB_RELOAD_URL + KB_RELOAD_KEY_FILE, and KB_RELOAD_CONFIRM must equal
+# the URL (fat-finger guard). localhost stays the safe default for iteration.
+BASE_URL = os.environ.get("KB_RELOAD_URL", "https://localhost:8443")
+KEY_FILE = Path(os.environ.get("KB_RELOAD_KEY_FILE",
+                               str(Path.home() / ".wip-deploy" / "wip-local" / "secrets" / "api-key"))).expanduser()
+IS_LOCAL = ("localhost" in BASE_URL) or ("127.0.0.1" in BASE_URL)
 GW = "/apps/kb/server-api/kb"
 ENTITY_TYPE = "documents"
 
@@ -137,7 +143,8 @@ def phase_bootstrap(ns: str, dry: bool) -> None:
         print("  (dry-run) would run tools/bootstrap-ns.ts + archive CASE_RECORD WRITE_POLICY")
         return
     env = {**os.environ, "WIP_BASE_URL": BASE_URL, "WIP_API_KEY": KEY_FILE.read_text().strip(),
-           "NODE_TLS_REJECT_UNAUTHORIZED": "0", "KB_BOOTSTRAP_NAMESPACE": ns}
+           "NODE_TLS_REJECT_UNAUTHORIZED": "0", "KB_BOOTSTRAP_NAMESPACE": ns,
+           "KB_BOOTSTRAP_CONFIRM": BASE_URL}  # opt-in for a remote/kb bootstrap target
     r = subprocess.run(["npx", "tsx", "tools/bootstrap-ns.ts"], cwd=REPO, env=env)
     if r.returncode != 0:
         raise SystemExit(f"bootstrap failed (rc={r.returncode})")
@@ -327,10 +334,16 @@ def main() -> int:
     args = ap.parse_args()
 
     ns = args.namespace
-    if ns == "kb":
-        sys.exit("REFUSE: namespace 'kb' is canonical. Use a throwaway (e.g. kb-mig-1).")
-    if "localhost" not in BASE_URL:
-        sys.exit("REFUSE: target must be localhost.")
+    if IS_LOCAL:
+        # localhost default: protect the dev sandbox / prod-restore 'kb'.
+        if ns == "kb":
+            sys.exit("REFUSE: 'kb' on localhost is the dev sandbox — use a throwaway (e.g. kb-mig-1).")
+    else:
+        # remote target = deliberate cutover. Require an explicit, matching confirm.
+        if os.environ.get("KB_RELOAD_CONFIRM") != BASE_URL:
+            sys.exit(f"REFUSE: remote target {BASE_URL} requires KB_RELOAD_CONFIRM={BASE_URL} "
+                     f"(deliberate cutover opt-in).")
+        print(f"\n*** REMOTE RELOAD — target={BASE_URL}  namespace={ns}  (cutover op) ***\n", file=sys.stderr)
 
     if args.phase == "teardown":
         phase_teardown(ns, args.dry_run)
