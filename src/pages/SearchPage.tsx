@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
@@ -35,39 +35,37 @@ interface DocItem {
       [k: string]: unknown
     }
   }
+  // Resolved term references (CASE-422): term fields (e.g. app → KB_APP) carry
+  // the canonical term_id here, resolved at write — data.app keeps the raw input.
+  term_references?: Array<{ field_path: string; term_id: string }>
   created_at: string
   updated_at: string
 }
 
-// `data.app` value normalization. The case-frontmatter `app:` field is
-// free-form; today's corpus has 17 distinct spellings for ~6 actual apps
-// (e.g., 'WIP ReactConsole' / 'RC-Console' / 'react-console' are all the
-// same thing). UI-side aliasing collapses them into canonical values for
-// the facet filter. Long-term: BE-YAC/FRanC normalize loader output and
-// this map can shrink (filed separately).
-const APP_ALIAS: Record<string, string> = {
-  KB: 'KB',
-  kb: 'KB',
-  'wip-kb': 'KB',
-  'WIP ReactConsole': 'ReactConsole',
-  'RC-Console': 'ReactConsole',
-  'RC-Console (WIP ReactConsole)': 'ReactConsole',
-  'react-console': 'ReactConsole',
-  'rc-console': 'ReactConsole',
-  AuthorAssist: 'AuthorAssist',
-  'ClinTrial Explorer': 'ClinTrial',
-  clintrial: 'ClinTrial',
-  'clintrial-explorer': 'ClinTrial',
-  'dnd-compendium': 'DnD',
-  backend: 'backend',
-  'cross-agent': 'cross-agent',
-  'wip-deploy': 'wip-deploy',
-  'all-apps': 'all-apps',
-}
+// `data.app` canonicalization is now PLATFORM-owned (CASE-422): app is a
+// term-ref field → KB_APP terminology, whose terms carry the operator spellings
+// as synonyms. The gateway resolves the synonym at write into the doc's
+// term_references[app].term_id; data.app keeps the raw input (Preserve-Original).
+// So the facet reads the canonical value FROM the resolved term — no client-side
+// alias table. A new app self-registers its term + synonyms in KB_APP (CASE-420)
+// and surfaces here with zero code change. Falls back to raw data.app on docs
+// that have no term_ref (pre-(A) data / unset app).
+const EMPTY_APP_TERMS = new Map<string, string>()
 
-function canonicalApp(raw: string | undefined): string | undefined {
-  if (!raw) return undefined
-  return APP_ALIAS[raw] ?? raw
+async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
+  try {
+    const t = await wipFetchJson<{ terminology_id?: string; id?: string }>(
+      `/api/def-store/terminologies/by-value/KB_APP?namespace=${namespace}`,
+    )
+    const tid = t.terminology_id ?? t.id
+    if (!tid) return EMPTY_APP_TERMS
+    const terms = await wipFetchJson<{ items: Array<{ term_id: string; value: string }> }>(
+      `/api/def-store/terminologies/${tid}/terms?namespace=${namespace}&page_size=100`,
+    )
+    return new Map((terms.items ?? []).map((x) => [x.term_id, x.value]))
+  } catch {
+    return EMPTY_APP_TERMS // no KB_APP yet (pre-(A)) → callers fall back to raw
+  }
 }
 
 // "Filed" sort uses metadata.custom.filed_at — the case-frontmatter timestamp
@@ -264,6 +262,23 @@ export default function SearchPage() {
     staleTime: 30_000,
   })
 
+  // CASE-422: resolve a doc's canonical app from its term_reference (term_id →
+  // KB_APP value), falling back to the raw data.app when there is no term_ref.
+  const appTermsQ = useQuery<Map<string, string>>({
+    queryKey: ['kb-app-terms', NAMESPACE],
+    queryFn: () => fetchAppTerms(NAMESPACE),
+    staleTime: 5 * 60_000,
+  })
+  const appTermMap = appTermsQ.data ?? EMPTY_APP_TERMS
+  const appOf = useCallback(
+    (doc: DocItem): string | undefined => {
+      const ref = doc.term_references?.find((r) => r.field_path === 'app')
+      const canon = ref ? appTermMap.get(ref.term_id) : undefined
+      return canon ?? doc.data.app
+    },
+    [appTermMap],
+  )
+
   const edgeTypes = useMemo(
     () =>
       new Set(
@@ -337,20 +352,19 @@ export default function SearchPage() {
       ).sort(),
     [docsInTypeScope],
   )
-  // App lives on CASE_RECORD.data.app (CASE-404). Raw values are inconsistent
-  // (17 spellings for ~6 actual apps); UI-side aliasing collapses them to
-  // canonical names. Upstream loader normalization is the long-term fix
-  // (filed separately) — once that lands the alias map shrinks.
+  // App = the canonical KB_APP term resolved from each doc's term_reference
+  // (CASE-422); the spelling variants live as KB_APP synonyms, so the facet
+  // shows one bucket per app with no client-side alias map.
   const allApps = useMemo(
     () =>
       Array.from(
         new Set(
           docsInTypeScope
-            .map((d) => canonicalApp(d.data.app))
+            .map((d) => appOf(d))
             .filter((s): s is string => typeof s === 'string' && s.length > 0),
         ),
       ).sort(),
-    [docsInTypeScope],
+    [docsInTypeScope, appOf],
   )
   const allAuthors = useMemo(
     () =>
@@ -392,10 +406,10 @@ export default function SearchPage() {
         if (aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false
         if (kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
         if (vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
-        if (pFilter.size > 0 && !pFilter.has(canonicalApp(doc.data.app) ?? '')) return false
+        if (pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
         return true
       }),
-    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter],
+    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, appOf],
   )
 
   // Per-option counts for each facet. "What would the result count be if I
@@ -411,7 +425,7 @@ export default function SearchPage() {
       if (skip !== 'a' && aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false
       if (skip !== 'k' && kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
       if (skip !== 'v' && vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
-      if (skip !== 'p' && pFilter.size > 0 && !pFilter.has(canonicalApp(doc.data.app) ?? '')) return false
+      if (skip !== 'p' && pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
       return true
     }
     function bucket(skip: FacetKey, get: (d: DocItem) => string | undefined): Map<string, number> {
@@ -429,9 +443,9 @@ export default function SearchPage() {
       a: bucket('a', (d) => rootAuthor(d.data.authored_by) || undefined),
       k: bucket('k', (d) => d.data.kind),
       v: bucket('v', (d) => d.data.severity),
-      p: bucket('p', (d) => canonicalApp(d.data.app)),
+      p: bucket('p', (d) => appOf(d)),
     }
-  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter])
+  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, appOf])
 
   const hasCaseInScope = useMemo(
     () => filtered.some((h) => typeof h.doc.data.case_number === 'number'),

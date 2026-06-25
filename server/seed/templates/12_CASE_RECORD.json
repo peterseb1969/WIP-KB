@@ -20,6 +20,6 @@
     { "name": "type",        "label": "Type",         "type": "string",  "mandatory": false },
     { "name": "component",   "label": "Component",    "type": "string",  "mandatory": false },
     { "name": "filed_by",    "label": "Filed By",     "type": "string",  "mandatory": false },
-    { "name": "app",         "label": "App",          "type": "string",  "mandatory": false }
+    { "name": "app",         "label": "App",          "type": "term",    "mandatory": false, "reference_type": "term", "terminology_ref": "KB_APP" }
   ]
 }

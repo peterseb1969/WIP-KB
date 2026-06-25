@@ -202,6 +202,12 @@ def phase_entities(ns: str, ents: list, idf0: dict, mint: dict, dry: bool) -> di
             data = d["data"]
             if d["document_id"] in DAY_NUMBER_OVERRIDES:
                 data = {**data, "day_number": DAY_NUMBER_OVERRIDES[d["document_id"]]}
+            # Drop empty-string / null values: an optional field left blank should
+            # be ABSENT, not "" — a term-ref field (e.g. CASE_RECORD.app → KB_APP,
+            # CASE-422) rejects "" with "Value '' is not valid for terminology".
+            # Mandatory fields can't be blanked away (they'd surface as missing —
+            # the loud, correct failure), so this only normalizes empties.
+            data = {k: v for k, v in data.items() if v != "" and v is not None}
             try:
                 r = gw_write(ns, tv, data)
             except RuntimeError as e:

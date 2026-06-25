@@ -1,0 +1,21 @@
+{
+  "value": "KB_APP",
+  "label": "KB App",
+  "description": "Canonical app names for CASE_RECORD.data.app (CASE-422). Operator-typed spellings are term aliases, resolved at write — replaces the retired client-side APP_ALIASES (CASE-411, deleted by CASE-464). New apps self-register a term + aliases via API (CASE-420). Canonical set + the two judgment calls resolved by Peter: FR-YAC is its own app; wip-song is canonical with Song as a synonym.",
+  "mutable": true,
+  "terms": [
+    { "value": "backend",      "label": "backend",      "sort_order": 10 },
+    { "value": "KB",           "label": "KB",           "sort_order": 20,  "aliases": ["kb", "wip-kb"] },
+    { "value": "ReactConsole", "label": "ReactConsole", "sort_order": 30,  "aliases": ["reactconsole", "app-rc", "react-console", "rc-console", "RC-Console", "RC-Console (WIP ReactConsole)", "WIP ReactConsole"] },
+    { "value": "ClinTrial",    "label": "ClinTrial",    "sort_order": 40,  "aliases": ["clintrial", "clintrial-explorer", "ClinTrial Explorer", "wip-clintrial", "ct"] },
+    { "value": "cross-agent",  "label": "cross-agent",  "sort_order": 50 },
+    { "value": "AuthorAssist", "label": "AuthorAssist", "sort_order": 60,  "aliases": ["authorassist", "wip-aa"] },
+    { "value": "wip-deploy",   "label": "wip-deploy",   "sort_order": 70 },
+    { "value": "gene-pool",    "label": "gene-pool",    "sort_order": 80 },
+    { "value": "wip-song",     "label": "wip-song",     "sort_order": 90,  "aliases": ["Song", "song"] },
+    { "value": "DnD",          "label": "DnD",          "sort_order": 100, "aliases": ["dnd", "dnd-compendium"] },
+    { "value": "Validator",    "label": "Validator",    "sort_order": 110, "aliases": ["validator", "wip-val"] },
+    { "value": "all-apps",     "label": "all-apps",     "sort_order": 120 },
+    { "value": "FR-YAC",       "label": "FR-YAC",       "sort_order": 130 }
+  ]
+}
