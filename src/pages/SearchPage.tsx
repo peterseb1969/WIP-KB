@@ -189,18 +189,22 @@ function compareCaseNumber(a: DocItem, b: DocItem, dir: 'asc' | 'desc'): number 
 const PAGE_SIZE = 25
 
 async function fetchAllDocs(namespace: string): Promise<DocItem[]> {
-  const all: DocItem[] = []
+  // Fetch page 1 to learn the page count, then fetch the rest CONCURRENTLY
+  // (CASE-501): the old serial loop paid per-request RTT N times — the dominant
+  // cost on kb.internal (Pi). Wall-clock is now ~2×RTT instead of N×RTT.
+  // NB: this list also hydrates FTS hits (docsById) + the facet rails, so it is
+  // still fetched when a query is present — skipping it would empty both. The
+  // durable fix (a server-side summary endpoint) is CASE-501 tier 2.
   const pageSize = 100
-  let page = 1
-  while (true) {
-    const res = await wipFetchJson<ListResponse>(
-      `/api/document-store/documents?namespace=${namespace}&page_size=${pageSize}&latest_only=true&page=${page}`,
-    )
-    all.push(...res.items)
-    if (page >= res.pages || res.items.length === 0) break
-    page++
-  }
-  return all
+  const url = (page: number) =>
+    `/api/document-store/documents?namespace=${namespace}&page_size=${pageSize}&latest_only=true&page=${page}`
+  const first = await wipFetchJson<ListResponse>(url(1))
+  const pages = first.pages || 1
+  if (pages <= 1) return first.items
+  const rest = await Promise.all(
+    Array.from({ length: pages - 1 }, (_, i) => wipFetchJson<ListResponse>(url(i + 2))),
+  )
+  return [...first.items, ...rest.flatMap((r) => r.items)]
 }
 
 async function fetchSearch(namespace: string, query: string, mode: string): Promise<FtsResponse> {

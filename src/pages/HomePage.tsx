@@ -92,18 +92,19 @@ function groupAndSort(items: DocItem[]): Group[] {
 }
 
 async function fetchAllDocs(namespace: string): Promise<DocItem[]> {
-  const all: DocItem[] = []
+  // Fetch page 1 to learn the page count, then fetch the rest CONCURRENTLY
+  // (CASE-501): the old serial loop paid per-request RTT N times — the dominant
+  // cost on kb.internal (Pi). Wall-clock is now ~2×RTT instead of N×RTT.
   const pageSize = 100
-  let page = 1
-  while (true) {
-    const res = await wipFetchJson<ListResponse>(
-      `/api/document-store/documents?namespace=${namespace}&page_size=${pageSize}&latest_only=true&page=${page}`,
-    )
-    all.push(...res.items)
-    if (page >= res.pages || res.items.length === 0) break
-    page++
-  }
-  return all
+  const url = (page: number) =>
+    `/api/document-store/documents?namespace=${namespace}&page_size=${pageSize}&latest_only=true&page=${page}`
+  const first = await wipFetchJson<ListResponse>(url(1))
+  const pages = first.pages || 1
+  if (pages <= 1) return first.items
+  const rest = await Promise.all(
+    Array.from({ length: pages - 1 }, (_, i) => wipFetchJson<ListResponse>(url(i + 2))),
+  )
+  return [...first.items, ...rest.flatMap((r) => r.items)]
 }
 
 // Windowed pager: 1, …, p-1, p, p+1, …, last (caps button count)
