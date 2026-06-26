@@ -39,10 +39,36 @@ from kb_client_core import gw_get
 # case + journey (single-record body fetch)
 # ----------------------------------------------------------------------------
 
-def fetch_case(case_num: int) -> str | None:
-    """GET /cases/:n (resolves the CASE-<n> synonym server-side). Body or None."""
-    payload = gw_get(f"/cases/{case_num}")
-    return payload.get("body") if payload is not None else None
+def fetch_case_payload(case_num: int, view: str = "both", response: str | None = None) -> dict | None:
+    """GET /cases/:n?view=…[&response=…] (resolves the CASE-<n> synonym server-side).
+    Returns the payload dict, or None on 404 (case absent, or explicit seq miss)."""
+    q = f"/cases/{case_num}?view={view}"
+    if response is not None:
+        q += "&response=" + urllib.parse.quote(response)
+    return gw_get(q)
+
+
+def render_case(payload: dict, view: str) -> str:
+    """Render the gateway payload to markdown: body, the response thread, or both."""
+    parts: list[str] = []
+    if view in ("case", "both"):
+        parts.append((payload.get("body") or "").rstrip("\n"))
+    if view in ("responses", "both"):
+        responses = payload.get("responses") or []
+        if responses:
+            if view == "both":
+                parts.append("")
+            parts.append(f"## Responses ({len(responses)})\n")
+            for r in responses:
+                seq, kind = r.get("seq"), r.get("kind") or "respond"
+                author, when = r.get("author") or "unknown", (r.get("created_at") or "")[:19]
+                head = f"### #{seq} · {kind} · {author}" + (f" · {when}" if when else "")
+                parts.append(head + "\n")
+                parts.append((r.get("body") or "(no content)").rstrip("\n"))
+                parts.append("")
+        elif view == "responses":
+            parts.append("_(no responses)_")
+    return "\n".join(parts).rstrip("\n") + "\n"
 
 
 def _day_path(day_num: float) -> str:
@@ -176,8 +202,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="KB read client (gateway-only).")
     sub = ap.add_subparsers(dest="mode", required=True)
 
-    case_sp = sub.add_parser("case", help="fetch a single case body by number")
+    case_sp = sub.add_parser("case", help="fetch a case: body, response thread, or both")
     case_sp.add_argument("identifier", help="case number")
+    case_sp.add_argument("--view", choices=["case", "responses", "both"], default="both",
+                         help="case body, the response thread, or both (default: both)")
+    case_sp.add_argument("--response", help="narrow responses to one: a seq number or 'latest'")
+    case_sp.add_argument("--format", choices=["text", "json"], default="text",
+                         help="rendered markdown (default) or the raw JSON payload")
 
     journey_sp = sub.add_parser("journey", help="fetch a journal entry body by day number")
     journey_sp.add_argument("identifier", help="day number (int or half-day like 4.5)")
@@ -208,7 +239,16 @@ def main() -> None:
             except ValueError:
                 print(f"ERROR: case identifier must be an integer (got: {args.identifier!r})", file=sys.stderr)
                 sys.exit(2)
-            _emit_body(fetch_case(case_num), f"case {case_num}")
+            payload = fetch_case_payload(case_num, args.view, args.response)
+            if payload is None:
+                what = f"case {case_num}" + (f" response {args.response}" if args.response else "")
+                print(f"{what} not found in kb", file=sys.stderr)
+                sys.exit(1)
+            if args.format == "json":
+                sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+            else:
+                sys.stdout.write(render_case(payload, args.view))
+            sys.exit(0)
 
         elif args.mode == "journey":
             try:

@@ -423,7 +423,38 @@ router.get('/cases', async (req, res) => {
   }
 })
 
-// GET /cases/:n — full case incl. body, resolved via the CASE-<n> synonym
+// Build the ACTIVE-only response thread for a case, ordered by response_seq.
+// The query's status defaults to active, so soft-deleted responses are excluded.
+async function fetchCaseResponses(n: number, ns: string, key: string): Promise<AnyObj[]> {
+  const all: AnyObj[] = []
+  let page = 1
+  for (;;) {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'CASE_RESPONSE',
+        filters: [{ field: 'data.case_number', operator: 'eq', value: n }],
+        page, page_size: 100 })
+    for (const it of (d.items || []) as AnyObj[]) {
+      all.push({
+        seq: it.data?.response_seq,
+        kind: it.data?.response_kind,
+        author: it.data?.author,
+        created_at: it.created_at,
+        document_id: it.document_id,
+        body: it.data?.body || '',
+      })
+    }
+    if (page >= (d.pages || 1) || (d.items || []).length === 0) break
+    page += 1
+  }
+  return all.sort((a, b) => ((a.seq as number) ?? 0) - ((b.seq as number) ?? 0))
+}
+
+// GET /cases/:n?view=both|case|responses[&response=latest|<seq>]
+// Default view=both → case fields + body + the response thread (fulfils the
+// `/wip-case read` "body + all responses" contract). view=case → case only;
+// view=responses → { case_number, responses[] }. The response selector
+// (latest | <seq>) narrows to one response; an explicit seq miss is 404.
+// Responses are active-only. Resolved via the CASE-<n> synonym.
 router.get('/cases/:n', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
@@ -433,14 +464,50 @@ router.get('/cases/:n', async (req, res) => {
     return
   }
   const ns = String(req.query.namespace || NS_DEFAULT)
+  const view = String(req.query.view || 'both')
+  if (!['both', 'case', 'responses'].includes(view)) {
+    res.status(422).json({ error: 'view must be one of: both, case, responses' })
+    return
+  }
+  const respSel = req.query.response !== undefined ? String(req.query.response) : null
+  if (respSel !== null && view === 'case') {
+    res.status(422).json({ error: 'response selector requires view=responses or view=both' })
+    return
+  }
   try {
     const docId = await resolveCase(n, ns, key)
     if (!docId) {
       res.status(404).json({ error: `CASE-${n} not found in ${ns}` })
       return
     }
-    const doc = await getDoc(docId, ns, key)
-    res.json({ ...caseProjection(doc), body: doc.data?.body || '' })
+    const out: AnyObj = {}
+    if (view === 'case' || view === 'both') {
+      const doc = await getDoc(docId, ns, key)
+      Object.assign(out, caseProjection(doc), { body: doc.data?.body || '' })
+    }
+    if (view === 'responses' || view === 'both') {
+      out.case_number = n
+      let responses = await fetchCaseResponses(n, ns, key)
+      if (respSel !== null) {
+        if (respSel === 'latest') {
+          responses = responses.slice(-1)
+        } else {
+          const seq = parseInt(respSel, 10)
+          if (!Number.isFinite(seq)) {
+            res.status(422).json({ error: "response must be an integer or 'latest'" })
+            return
+          }
+          const found = responses.find((r) => r.seq === seq)
+          if (!found) {
+            res.status(404).json({ error: `CASE-${n}#${seq} not found` })
+            return
+          }
+          responses = [found]
+        }
+      }
+      out.responses = responses
+    }
+    res.json(out)
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }

@@ -116,12 +116,18 @@ BE-YACs: list all. If none, say "No cases" and stop.
 ## `/wip-case read <n>`
 
 ```bash
-$KBC case-fetch.py case <n>
+$KBC case-fetch.py case <n>                    # body + full response thread (default: view=both)
+$KBC case-fetch.py case <n> --view case        # case body only
+$KBC case-fetch.py case <n> --view responses   # the response thread only
+$KBC case-fetch.py case <n> --response latest  # just the latest response
+$KBC case-fetch.py case <n> --response <seq>   # a specific response (404 if absent)
+$KBC case-fetch.py case <n> --format json      # raw gateway payload
 ```
 
-Prints the full case body. (Responses are separate CASE_RESPONSE docs; surface them
-with `case-fetch.py` once a response view lands — for now the body is the record.)
-If not found, tell Peter and stop.
+Prints the case body followed by its responses (CASE_RESPONSE docs, seq-ordered,
+active-only) — one gateway read, no separate fetch. Backed by
+`GET /cases/:n?view=both|case|responses[&response=latest|<seq>]`. If the case (or an
+explicit `--response <seq>`) isn't found, tell Peter and stop.
 
 ---
 
