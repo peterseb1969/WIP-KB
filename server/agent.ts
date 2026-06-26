@@ -110,6 +110,43 @@ export async function setAnthropicKey(
   return { ...getKeyStatus(), persisted }
 }
 
+// ---------- Tool-result sizing & steering (prompt-too-long defence) ----------
+// The askBar's document tools (query_by_template/list_documents/query_documents/
+// get_document) return full data.body fields; for a "find all cases about X"
+// intent the model can dump dozens of full docs into the context and blow the
+// 200k window. Three defences: (A) a standing system-prompt policy, (B) a
+// per-turn recency nudge on the first (decisive) tool choice, and a hard
+// per-result cap as the guaranteed backstop since A/B are only steering.
+
+const QUERY_TOOL_POLICY = `TOOL-USE POLICY — keep results small (context window is 200k tokens):
+- To find / list / count / filter documents (e.g. "all cases about X"), use run_report_query
+  with an EXPLICIT, NARROW column list, e.g.:
+    SELECT case_number, title, status, component FROM doc_case_record
+    WHERE body ILIKE '%synonym%' ORDER BY case_number LIMIT 100
+  NEVER "SELECT *", and NEVER select large free-text columns (body, content, snippet).
+  Call list_report_tables first if you need the column names.
+- To find passages or rank by relevance, use search (FTS) — it returns short ranked
+  snippets, not whole documents.
+- Use get_document / query_by_template / list_documents ONLY to fetch ONE specific
+  document the user named — never to enumerate many; those return full bodies.
+- When the user asks "how many" / "which", prefer COUNT / GROUP BY over row dumps,
+  and always add LIMIT.`
+
+const QUERY_TOOL_HINT = `[Answer using run_report_query with an explicit small column list `
+  + `(never SELECT *, never body) for find/list/count, or search() for snippets; do not `
+  + `enumerate many documents with query_by_template/list_documents. Add LIMIT.]`
+
+// Hard cap on any single tool result (~6k tokens). Bounds whatever tool the model
+// picks, regardless of the steering above.
+const MAX_TOOL_RESULT_CHARS = 24_000
+
+function capToolResult(s: string): string {
+  if (s.length <= MAX_TOOL_RESULT_CHARS) return s
+  const dropped = s.length - MAX_TOOL_RESULT_CHARS
+  return `${s.slice(0, MAX_TOOL_RESULT_CHARS)}\n…[truncated ${dropped} chars — result too large. `
+    + `Narrow it: select fewer columns, add WHERE/LIMIT, or use search() for snippets.]`
+}
+
 // Only expose read/query tools — no create, delete, or admin tools
 const ALLOWED_TOOLS = new Set([
   'get_wip_status',
@@ -241,6 +278,9 @@ export async function initAgent() {
   } catch {
     // No app-specific prompt — that's fine
   }
+
+  // (A) Standing tool-use policy — steer away from full-document dumps.
+  systemPrompt += '\n\n' + QUERY_TOOL_POLICY
 }
 
 // ---------- Ask ----------
@@ -261,8 +301,9 @@ export async function ask(
   }
   session.lastAccess = Date.now()
 
-  // Add user message
-  session.messages.push({ role: 'user', content: question })
+  // Add user message. (B) Prepend the steering hint so it sits closest to the
+  // model's decisive FIRST tool choice (search/SQL vs full-document dump).
+  session.messages.push({ role: 'user', content: `${QUERY_TOOL_HINT}\n\n${question}` })
 
   const e = env()
   const anthropic = new Anthropic({ apiKey: anthropicKey() })
@@ -281,13 +322,29 @@ export async function ask(
       : mcpTools
 
   for (let turn = 0; turn < e.MAX_TURNS; turn++) {
-    const response = await anthropic.messages.create({
-      model: e.CLAUDE_MODEL,
-      max_tokens: 4096,
-      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-      tools: cachedTools,
-      messages: session.messages,
-    })
+    let response: Anthropic.Message
+    try {
+      response = await anthropic.messages.create({
+        model: e.CLAUDE_MODEL,
+        max_tokens: 4096,
+        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+        tools: cachedTools,
+        messages: session.messages,
+      })
+    } catch (err: any) {
+      if (/prompt is too long|too many tokens|context.*length|exceeds.*context/i.test(err?.message || '')) {
+        // Context overflowed despite the per-result cap. Reset the session so the
+        // next question starts clean, and return a clear, non-fatal message.
+        sessions.delete(id)
+        return {
+          answer: 'That pulled back more data than fits in one context. Narrow it — ask for a count, '
+            + 'filter by component/status, or search for a specific term — then try again.',
+          toolCalls: totalToolCalls,
+          sessionId: id,
+        }
+      }
+      throw err
+    }
 
     if (response.stop_reason === 'end_turn' || response.stop_reason !== 'tool_use') {
       // Extract text from response
@@ -323,12 +380,16 @@ export async function ask(
 
       try {
         const result = await mcpClient!.callTool({ name: block.name, arguments: args })
+        const raw = typeof result.content === 'string'
+          ? result.content
+          : JSON.stringify(result.content)
+        if (raw.length > MAX_TOOL_RESULT_CHARS) {
+          console.warn(`[agent] tool ${block.name} → ${raw.length} chars (capped to ${MAX_TOOL_RESULT_CHARS})`)
+        }
         toolResults.push({
           type: 'tool_result',
           tool_use_id: block.id,
-          content: typeof result.content === 'string'
-            ? result.content
-            : JSON.stringify(result.content),
+          content: capToolResult(raw),
           is_error: result.isError === true,
         })
       } catch (err: any) {
