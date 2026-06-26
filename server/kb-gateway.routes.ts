@@ -108,8 +108,14 @@ async function maxNumberField(templateValue: string, field: string, ns: string, 
   const filters = scope ? [{ field: `data.${scope.field}`, operator: 'eq', value: scope.value }] : []
   let mx = 0, page = 1
   for (;;) {
+    // status: null spans ALL statuses (the query defaults to active-only). A
+    // minted number is permanently spent once any doc holds it — including a
+    // soft-deleted one whose CASE-<n> synonym is retained. Without this the
+    // high-water mark regresses when the latest doc is soft-deleted, the next
+    // mint re-allocates its number, and the create upserts (clobbers) the
+    // retired doc as a new version instead of minting fresh (CASE-504).
     const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
-      { template_id: templateValue, filters, page, page_size: 100 })
+      { template_id: templateValue, filters, status: null, page, page_size: 100 })
     const items: AnyObj[] = d.items || []
     for (const it of items) { const v = it.data?.[field]; if (typeof v === 'number' && v > mx) mx = v }
     if (page >= (d.pages || 1) || items.length === 0) break
