@@ -3,7 +3,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import Anthropic from '@anthropic-ai/sdk'
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -29,6 +29,86 @@ const env = () => ({
   MAX_TURNS: parseInt(process.env.MAX_TURNS || '15'),
   SESSION_TTL_MS: parseInt(process.env.SESSION_TTL_MINUTES || '30') * 60_000,
 })
+
+// ---------- Anthropic key resolution (CASE-508) ----------
+// process.env is frozen at process start, so an env-only key can't be rotated
+// without a redeploy. Resolve in priority order so the key is settable in a
+// running system: runtime override (set via the admin config endpoint) → key
+// file (ANTHROPIC_API_KEY_FILE, mirroring the WIP apiKeyFile pattern, CASE-495)
+// → env. The key is a secret — it never goes into a WIP document.
+let runtimeKeyOverride: string | null = null
+
+function keyFromFile(): string {
+  const f = process.env.ANTHROPIC_API_KEY_FILE
+  if (!f) return ''
+  try {
+    return readFileSync(f, 'utf-8').trim()
+  } catch {
+    return ''
+  }
+}
+
+function anthropicKey(): string {
+  return runtimeKeyOverride || keyFromFile() || process.env.ANTHROPIC_API_KEY || ''
+}
+
+function keySource(): 'override' | 'file' | 'env' | 'none' {
+  if (runtimeKeyOverride) return 'override'
+  if (keyFromFile()) return 'file'
+  if (process.env.ANTHROPIC_API_KEY) return 'env'
+  return 'none'
+}
+
+// Masked status only — the key value is never returned to a caller.
+export function getKeyStatus() {
+  const key = anthropicKey()
+  return {
+    configured: !!key,
+    source: keySource(),
+    last4: key ? key.slice(-4) : null,
+    agentReady: mcpClient !== null,
+  }
+}
+
+// Cheap liveness probe — confirm a key actually authenticates before accepting it.
+export async function validateKey(key: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const probe = new Anthropic({ apiKey: key })
+    await probe.messages.create({
+      model: env().CLAUDE_MODEL,
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'ping' }],
+    })
+    return { ok: true }
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'validation failed' }
+  }
+}
+
+// Set the key in the running system. Updates the in-memory override and, when
+// persist is set and ANTHROPIC_API_KEY_FILE is configured, writes the key file
+// 0600 so it survives a restart (and is picked up by file-resolve). If the agent
+// was never initialised (no key at boot), connect it now so /api/ask comes alive.
+export async function setAnthropicKey(
+  key: string,
+  opts: { persist?: boolean } = {},
+): Promise<ReturnType<typeof getKeyStatus> & { persisted: boolean }> {
+  runtimeKeyOverride = key
+  let persisted = false
+  const f = process.env.ANTHROPIC_API_KEY_FILE
+  if (opts.persist && f) {
+    writeFileSync(f, key, { mode: 0o600 })
+    persisted = true
+  }
+  if (!mcpClient) {
+    try {
+      await initAgent()
+    } catch (err) {
+      console.warn('[agent] initAgent after key set failed:', (err as Error).message)
+    }
+  }
+  return { ...getKeyStatus(), persisted }
+}
 
 // Only expose read/query tools — no create, delete, or admin tools
 const ALLOWED_TOOLS = new Set([
@@ -114,8 +194,8 @@ function createTransport() {
 }
 
 export async function initAgent() {
-  if (!env().ANTHROPIC_API_KEY) {
-    console.warn('⚠ ANTHROPIC_API_KEY not set — /api/ask will be unavailable')
+  if (!anthropicKey()) {
+    console.warn('⚠ No Anthropic key (override/file/env) — /api/ask unavailable until one is set')
     return
   }
 
@@ -185,7 +265,7 @@ export async function ask(
   session.messages.push({ role: 'user', content: question })
 
   const e = env()
-  const anthropic = new Anthropic({ apiKey: e.ANTHROPIC_API_KEY })
+  const anthropic = new Anthropic({ apiKey: anthropicKey() })
   let totalToolCalls = 0
 
   // Prompt-caching: system prompt + tool definitions are static across all askBar

@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Search, Terminal } from 'lucide-react'
+import { Home, Search, Terminal, Settings } from 'lucide-react'
 
 const items = [
   { to: '/', label: 'Start', icon: Home, end: true },
   { to: '/search', label: 'Search', icon: Search, end: false },
   { to: '/client', label: 'Client', icon: Terminal, end: false },
+  { to: '/settings', label: 'Settings', icon: Settings, end: false },
 ]
 
 export function Sidebar() {

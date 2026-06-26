@@ -6,8 +6,9 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { wipProxy } from '@wip/proxy'
 import { initAgent, ask } from './agent.js'
-import { initAuth, requireAuth, handleCallback, handleLogout } from './auth.js'
+import { initAuth, requireAuth, requireAdmin, handleCallback, handleLogout } from './auth.js'
 import bootstrapRoutes from './bootstrap.routes.js'
+import configRoutes from './config.routes.js'
 import kbClientRoutes from './kb-client.routes.js'
 import kbGatewayRoutes from './kb-gateway.routes.js'
 
@@ -75,6 +76,9 @@ router.use((req, res, next) => {
   if (req.path.startsWith('/wip')) return next()
   express.json()(req, res, next)
 })
+
+// Runtime config (admin-only) — set/rotate the Anthropic key without a redeploy (CASE-508)
+router.use('/server-api/config', requireAdmin(), configRoutes)
 
 // Bootstrap (offer-on-empty / use-on-exists for the kb namespace)
 router.use('/server-api', bootstrapRoutes)
