@@ -27,6 +27,10 @@ interface Props {
   incoming: EdgeItem[]
   outgoing: EdgeItem[]
   enrichment?: Record<string, PeerEnrichment>
+  // CASE-506: responses are shown as dots below the case node (not as peer
+  // nodes). Count drives how many dots; click scrolls to the inline thread.
+  responseCount?: number
+  onResponsesClick?: () => void
 }
 
 // Case-status → border-color override for CASE_RECORD peers. Keeps the fill
@@ -107,23 +111,29 @@ export function RelationshipGraph({
   incoming,
   outgoing,
   enrichment = {},
+  responseCount = 0,
+  onResponsesClick,
 }: Props) {
   const navigate = useNavigate()
   const [hover, setHover] = useState<HoverState | null>(null)
-  if (incoming.length === 0 && outgoing.length === 0) return null
+  if (incoming.length === 0 && outgoing.length === 0 && responseCount === 0) return null
 
   const maxRows = Math.max(incoming.length, outgoing.length, 1)
-  const height = PAD * 2 + maxRows * (NODE_H + ROW_GAP) - ROW_GAP
+  // rowsHeight holds the column region; a dot band is appended below it for the
+  // response dots so they never collide with peer nodes.
+  const rowsHeight = PAD * 2 + maxRows * (NODE_H + ROW_GAP) - ROW_GAP
+  const DOT_BAND = responseCount > 0 ? 24 : 0
+  const height = rowsHeight + DOT_BAND
   const width = PAD * 2 + NODE_W * 3 + COL_GAP * 2
 
   const selfX = (width - NODE_W) / 2
-  const selfY = (height - NODE_H) / 2
+  const selfY = (rowsHeight - NODE_H) / 2
   const leftX = selfX - COL_GAP - NODE_W
   const rightX = selfX + NODE_W + COL_GAP
 
   function colY(idx: number, total: number): number {
     const colHeight = total * (NODE_H + ROW_GAP) - ROW_GAP
-    const startY = (height - colHeight) / 2
+    const startY = (rowsHeight - colHeight) / 2
     return startY + idx * (NODE_H + ROW_GAP)
   }
 
@@ -377,6 +387,58 @@ export function RelationshipGraph({
             {selfLabel}
           </text>
         </g>
+
+        {/* Response dots — below the case node, centered. Up to 3 dots, then a
+            "+N" overflow. Clicking scrolls to the inline thread (CASE-506). */}
+        {responseCount > 0 && (() => {
+          const shown = Math.min(responseCount, 3)
+          const gap = 11
+          const cx0 = selfX + NODE_W / 2
+          const cy = rowsHeight + DOT_BAND / 2
+          const overflow = responseCount > 3
+          const spanW = (shown - 1) * gap
+          const startX = cx0 - spanW / 2 - (overflow ? 9 : 0)
+          return (
+            <g
+              onClick={onResponsesClick}
+              style={{ cursor: onResponsesClick ? 'pointer' : 'default' }}
+            >
+              <title>{`${responseCount} response${responseCount === 1 ? '' : 's'}`}</title>
+              {/* tick connecting the case node to its dots */}
+              <line
+                x1={cx0}
+                y1={selfY + NODE_H}
+                x2={cx0}
+                y2={cy - 5}
+                stroke="#CBD5E1"
+                strokeWidth="1"
+              />
+              {Array.from({ length: shown }, (_, i) => (
+                <circle
+                  key={i}
+                  cx={startX + i * gap}
+                  cy={cy}
+                  r="3.5"
+                  fill="#5B9BD5"
+                  stroke="#2B579A"
+                  strokeWidth="0.6"
+                />
+              ))}
+              {overflow && (
+                <text
+                  x={startX + (shown - 1) * gap + 10}
+                  y={cy + 3.5}
+                  fontSize="10"
+                  fontWeight="600"
+                  fontFamily="ui-monospace, SFMono-Regular, monospace"
+                  fill="#2B579A"
+                >
+                  +{responseCount - 3}
+                </text>
+              )}
+            </g>
+          )
+        })()}
 
         {/* Column labels */}
         {incoming.length > 0 && (

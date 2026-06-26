@@ -9,6 +9,7 @@ import { ArrowLeft } from 'lucide-react'
 import { PrepareButtons } from '../components/PrepareButtons'
 import { FlagModal } from '../components/FlagModal'
 import { RelationshipGraph } from '../components/RelationshipGraph'
+import { CaseThread, type ResponseDoc } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
 
 const COMMON_FIELDS = new Set(['title', 'authored_by', 'doc_status', 'tags', 'root', 'body'])
@@ -76,6 +77,14 @@ export default function DocPage() {
   const incoming = (rels?.items ?? []).filter((r) => r.data.target_ref === id)
   const outgoing = (rels?.items ?? []).filter((r) => r.data.source_ref === id)
 
+  // CASE-506: a case's responses arrive as incoming RESPONDS_TO edges. Split them
+  // out — they get dots in the graph + an inline collapsible thread, not generic
+  // peer nodes / list rows.
+  const isResponseEdge = (r: RelationshipItem) =>
+    r.template_value === 'RESPONDS_TO' && r.peer?.template_value === 'CASE_RESPONSE'
+  const responseEdges = incoming.filter(isResponseEdge)
+  const incomingEdges = incoming.filter((r) => !isResponseEdge(r))
+
   // CASE-350: incoming SUPERSEDES = something newer replaces this doc.
   // Edge direction is newer→older, so source = replacing doc, target = this.
   const supersededBy = incoming.filter((r) => r.template_value === 'SUPERSEDES')
@@ -115,6 +124,42 @@ export default function DocPage() {
     staleTime: 30_000,
   })
 
+  // CASE-506: the include=peers projection carries only title/status/case_number
+  // for response peers — NOT body/response_kind/response_seq — so fetch each
+  // response doc's full content (parallel batch, eager with the case view).
+  // Sorted by response_seq for chronological thread order.
+  const responseIds = useMemo(
+    () =>
+      (rels?.items ?? [])
+        .filter(
+          (r) =>
+            r.data.target_ref === id &&
+            r.template_value === 'RESPONDS_TO' &&
+            r.peer?.template_value === 'CASE_RESPONSE' &&
+            !!r.peer?.document_id,
+        )
+        .map((r) => r.peer!.document_id)
+        .sort(),
+    [rels, id],
+  )
+  const { data: responseDocs } = useQuery<ResponseDoc[]>({
+    queryKey: ['case-responses', responseIds],
+    queryFn: async () => {
+      const base = import.meta.env.BASE_URL
+      const docs = await Promise.all(
+        responseIds.map(async (rid) => {
+          const res = await fetch(`${base}wip/api/document-store/documents/${rid}`)
+          return res.ok ? ((await res.json()) as ResponseDoc) : null
+        }),
+      )
+      return docs
+        .filter((d): d is ResponseDoc => !!d)
+        .sort((a, b) => (a.data?.response_seq ?? 0) - (b.data?.response_seq ?? 0))
+    },
+    enabled: responseIds.length > 0,
+    staleTime: 30_000,
+  })
+
   if (!id) return null
   if (docLoading) return <p className="text-text-muted">Loading…</p>
   if (docError) return <p className="text-danger">Failed to load doc: {(docError as Error).message}</p>
@@ -144,19 +189,28 @@ export default function DocPage() {
     ([, v]) => v !== '' && v !== null && v !== undefined,
   )
 
-  const hasEdges = incoming.length > 0 || outgoing.length > 0
+  // Responses are excluded from the edge sets — incomingEdges drives the aside
+  // list and graph columns; the graph still renders for a responses-only case.
+  const hasEdges = incomingEdges.length > 0 || outgoing.length > 0
+  const hasGraph = hasEdges || responseEdges.length > 0
 
   return (
     <>
-      {hasEdges && (
+      {hasGraph && (
         <RelationshipGraph
           selfId={id}
           selfTitle={docLabel(data, id)}
           selfCaseNumber={selfParsed.caseNumber}
           selfTemplate={doc.template_value ?? ''}
-          incoming={incoming}
+          incoming={incomingEdges}
           outgoing={outgoing}
           enrichment={peerEnrichment ?? {}}
+          responseCount={responseEdges.length}
+          onResponsesClick={() =>
+            document
+              .getElementById('case-thread')
+              ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
         />
       )}
       <div
@@ -307,6 +361,9 @@ export default function DocPage() {
         {!body && structured.length === 0 && (
           <p className="text-sm text-text-muted">(no content)</p>
         )}
+
+        {/* CASE-506: inline collapsible response thread */}
+        {responseDocs && responseDocs.length > 0 && <CaseThread responses={responseDocs} />}
       </article>
 
       {hasEdges && (
@@ -314,7 +371,7 @@ export default function DocPage() {
           <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
             Relationships
           </h2>
-          <RelationshipList label="Incoming" items={incoming} selfId={id} />
+          <RelationshipList label="Incoming" items={incomingEdges} selfId={id} />
           <RelationshipList label="Outgoing" items={outgoing} selfId={id} />
         </aside>
       )}
