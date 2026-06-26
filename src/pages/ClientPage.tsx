@@ -31,7 +31,7 @@ const FILE_ROLES: Record<string, Role> = {
   'kb-client.sh': { role: 'Runner — fetches/refreshes the bundle; run scripts via it', extra: true },
   'install.sh': { role: 'Bootstrap — `curl | sh` materializes the bundle', extra: true },
   'kb_client_core.py': { role: 'Shared core — kb.json/API-key resolution + gateway transport (gw_get/gw_post, failover)' },
-  'case-fetch.py': { role: 'Read — case / journey / list / fireside, all via the gateway' },
+  'case-fetch.py': { role: 'Read — case (body + response thread) / journey / list / fireside, all via the gateway' },
   'kb-write.py': { role: 'The write client — any doc type via POST /write/:type (file/dir/json sources, edges, patch, and git-stats via --git-repo)' },
   'case-workflow.md': { role: 'Playbook — authoritative case how-to (rendered below)', extra: true },
   'README.md': { role: 'Bundle readme', extra: true },
@@ -48,7 +48,7 @@ const SERVING_ENDPOINTS: Array<[string, string, string]> = [
 ]
 const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb/cases?status=&filed_by=&severity=&type=&component=&app=', 'list cases (faceted, server-side)'],
-  ['GET', 'kb/cases/:n', 'one case incl. body (CASE-<n> synonym)'],
+  ['GET', 'kb/cases/:n?view=both|case|responses[&response=latest|<seq>]', 'one case: body, response thread, or both (default both)'],
   ['GET', 'kb/sessions  ·  kb/journeys/:day', 'list sessions / a journey day'],
   ['GET', 'kb/firesides  ·  kb/firesides/:id', 'list firesides / one fireside body'],
   ['GET', 'kb/types', 'doc-type manifest — write_mode per type (from WRITE_POLICY docs)'],

@@ -204,8 +204,9 @@ def main() -> None:
 
     case_sp = sub.add_parser("case", help="fetch a case: body, response thread, or both")
     case_sp.add_argument("identifier", help="case number")
-    case_sp.add_argument("--view", choices=["case", "responses", "both"], default="both",
-                         help="case body, the response thread, or both (default: both)")
+    case_sp.add_argument("--view", choices=["case", "responses", "both"], default=None,
+                         help="case body, the response thread, or both "
+                              "(default: both, or responses when --response is given)")
     case_sp.add_argument("--response", help="narrow responses to one: a seq number or 'latest'")
     case_sp.add_argument("--format", choices=["text", "json"], default="text",
                          help="rendered markdown (default) or the raw JSON payload")
@@ -239,7 +240,10 @@ def main() -> None:
             except ValueError:
                 print(f"ERROR: case identifier must be an integer (got: {args.identifier!r})", file=sys.stderr)
                 sys.exit(2)
-            payload = fetch_case_payload(case_num, args.view, args.response)
+            # --response implies responses-only unless --view is set explicitly,
+            # so `case <n> --response latest` returns the response, not the body.
+            view = args.view or ("responses" if args.response else "both")
+            payload = fetch_case_payload(case_num, view, args.response)
             if payload is None:
                 what = f"case {case_num}" + (f" response {args.response}" if args.response else "")
                 print(f"{what} not found in kb", file=sys.stderr)
@@ -247,7 +251,7 @@ def main() -> None:
             if args.format == "json":
                 sys.stdout.write(json.dumps(payload, indent=2) + "\n")
             else:
-                sys.stdout.write(render_case(payload, args.view))
+                sys.stdout.write(render_case(payload, view))
             sys.exit(0)
 
         elif args.mode == "journey":
