@@ -43,6 +43,14 @@ jobs:
       - name: Set up QEMU (multi-arch only)
         if: inputs.platforms != 'linux/amd64'
         uses: docker/setup-qemu-action@v3
+        with:
+          # Pin a newer QEMU binfmt: the GitHub runner image update (2025-09-19
+          # Node-20 deprecation rollout) swapped in a binfmt that mis-emulates
+          # the node:20-alpine arm64 Node binary -> SIGILL ("illegal instruction"
+          # core-dump) during `npm ci`. qemu-v9.2.2 has the arm64 instruction
+          # coverage the default lacks. If this still SIGILLs, move the arm64 leg
+          # to a native ubuntu-24.04-arm runner (no emulation) instead.
+          image: tonistiigi/binfmt:qemu-v9.2.2
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
