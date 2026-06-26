@@ -235,13 +235,25 @@ def build_records(type_: str, args: argparse.Namespace) -> tuple[dict, list]:
     continues_from / responds_to frontmatter conventions."""
     fields = _parse_fields(args.field)
     edges = _parse_edges(args.edge)
-    # A directory source = a session report dir → SESSION (only SESSION bundles a dir).
-    if args.file and args.file != "-" and os.path.isdir(args.file):
-        if type_ != "SESSION":
-            raise SystemExit(f"ERROR: a directory source is only valid for SESSION (got {type_})")
-        data, dedges = _session_records(args.file, fields)
-        data.update(fields)
-        return data, edges + dedges
+    # A directory source = a session report dir → SESSION (only SESSION bundles a
+    # dir). A SESSION *file* arg pointing at session.md resolves to its parent dir
+    # so the harness's file-path convention (`reports/<id>/session.md`, used by
+    # /wip-wake, /wip-setup, /wip-report) routes through _session_records too —
+    # otherwise a frontmatter-only session.md hits the generic path with an empty
+    # body and the gateway rejects "Field 'body' is required" (CASE-503).
+    src = args.file
+    if src and src != "-":
+        sess_dir = None
+        if os.path.isdir(src):
+            if type_ != "SESSION":
+                raise SystemExit(f"ERROR: a directory source is only valid for SESSION (got {type_})")
+            sess_dir = src
+        elif type_ == "SESSION" and os.path.basename(src) == "session.md":
+            sess_dir = os.path.dirname(src) or "."
+        if sess_dir is not None:
+            data, dedges = _session_records(sess_dir, fields)
+            data.update(fields)
+            return data, edges + dedges
     if args.json is not None:
         data = json.loads(args.json)
         if not isinstance(data, dict):
