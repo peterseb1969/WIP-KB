@@ -412,6 +412,9 @@ export default function SearchPage() {
   const filtered = useMemo(
     () =>
       hits.filter(({ doc }) => {
+        // CASE_RESPONSE is default-hidden noise (viewable inline under its parent
+        // case); surface it only when explicitly selected in the type facet (CASE-533).
+        if (doc.template_value === 'CASE_RESPONSE' && !tFilter.has('CASE_RESPONSE')) return false
         if (tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
         if (sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
         if (aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false
@@ -431,6 +434,10 @@ export default function SearchPage() {
   type FacetKey = 't' | 's' | 'a' | 'k' | 'v' | 'p'
   const facetCounts = useMemo(() => {
     function passes(doc: DocItem, skip: FacetKey): boolean {
+      // Default-hidden CASE_RESPONSE shouldn't inflate other facets' counts, but
+      // stays counted in the type facet itself (skip==='t') so it's selectable (CASE-533).
+      if (skip !== 't' && doc.template_value === 'CASE_RESPONSE' && !tFilter.has('CASE_RESPONSE'))
+        return false
       if (skip !== 't' && tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
       if (skip !== 's' && sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
       if (skip !== 'a' && aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false

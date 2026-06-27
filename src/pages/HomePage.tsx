@@ -9,7 +9,10 @@ const NAMESPACE = 'kb'
 
 // Structural / config doc types — not KB content, hidden from the start page.
 // (Edge types are filtered separately via the template usage flag.)
-const HIDDEN_TYPES = new Set(['BOOTSTRAP_RECORD', 'WRITE_POLICY'])
+// CASE_RESPONSE is a scoped child of a CASE_RECORD (viewable inline in the case
+// thread); as a standalone group box it's just a list of case numbers eating
+// screen space, so it's hidden here too (CASE-533).
+const HIDDEN_TYPES = new Set(['BOOTSTRAP_RECORD', 'WRITE_POLICY', 'CASE_RESPONSE'])
 
 interface DocItem {
   document_id: string
