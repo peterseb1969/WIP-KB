@@ -39,11 +39,25 @@ submission produces a different hash and orphan-duplicates. `LIBRARY_RELEASE` is
 deliberately alias-free; the generator emits canonical release values only.
 (Candidate BE-YAC note: hashing the resolved `term_id` would make term-identity robust.)
 
-## Cross-namespace Library → KB edges
-`allowed_external_refs` is set, but the cross-namespace edge type (LIBRARY_DOC →
-KB-corpus doc) is **not yet modelled** here — it needs its own spike (does an edge-type
-`target_templates` resolve a cross-namespace template, and does the edge document
-validate?). `SEE_ALSO` is library-internal for now.
+## Cross-namespace Library → KB links (spike finding, APP-KB-20260628)
+Spiked. The platform constraint is decisive:
+- **Cross-namespace relationship/edge documents are NOT supported in v2** — the
+  document-store rejects them with `cross_namespace_relationship`. So a `library` edge
+  type targeting a `kb-libdev` doc is a dead end (the edge *type* can be created if you
+  name the foreign template by canonical `template_id`, but the edge *document* fails).
+- **A plain document reference FIELD works cross-namespace** — a `LIBRARY_DOC` field
+  `reference_type: document` whose `target_templates` is the foreign template's
+  canonical `template_id` validates fine, given `allowed_external_refs`.
+
+**Therefore:** Library → KB links are modelled as a **reference field** on LIBRARY_DOC
+(e.g. a future `kb_refs` array), NOT an edge. `SEE_ALSO` (library-internal) stays an edge.
+Deferred until the linking feature is built — it's an additive non-identity field then
+(PoNIF #2 corollary, no migration). Candidate BE-YAC note: cross-namespace relationships
+unsupported is a hard constraint for multi-namespace apps.
+
+Note: cross-namespace `target_templates` (and any foreign template ref) must be the
+canonical `template_id`, not the value — value resolution does not traverse
+`allowed_external_refs`.
 
 ## Dev vs deployed
 In dev the KB-corpus namespace is `kb-libdev` and this namespace is `library`, both on
