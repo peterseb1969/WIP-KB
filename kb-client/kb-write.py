@@ -229,6 +229,125 @@ def _session_records(dirpath: str, fields: dict) -> tuple[dict, list]:
     return data, edges
 
 
+# --- YAC_MEMORY source: a YAC's local memory/ dir → one record per *.md --------
+# (CASE-507) Each ~/.claude/projects/<proj>/memory/<stem>.md is a YAC_MEMORY doc,
+# natural-upserted by (owner, mem_key=stem). Unlike SESSION (a dir → ONE bundled
+# doc), a memory dir → MANY docs. MEMORY.md is the index, not a memory — skipped.
+_MEMORY_SKIP = {"MEMORY.md"}
+_MEMORY_TYPES = ("user", "feedback", "project", "reference")
+
+
+def _unquote(s: object) -> str:
+    """Strip a single pair of matched surrounding quotes (frontmatter `name`/
+    `description` are sometimes quoted; parse_frontmatter keeps them verbatim)."""
+    t = str(s).strip()
+    if len(t) >= 2 and t[0] == t[-1] and t[0] in ("'", '"'):
+        return t[1:-1].strip()
+    return t
+
+
+def _read_local(rel: str) -> str | None:
+    """Read a repo-local file (e.g. .claude/.session-role) from CLAUDE_PROJECT_DIR
+    or cwd — used to resolve the memory owner/session when not passed via --field."""
+    for base in (os.environ.get("CLAUDE_PROJECT_DIR"), os.getcwd()):
+        if base and os.path.isfile(os.path.join(base, rel)):
+            return open(os.path.join(base, rel), encoding="utf-8").read().strip()
+    return None
+
+
+def _memory_record(fm: dict, body: str, filename: str, owner: str,
+                   session_id: str | None, repo: str | None) -> dict:
+    """Map one memory/*.md to a YAC_MEMORY record. parse_frontmatter flattens the
+    nested `metadata:` block, so metadata.type / metadata.originSessionId surface
+    as top-level `type` / `originSessionId` — normalizing the two known shapes."""
+    mem_key = filename[:-3] if filename.endswith(".md") else filename
+    title = _unquote(fm.get("name") or mem_key)
+    description = _unquote(fm.get("description") or "")
+    if not description:
+        raise ValueError("description unresolved (frontmatter `description`)")
+    mtype = _unquote(fm.get("type") or "").lower()
+    if mtype not in _MEMORY_TYPES:
+        raise ValueError(f"memory_type {mtype!r} not in {'|'.join(_MEMORY_TYPES)} "
+                         "(frontmatter `type` or `metadata.type`)")
+    if not body.strip():
+        raise ValueError("body is empty")
+    data: dict = {"owner": owner, "mem_key": mem_key, "title": title,
+                  "description": description, "body": body, "memory_type": mtype}
+    origin = fm.get("originSessionId")
+    if origin:
+        data["origin_session"] = _unquote(origin)
+    if session_id:
+        data["session_id"] = str(session_id)
+    if repo:
+        data["repo"] = str(repo)
+    return data
+
+
+def cmd_memory(args: argparse.Namespace) -> int:
+    """kb-write.py YAC_MEMORY <dir|file.md> — upsert each memory file as its own
+    YAC_MEMORY doc (CASE-507). owner resolves from --field owner= or the repo's
+    .claude/.session-role; session_id from --field or .claude/.session-id. Skips
+    MEMORY.md and editor backups. Idempotent: natural-upsert by (owner, mem_key),
+    so re-pushing the whole dir is delta-only (unchanged files → 'unchanged')."""
+    fields = _parse_fields(args.field)
+    owner = str(fields.get("owner") or _read_local(".claude/.session-role") or "").strip()
+    if not owner:
+        print("ERROR: YAC_MEMORY owner unresolved — pass --field owner=<ROLE> or run "
+              "from a repo with .claude/.session-role", file=sys.stderr)
+        return 2
+    session_id = fields.get("session_id") or _read_local(".claude/.session-id")
+    repo = fields.get("repo")
+    src = args.file
+    if not src or src == "-":
+        print("ERROR: provide a memory dir or a single memory .md file", file=sys.stderr)
+        return 2
+    if os.path.isdir(src):
+        paths = [os.path.join(src, n) for n in sorted(os.listdir(src))
+                 if n.endswith(".md") and n not in _MEMORY_SKIP and not _EDITOR_BACKUP.search(n)]
+    else:
+        paths = [src]
+    if not paths:
+        print(f"YAC_MEMORY: no memory files in {src}", file=sys.stderr)
+        return 0
+    edges = _parse_edges(args.edge)
+    md = json.loads(args.metadata) if args.metadata else None
+    counts: dict = {}
+    rc = 0
+    for p in paths:
+        fn = os.path.basename(p)
+        if fn in _MEMORY_SKIP:
+            continue
+        fm, body = parse_frontmatter(open(p, encoding="utf-8").read())
+        try:
+            data = _memory_record(fm, body, fn, owner, session_id, repo)
+        except ValueError as e:
+            print(f"ERROR: skipped {fn} — {e}", file=sys.stderr)
+            counts["error"] = counts.get("error", 0) + 1
+            rc = rc or 1
+            continue
+        req: dict = {"data": data}
+        if edges:
+            req["edges"] = edges
+        if md:
+            req["metadata"] = md
+        try:
+            result = gw_post("/write/YAC_MEMORY", req)
+        except RuntimeError as e:
+            print(f"[gateway] {fn}: {e}", file=sys.stderr)
+            counts["error"] = counts.get("error", 0) + 1
+            rc = 2
+            continue
+        status = result.get("result", "?")
+        counts[status] = counts.get(status, 0) + 1
+        if args.format == "json":
+            sys.stdout.write(json.dumps(result) + "\n")
+        else:
+            sys.stdout.write(f"  {status:9} {data['mem_key']} ({result.get('document_id', '')})\n")
+    summ = ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "nothing"
+    sys.stderr.write(f"YAC_MEMORY [{owner}]: {len(paths)} file(s) — {summ}\n")
+    return rc
+
+
 def build_records(type_: str, args: argparse.Namespace) -> tuple[dict, list]:
     """Produce (data, edges) for a write. A per-type extractor maps the source to
     fields (validating); --field overrides win; edges come from --edge plus the
@@ -472,6 +591,8 @@ def main() -> int:
             return cmd_gitstats(args)
         if not args.type:
             ap.error("a doc TYPE is required (or use --list)")
+        if args.type == "YAC_MEMORY" and args.json is None and not args.patch:
+            return cmd_memory(args)  # dir/file → one record per memory (CASE-507)
         if args.patch:
             return cmd_patch(args.type, args)
         return cmd_write(args.type, args)
