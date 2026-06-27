@@ -1,0 +1,8 @@
+{
+  "prefix": "library",
+  "description": "WIP Technical Library — generated-from-code docs (CASE-518). Cross-refs the KB corpus namespace.",
+  "isolation_mode": "open",
+  "allowed_external_refs": ["kb-libdev"],
+  "deletion_mode": "full",
+  "_note": "allowed_external_refs lets LIBRARY_DOCs reference KB-corpus docs across namespaces (Library → KB edges). In a deployed instance the external ref is the deployment's KB-corpus namespace name (kb-libdev in dev). deletion_mode:full is a dev convenience for teardown/reset."
+}

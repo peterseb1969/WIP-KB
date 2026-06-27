@@ -1,0 +1,14 @@
+{
+  "value": "SEE_ALSO",
+  "label": "See Also",
+  "description": "Cross-reference between two LIBRARY_DOCs (CASE-518) — the template's 'See also' links. versioned:false (write-once edge; correct via delete+recreate), matching the KB edge convention. Cross-namespace Library -> KB references are a SEPARATE edge type (pending the cross-ns edge spike); this one is library-internal.",
+  "usage": "relationship",
+  "versioned": false,
+  "identity_fields": ["source_ref", "target_ref"],
+  "source_templates": ["LIBRARY_DOC"],
+  "target_templates": ["LIBRARY_DOC"],
+  "fields": [
+    { "name": "source_ref", "label": "Source", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["LIBRARY_DOC"] },
+    { "name": "target_ref", "label": "Target", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["LIBRARY_DOC"] }
+  ]
+}

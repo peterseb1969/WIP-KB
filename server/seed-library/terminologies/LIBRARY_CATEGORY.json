@@ -1,0 +1,12 @@
+{
+  "value": "LIBRARY_CATEGORY",
+  "label": "Library Category",
+  "description": "The template family / generation kind for a LIBRARY_DOC (CASE-518). Same record shape per category; only the generation template differs. Non-identity facet. mutable: new families add additively.",
+  "mutable": true,
+  "terms": [
+    { "value": "concept", "label": "Concept", "sort_order": 10, "description": "Conceptual / explanatory doc (the WHY and the model)." },
+    { "value": "api",     "label": "API",     "sort_order": 20, "description": "API reference generated from a service's surface." },
+    { "value": "lib",     "label": "Library", "sort_order": 30, "description": "Client-library / SDK reference." },
+    { "value": "cli",     "label": "CLI",     "sort_order": 40, "description": "Command-line tool reference." }
+  ]
+}

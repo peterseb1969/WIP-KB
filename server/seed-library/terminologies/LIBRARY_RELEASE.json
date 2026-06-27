@@ -1,0 +1,10 @@
+{
+  "value": "LIBRARY_RELEASE",
+  "label": "Library Release Line",
+  "description": "Product release line a LIBRARY_DOC documents (CASE-518). Part of LIBRARY_DOC identity [slug, release] so v1 and v2 libraries stay live in parallel — NOT the document version (each (slug,release) still has its own regen version history). Values are product-qualified (e.g. wip-v1) to disambiguate which product and future-proof multi-product libraries. mutable: new release lines added additively. MUST NOT carry aliases: the identity hash keys on the raw submitted value, so an alias would orphan-duplicate (CASE-316/317 class — confirmed by the term-as-identity spike, APP-KB-20260628).",
+  "mutable": true,
+  "terms": [
+    { "value": "wip-v1", "label": "WIP v1", "sort_order": 10, "description": "WIP release line 1 (current)." },
+    { "value": "wip-v2", "label": "WIP v2", "sort_order": 20, "description": "WIP release line 2 (template-ID redesign / v2 in flight)." }
+  ]
+}

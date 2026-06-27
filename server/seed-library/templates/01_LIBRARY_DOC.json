@@ -1,0 +1,23 @@
+{
+  "value": "LIBRARY_DOC",
+  "label": "Library Doc",
+  "description": "A generated-from-code Technical Library document (CASE-518). Identity = [slug, release]: slug is the manifest doc-slug, release is the product release line (LIBRARY_RELEASE, e.g. wip-v1) so v1/v2 libraries stay live in parallel. NOT the document version — each (slug,release) keeps its own regen version history (natural-upsert -> versions-in-place). generated_from_rev + source_scope are PROVENANCE, never identity (the SHA is volatile; identity over it would orphan-duplicate, CASE-316/317 class). do_not_edit marks generated output: regenerate to change it, never hand-edit. No mint WRITE_POLICY -> natural-identity upsert.",
+  "usage": "entity",
+  "identity_fields": ["slug", "release"],
+  "header_fields": ["title", "category", "release"],
+  "fields": [
+    { "name": "slug",               "label": "Slug",               "type": "string",  "mandatory": true },
+    { "name": "release",            "label": "Release",            "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "LIBRARY_RELEASE" },
+    { "name": "title",              "label": "Title",              "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "body",               "label": "Body",               "type": "string",  "mandatory": true, "full_text_indexed": true },
+    { "name": "category",           "label": "Category",           "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "LIBRARY_CATEGORY" },
+    { "name": "audience",           "label": "Audience",           "type": "string",  "full_text_indexed": true },
+    { "name": "source_scope",       "label": "Source Scope",       "type": "array",   "array_item_type": "string" },
+    { "name": "generated_from_rev", "label": "Generated From Rev", "type": "string" },
+    { "name": "do_not_edit",        "label": "Do Not Edit",        "type": "boolean", "default_value": true },
+    { "name": "authored_by",        "label": "Authored By",        "type": "string" },
+    { "name": "doc_status",         "label": "Doc Status",         "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "LIBRARY_STATUS", "default_value": "published" },
+    { "name": "tags",               "label": "Tags",               "type": "array",   "array_item_type": "string" },
+    { "name": "root",               "label": "Root",               "type": "boolean", "default_value": false }
+  ]
+}

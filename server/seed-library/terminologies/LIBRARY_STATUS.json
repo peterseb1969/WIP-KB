@@ -1,0 +1,11 @@
+{
+  "value": "LIBRARY_STATUS",
+  "label": "Library Doc Status",
+  "description": "Lifecycle status for a LIBRARY_DOC (CASE-518). Library-local (NOT kb-libdev's KB_DOC_STATUS) so the library namespace exports/imports as a self-contained unit. Generated docs default published; deprecated marks a stale/superseded release line. mutable.",
+  "mutable": true,
+  "terms": [
+    { "value": "draft",      "label": "Draft",      "sort_order": 10, "description": "Generated but not yet published." },
+    { "value": "published",  "label": "Published",  "sort_order": 20, "description": "Live library content. Default for generated docs." },
+    { "value": "deprecated", "label": "Deprecated", "sort_order": 30, "description": "Stale / superseded release line; kept resolvable." }
+  ]
+}
