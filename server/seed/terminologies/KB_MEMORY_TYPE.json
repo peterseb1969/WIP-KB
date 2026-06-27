@@ -1,0 +1,12 @@
+{
+  "value": "KB_MEMORY_TYPE",
+  "label": "KB Memory Type",
+  "description": "Classifies a YAC_MEMORY record by the kind of fact it captures (CASE-507). Mirrors the four types in a YAC's local memory frontmatter: user (who Peter is / preferences), feedback (standing guidance on how to work), project (ongoing work / constraints not derivable from code), reference (pointers to external resources). Term-backed so the type is a controlled facet — discoverable via list_terms, filterable, and the axis a later gene-pool harvest step reasons over. Distinct from KB_DOC_KIND (which classifies markdown DOCUMENT mirrors).",
+  "mutable": true,
+  "terms": [
+    { "value": "user",      "label": "User",      "sort_order": 10, "description": "Who the user (Peter) is — role, expertise, preferences. Constellation-applicable: the same Peter across every YAC, so the highest-value context to seed into a cold new YAC." },
+    { "value": "feedback",  "label": "Feedback",  "sort_order": 20, "description": "Standing guidance on how the agent should work — corrections and confirmed approaches, with the why. The densest behavioural context a YAC accrues." },
+    { "value": "project",   "label": "Project",   "sort_order": 30, "description": "Ongoing work, goals, or constraints not derivable from the code or git history. Relative dates converted to absolute." },
+    { "value": "reference", "label": "Reference", "sort_order": 40, "description": "Pointers to external resources — URLs, dashboards, tickets, gene-pool master locations." }
+  ]
+}

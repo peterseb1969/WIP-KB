@@ -1,0 +1,19 @@
+{
+  "value": "YAC_MEMORY",
+  "label": "YAC Memory",
+  "description": "One persistent memory fact a YAC accrues in its local file-based memory (~/.claude/projects/<proj>/memory/*.md), captured into the KB so it is cross-agent visible, full-text searchable, linkable, and backed up with the namespace (CASE-507). One record per memory file. identity_fields = (owner, mem_key): owner is the YAC role (APP-KB, BE-YAC, FRanC); mem_key is the file's stem (e.g. feedback_dev_install_first) — stable and per-owner-unique, so re-persisting the same file versions in place. The frontmatter `name` maps to `title` (display, mutable, sometimes a full sentence) and is deliberately NOT identity — keying on it would orphan-duplicate on any rename (the CASE-316/317 class). origin_session/session_id are provenance, never identity (memory outlives sessions). The loader normalizes the two frontmatter shapes (nested metadata.{type,originSessionId} vs top-level) and skips MEMORY.md (the index, not a memory).",
+  "usage": "entity",
+  "identity_fields": ["owner", "mem_key"],
+  "header_fields": ["owner", "mem_key", "memory_type"],
+  "fields": [
+    { "name": "owner",          "label": "Owner",          "type": "string", "mandatory": true,  "description": "The owning YAC role (APP-KB, BE-YAC, FRanC). Encodes the repo/project in this constellation. Identity, with mem_key." },
+    { "name": "mem_key",        "label": "Memory Key",      "type": "string", "mandatory": true,  "description": "The memory file's stem (basename minus .md), e.g. `feedback_dev_install_first`. Stable, per-owner-unique. Identity, with owner — NOT the frontmatter name." },
+    { "name": "title",          "label": "Title",           "type": "string", "mandatory": true,  "full_text_indexed": true, "description": "Display title ← frontmatter `name`. Mutable, sometimes a full sentence; NOT identity." },
+    { "name": "description",    "label": "Description",     "type": "string", "mandatory": true,  "full_text_indexed": true, "description": "One-line summary ← frontmatter `description`. The recall hook." },
+    { "name": "body",           "label": "Body",            "type": "string", "mandatory": true,  "full_text_indexed": true, "description": "The fact itself — the markdown after the frontmatter fence." },
+    { "name": "memory_type",    "label": "Memory Type",     "type": "term",   "mandatory": true,  "reference_type": "term", "terminology_ref": "KB_MEMORY_TYPE", "description": "user | feedback | project | reference, normalized from nested metadata.type or top-level type." },
+    { "name": "origin_session", "label": "Origin Session",  "type": "string", "mandatory": false, "description": "The frontmatter originSessionId (the Claude session that first wrote the memory). Provenance, NOT identity." },
+    { "name": "session_id",     "label": "Writing Session", "type": "string", "mandatory": false, "description": "The YAC session_id that last mirrored this memory to the KB (e.g. APP-KB-YYYYMMDD-HHMMSS). Provenance, NOT identity." },
+    { "name": "repo",           "label": "Repo",            "type": "string", "mandatory": false, "description": "The repo/project the memory belongs to (memory is project-scoped via the projects/<proj>/ path). Optional." }
+  ]
+}
