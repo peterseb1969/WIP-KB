@@ -42,11 +42,11 @@ Your development namespace is `dev-kb`. Use it for all data modeling during deve
 The MCP server resolves its key from `WIP_API_KEY_FILE` (the live wip-deploy secrets file) — see `.mcp.json`. This is fine for data modeling via MCP tools.
 
 **For your app's runtime API calls**, `.env` carries `WIP_API_KEY_FILE` pointing at that same live file. Resolve the key from the file at startup — the `@wip/proxy` `apiKeyFile` option does this for you, mirroring the MCP server — rather than baking a plaintext key. A key rotation or target-redeploy is then picked up on restart instead of stranding a stale `.env` (CASE-495). This is the deployment's admin/proxy key and spans all namespaces, which a cross-namespace console needs as-is.
-`.env` was written with `WIP_API_KEY_FILE=/Users/peter/.wip-deploy/wip-dev-local/secrets/api-key` — no plaintext key is baked in. The runtime reads the file at startup, so rotating the deploy key or redeploying the target needs no edit here.
+`.env` was written with `WIP_API_KEY_FILE=/Users/peter/.wip-deploy/wip-local/secrets/api-key` — no plaintext key is baked in. The runtime reads the file at startup, so rotating the deploy key or redeploying the target needs no edit here.
 
 ```bash
 # .env (already created)
-WIP_API_KEY_FILE=/Users/peter/.wip-deploy/wip-dev-local/secrets/api-key
+WIP_API_KEY_FILE=/Users/peter/.wip-deploy/wip-local/secrets/api-key
 ```
 
 **Least-privilege (optional).** The deploy key is admin-scoped. If this app owns a single namespace and you want a least-privilege key, provision one and repoint `WIP_API_KEY_FILE` at its own secrets file:
@@ -103,7 +103,7 @@ Otherwise start with:
 - `/wip-wake` — Recover context after compaction or at start of a new session
 - `/wip-report` — Capture fireside chat or trigger session summary
 - `/wip-deploy redeploy|verify` — Redeploy this YAC's own source to the running dev install (or smoke-only). Subset of BE-YAC's `/wip-deploy` — install is BE-YAC's territory
-- `/wip-case file|list|read|respond|comment|close|implement` — Cross-agent case management. **Every case write is ONE gateway call:** `POST <kb_app_url>/apps/kb/server-api/kb/cases[…]` per the served playbook (`~/.cache/wip-kb-client/case-workflow.md`). The server owns allocation (atomic `CASE-<n>` synonym claim — race-safe by construction), the status machine, and edges. Never `Write` a case file with a hand-picked number. Flat case files are optional write-staging; there is no mirror step (the retired loaders refuse with a pointer).
+- `/wip-case file|list|read|respond|comment|close|implement` — Cross-agent case management. **All KB reads/writes go through the served client — never a raw gateway curl:** `kbc kb-write.py <TYPE> …` (writes) / `kbc case-fetch.py …` (reads); the served playbook (`~/.cache/wip-kb-client/case-workflow.md`) is the version-matched source of truth for each verb. The gateway mints the `CASE-<n>` number + synonym and persists edges, but status-transition validity is enforced caller-side and a respond/close/implement is two writes (response doc + `CASE_RECORD --patch status=…`). Cases live in the KB, not on disk — never `Write` a case file with a hand-picked number; never reason about "the next number".
 
 **Context management:** When context reaches ~70-80%, the human should tell you to run `/wip-wake` or save state (DESIGN.md, memory files) before compaction hits.
 
@@ -152,6 +152,8 @@ WIP is accessed exclusively via MCP tools (94 tools, 5 resources). Before starti
 
 `wip://development-guide` provides the full 4-phase workflow reference if needed.
 `wip://query-assistant-prompt` provides a complete system prompt for NL query agents (used by --preset query apps).
+
+**Query preset — runtime Anthropic key (CASE-509).** The `--preset query` agent resolves its Anthropic key in priority order: a key set at runtime via the admin `/settings` page → `ANTHROPIC_API_KEY_FILE` (0600, survives restart) → `ANTHROPIC_API_KEY` (frozen at process start). So an operator can set/rotate the key from the UI with no redeploy. Two deploy requirements for this to persist: (1) declare `ANTHROPIC_API_KEY_FILE` in `apps/<name>/wip-app.yaml` pointing at a **writable, persistent mount** (otherwise a UI-set key reverts on restart); (2) the `/settings` config endpoint is admin-gated via `ADMIN_GROUPS` (default `wip-admins`) — open only in dev mode (no `OIDC_ISSUER`). The key is a secret: never put it in a WIP document, and the server returns only configured/source/last-4, never the value.
 
 ## Client Libraries
 
