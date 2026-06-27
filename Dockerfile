@@ -8,8 +8,12 @@ COPY libs/ libs/
 RUN npm ci --ignore-scripts
 
 # Copy source and build
-# VITE_BASE_PATH sets the public base path for assets (e.g. /apps/kb/)
-ARG VITE_BASE_PATH=/
+# VITE_BASE_PATH sets the public base path for assets (e.g. /apps/kb/).
+# Default to this app's production mount so the image is correct even if the
+# deploy forgets --build-arg VITE_BASE_PATH (a root-relative bundle 404s its
+# /assets/*.js under /apps/kb and the SPA fails with a text/html MIME error).
+# A passed --build-arg still overrides this default.
+ARG VITE_BASE_PATH=/apps/kb
 ENV VITE_BASE_PATH=${VITE_BASE_PATH}
 # Build stamp (CASE-472) — baked from CI --build-arg; 'dev' default hides it.
 ARG VITE_BUILD_STAMP=dev
