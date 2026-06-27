@@ -8,6 +8,9 @@ const items = [
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
 ]
 
+/**
+ * Left navigation rail — links to the Home, Search, Client, and Settings routes.
+ */
 export function Sidebar() {
   return (
     <aside className="hidden w-56 shrink-0 border-r border-gray-200 bg-surface md:block">

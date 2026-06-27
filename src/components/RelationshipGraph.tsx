@@ -103,6 +103,13 @@ const TOOLTIP_W = 280
 const TOOLTIP_H = 60
 const TOOLTIP_GAP = 8
 
+/**
+ * SVG graph of a document's relationships — the focus doc at center with incoming/
+ * outgoing edge peers (fill = template, stroke = case status), plus response dots
+ * for cases (CASE-506).
+ * @param selfId/selfTitle/selfTemplate - the focus doc; incoming/outgoing - edges;
+ * responseCount/onResponsesClick - the response dots.
+ */
 export function RelationshipGraph({
   selfId,
   selfTitle,

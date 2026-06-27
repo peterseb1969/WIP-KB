@@ -28,6 +28,11 @@ const KIND_STYLE: Record<string, KindStyle> = {
   implement: { label: 'implemented', cls: 'bg-green-100 text-green-700' },
 }
 
+/**
+ * Inline, collapsible thread of a case's CASE_RESPONSE docs (seq-ordered, latest
+ * auto-expanded, kind-colored). (CASE-506/511)
+ * @param responses - the case's response docs.
+ */
 export function CaseThread({ responses }: { responses: ResponseDoc[] }) {
   if (responses.length === 0) return null
   return (

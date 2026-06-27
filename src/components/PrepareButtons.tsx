@@ -6,6 +6,12 @@ interface Props {
   docTitle: string
 }
 
+/**
+ * The three fixed "prepare a prompt" clipboard buttons (read-for-design,
+ * read-and-validate, read-and-plan). Copies a prompt string to the clipboard — no
+ * writes, no per-doc-type variation.
+ * @param docId/docTitle - the doc to reference in the prompt.
+ */
 export function PrepareButtons({ docId, docTitle }: Props) {
   const [copiedId, setCopiedId] = useState<string | null>(null)
 

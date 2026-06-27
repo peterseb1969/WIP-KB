@@ -224,6 +224,12 @@ function rootAuthor(s: string | undefined | null): string {
   return s.replace(/-\d{8}(?:-\d{2,4})?$/, '')
 }
 
+/**
+ * `/search` route — faceted search over the corpus. Posts the query to
+ * reporting-sync (`mode: auto|fts|substring`) and filters/ranks client-side with
+ * URL-param facets (type/status/author/kind/severity/app). CASE_RESPONSE is
+ * default-off but selectable.
+ */
 export default function SearchPage() {
   const [params, setParams] = useSearchParams()
   const query = params.get('q') ?? ''

@@ -99,6 +99,11 @@ function Section({
   )
 }
 
+/**
+ * `/client` route — in-app documentation of the served kb-client. Fetches the
+ * bundle manifest from `/server-api/kb-client/manifest` and renders each served
+ * file with its role (the CLI YACs install to read/write the KB). Read-only.
+ */
 export default function ClientPage() {
   const manifestQ = useQuery<Manifest>({
     queryKey: ['kb-client-manifest'],

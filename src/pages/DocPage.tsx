@@ -43,6 +43,11 @@ interface TemplateField {
   type?: string
 }
 
+/**
+ * `/doc/:id` route — a single KB document: rendered markdown body, structured
+ * fields, the RelationshipGraph, the inline CaseThread (CASE_RESPONSE replies),
+ * the FlagModal (flag-for-YAC — the one UI write), and the PrepareButtons.
+ */
 export default function DocPage() {
   const { id = '' } = useParams<{ id: string }>()
   const navigate = useNavigate()

@@ -4,6 +4,11 @@ import { caseParts, docLabel } from '../lib/casePrefix'
 // a "CASE-N" chip + slug, sourcing the number from data.case_number (gateway-filed
 // cases, CASE-464) with the legacy title prefix as fallback. Non-case docs fall
 // back to docLabel (title → session_id → path).
+/**
+ * Compact identity label for a doc: a `CASE-<n>` chip when the doc has a
+ * case_number, else a title/slug.
+ * @param data - the doc's data (title, case_number, session_id, path) used to derive the label.
+ */
 export function CaseLabel({
   data,
 }: {

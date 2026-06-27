@@ -33,6 +33,11 @@ interface BulkResponse {
 const NAMESPACE = 'kb'
 const TARGET_YAC_TERMINOLOGY = 'KB_TARGET_YAC'
 
+/**
+ * The flag-for-YAC modal — the one write the UI performs. Creates a FLAG_RECORD
+ * with a FLAGGED_FROM edge to the source doc.
+ * @param sourceDocId/sourceDocTitle - the doc being flagged. @param onClose - dismiss callback.
+ */
 export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
   const qc = useQueryClient()
   const [targetYac, setTargetYac] = useState('')

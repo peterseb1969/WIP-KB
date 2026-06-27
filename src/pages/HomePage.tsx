@@ -330,6 +330,12 @@ function DocGroupBox({ group }: { group: Group }) {
   )
 }
 
+/**
+ * `/` route — the start page. Sweeps all docs (paged concurrently), groups them by
+ * template_value newest-first, and renders a collapsible box per type with
+ * per-group search/sort. HIDDEN_TYPES excludes structural/config types and
+ * CASE_RESPONSE.
+ */
 export default function HomePage() {
   const { data, isLoading, error } = useQuery<DocItem[]>({
     queryKey: ['kb-docs-all', NAMESPACE],

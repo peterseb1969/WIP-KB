@@ -13,6 +13,10 @@ interface KeyStatus {
   persisted?: boolean
 }
 
+/**
+ * `/settings` route — admin-gated runtime configuration (e.g. the Anthropic API
+ * key for the askBar) via `/server-api/config/*`. Non-admins see a gated message.
+ */
 export default function SettingsPage() {
   const [status, setStatus] = useState<KeyStatus | null>(null)
   const [forbidden, setForbidden] = useState(false)

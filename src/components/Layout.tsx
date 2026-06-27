@@ -3,6 +3,11 @@ import { Link } from 'react-router-dom'
 import { WipFooter } from '@wip/react'
 import { Sidebar } from './Sidebar'
 
+/**
+ * App shell wrapping every route — Sidebar, the app-wide AskBar, the WipFooter
+ * (build stamp), and the routed page content.
+ * @param children - the active route's element.
+ */
 export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col bg-background">

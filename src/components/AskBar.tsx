@@ -14,6 +14,11 @@ const DEFAULT_H = 600
 const MIN_W = 320
 const MIN_H = 280
 
+/**
+ * App-wide natural-language query bar. Posts the question to `/server-api/ask`,
+ * where the server runs an Anthropic model over WIP's MCP tools, and renders the
+ * agent's answer. Agent-mediated retrieval, not a deterministic query.
+ */
 export default function AskBar() {
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
