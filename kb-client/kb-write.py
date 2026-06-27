@@ -304,8 +304,13 @@ def cmd_memory(args: argparse.Namespace) -> int:
     if os.path.isdir(src):
         paths = [os.path.join(src, n) for n in sorted(os.listdir(src))
                  if n.endswith(".md") and n not in _MEMORY_SKIP and not _EDITOR_BACKUP.search(n)]
-    else:
+    elif os.path.isfile(src):
         paths = [src]
+    else:
+        # No memory dir/file (a repo with no memory yet) — not an error; the
+        # session-end fold-in calls this unconditionally, so it must no-op cleanly.
+        print(f"YAC_MEMORY: no memory dir/file at {src} — nothing to mirror", file=sys.stderr)
+        return 0
     if not paths:
         print(f"YAC_MEMORY: no memory files in {src}", file=sys.stderr)
         return 0
