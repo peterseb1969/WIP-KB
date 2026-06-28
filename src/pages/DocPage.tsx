@@ -11,6 +11,7 @@ import { FlagModal } from '../components/FlagModal'
 import { RelationshipGraph } from '../components/RelationshipGraph'
 import { CaseThread, type ResponseDoc } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
+import { CORPUS_NS } from '../lib/namespaces'
 
 const COMMON_FIELDS = new Set(['title', 'authored_by', 'doc_status', 'tags', 'root', 'body'])
 
@@ -184,6 +185,12 @@ export default function DocPage() {
   const isRoot = data.root === true
   const orphan = !isRoot && incoming.length === 0 && outgoing.length === 0
 
+  // Flag-for-YAC writes a FLAG_RECORD in the corpus namespace + a FLAGGED_FROM
+  // edge to this doc. Cross-namespace relationships are unsupported (CASE-538),
+  // so the flag affordance is corpus-only — Library docs (generated, read-only
+  // output in their own namespace) don't show it.
+  const canFlag = doc.namespace === CORPUS_NS
+
   // Surface metadata.custom alongside template-defined data fields. Render
   // every key (no hide list) in insertion order from the API response —
   // Peter explicitly wants the full audit trail visible (CASE-322, closed).
@@ -326,13 +333,15 @@ export default function DocPage() {
         </header>
 
         <div className="mb-8 flex flex-wrap items-center gap-2 border-y border-gray-100 py-2">
-          <button
-            type="button"
-            onClick={() => setFlagOpen(true)}
-            className="rounded-md border border-accent/20 bg-accent/5 px-3 py-1 text-xs font-medium text-accent hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-accent/40"
-          >
-            Flag for YAC
-          </button>
+          {canFlag && (
+            <button
+              type="button"
+              onClick={() => setFlagOpen(true)}
+              className="rounded-md border border-accent/20 bg-accent/5 px-3 py-1 text-xs font-medium text-accent hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-accent/40"
+            >
+              Flag for YAC
+            </button>
+          )}
           <PrepareButtons docId={id} docTitle={docLabel(data, id)} />
         </div>
 
