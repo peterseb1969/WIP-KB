@@ -6,8 +6,9 @@ import { wipFetchJson } from '../lib/wipBulk'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
+import { CORPUS_NS } from '../lib/namespaces'
 
-const NAMESPACE = 'kb'
+const NAMESPACE = CORPUS_NS
 
 interface DocItem {
   document_id: string

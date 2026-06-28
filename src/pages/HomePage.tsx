@@ -4,8 +4,9 @@ import { useQuery } from '@tanstack/react-query'
 import { wipFetchJson } from '../lib/wipBulk'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
+import { CORPUS_NS } from '../lib/namespaces'
 
-const NAMESPACE = 'kb'
+const NAMESPACE = CORPUS_NS
 
 // Structural / config doc types — not KB content, hidden from the start page.
 // (Edge types are filtered separately via the template usage flag.)

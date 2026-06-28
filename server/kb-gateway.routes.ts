@@ -22,7 +22,10 @@
 import { Router, type Request, type Response } from 'express'
 
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
-const NS_DEFAULT = 'kb' // namespace discipline; ?namespace= override exists for test harnesses
+// The gateway's default namespace is the KB corpus (cases, decisions, …).
+// Env-driven so a deployment / dev branch points at its own corpus namespace
+// (kb-libdev on lib-dev). The ?namespace= override still rides every handler.
+const NS_DEFAULT = process.env.WIP_NAMESPACE || 'kb'
 const ALLOC_MAX_RETRIES = 100
 const PATCH_MAX_RETRIES = 3
 

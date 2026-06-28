@@ -54,7 +54,8 @@ npm run dev          # client (Vite, :5173) + server (Express) concurrently
 |---|---|
 | `WIP_BASE_URL` | WIP API base (the proxy target). From `wip-deploy`'s router component. |
 | `WIP_API_KEY` | API key the proxy injects on WIP calls. From the `api-key` secret. |
-| `WIP_NAMESPACE` | KB namespace (default `kb`). |
+| `WIP_NAMESPACE` | KB-corpus namespace, server side (default `kb`). Gateway + bootstrap target. |
+| `VITE_KB_NAMESPACE` / `VITE_LIBRARY_NAMESPACE` | Client (bundle) namespaces (CASE-518): the KB corpus and the Technical Library. Build args / `.env`; keep in sync with `WIP_NAMESPACE`. Empty `VITE_LIBRARY_NAMESPACE` = single-namespace. |
 | `PORT` | Express port (prod: `3012`). |
 | `APP_BASE_PATH` | Mount path (`/apps/kb`). Drives the router base + cookie path. |
 | `NODE_ENV` | `production` enables static `dist/` serving + SPA fallback. |

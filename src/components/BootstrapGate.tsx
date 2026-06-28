@@ -25,8 +25,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Database, AlertTriangle, RefreshCw, Loader2, ServerCrash } from 'lucide-react'
+import { CORPUS_NS } from '../lib/namespaces'
 
-const NAMESPACE_LABEL = 'kb'
+const NAMESPACE_LABEL = CORPUS_NS
 const APP_TITLE = 'KB'
 
 // Vite BASE_URL always ends in `/`. In dev it's `/`; in prod (behind

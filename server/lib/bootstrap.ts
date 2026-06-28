@@ -36,7 +36,7 @@ const SEED_DIR = join(__dirname, '..', 'seed')
 // env override exists ONLY for test harnesses that bootstrap a throwaway
 // namespace through the same code path (CASE-464 gateway lifecycle tests) —
 // never set in any deployed environment.
-const NAMESPACE = process.env.KB_BOOTSTRAP_NAMESPACE || 'kb'
+const NAMESPACE = process.env.KB_BOOTSTRAP_NAMESPACE || process.env.WIP_NAMESPACE || 'kb'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObj = Record<string, any>

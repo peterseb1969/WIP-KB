@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { wipFetchJson, assertBulkSuccess } from '../lib/wipBulk'
 import { DEFAULT_INTENT } from '../lib/promptTemplates'
+import { CORPUS_NS } from '../lib/namespaces'
 
 interface Props {
   sourceDocId: string
@@ -30,7 +31,10 @@ interface BulkResponse {
   results: BulkItemResult[]
 }
 
-const NAMESPACE = 'kb'
+// FLAG_RECORD lives in the KB-corpus namespace. Flagging a Library doc across
+// namespaces is a separate concern (cross-namespace FLAGGED_FROM edges are
+// unsupported — CASE-538); handled when unified flagging lands.
+const NAMESPACE = CORPUS_NS
 const TARGET_YAC_TERMINOLOGY = 'KB_TARGET_YAC'
 
 /**
