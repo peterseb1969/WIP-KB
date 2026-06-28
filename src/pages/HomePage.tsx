@@ -4,9 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { wipFetchJson } from '../lib/wipBulk'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
-import { CORPUS_NS } from '../lib/namespaces'
-
-const NAMESPACE = CORPUS_NS
+import { NAMESPACES } from '../lib/namespaces'
 
 // Structural / config doc types — not KB content, hidden from the start page.
 // (Edge types are filtered separately via the template usage flag.)
@@ -17,6 +15,7 @@ const HIDDEN_TYPES = new Set(['BOOTSTRAP_RECORD', 'WRITE_POLICY', 'CASE_RESPONSE
 
 interface DocItem {
   document_id: string
+  namespace: string
   template_value: string
   data: {
     title?: string
@@ -99,7 +98,7 @@ function groupAndSort(items: DocItem[]): Group[] {
   return groups
 }
 
-async function fetchAllDocs(namespace: string): Promise<DocItem[]> {
+async function fetchNamespaceDocs(namespace: string): Promise<DocItem[]> {
   // Fetch page 1 to learn the page count, then fetch the rest CONCURRENTLY
   // (CASE-501): the old serial loop paid per-request RTT N times — the dominant
   // cost on kb.internal (Pi). Wall-clock is now ~2×RTT instead of N×RTT.
@@ -108,11 +107,46 @@ async function fetchAllDocs(namespace: string): Promise<DocItem[]> {
     `/api/document-store/documents?namespace=${namespace}&page_size=${pageSize}&latest_only=true&page=${page}`
   const first = await wipFetchJson<ListResponse>(url(1))
   const pages = first.pages || 1
-  if (pages <= 1) return first.items
-  const rest = await Promise.all(
-    Array.from({ length: pages - 1 }, (_, i) => wipFetchJson<ListResponse>(url(i + 2))),
+  const items =
+    pages <= 1
+      ? first.items
+      : [
+          ...first.items,
+          ...(
+            await Promise.all(
+              Array.from({ length: pages - 1 }, (_, i) =>
+                wipFetchJson<ListResponse>(url(i + 2)),
+              ),
+            )
+          ).flatMap((r) => r.items),
+        ]
+  // Tag each doc with its source namespace — the unified view spans two
+  // namespaces (CASE-518), and DocItem.namespace drives per-namespace edge-type
+  // filtering and (later) namespace-aware doc links.
+  return items.map((d) => ({ ...d, namespace }))
+}
+
+// Unified fetch across all configured namespaces (corpus + library), merged.
+async function fetchAllDocs(namespaces: string[]): Promise<DocItem[]> {
+  const perNs = await Promise.all(namespaces.map(fetchNamespaceDocs))
+  return perNs.flat()
+}
+
+// Edge-type templates, per namespace. Relationship docs must be filtered out of
+// the start page; edge-type sets differ per namespace, so we key the filter on
+// `${namespace}:${template_value}`.
+async function fetchEdgeTypeKeys(namespaces: string[]): Promise<Set<string>> {
+  const perNs = await Promise.all(
+    namespaces.map(async (ns) => {
+      const r = await wipFetchJson<TemplateListResponse>(
+        `/api/template-store/templates?namespace=${ns}&latest_only=true&page_size=100`,
+      )
+      return r.items
+        .filter((t) => t.usage === 'relationship')
+        .map((t) => `${ns}:${t.value}`)
+    }),
   )
-  return [...first.items, ...rest.flatMap((r) => r.items)]
+  return new Set(perNs.flat())
 }
 
 // Windowed pager: 1, …, p-1, p, p+1, …, last (caps button count)
@@ -338,31 +372,28 @@ function DocGroupBox({ group }: { group: Group }) {
  * CASE_RESPONSE.
  */
 export default function HomePage() {
+  const nsKey = NAMESPACES.join(',')
   const { data, isLoading, error } = useQuery<DocItem[]>({
-    queryKey: ['kb-docs-all', NAMESPACE],
-    queryFn: () => fetchAllDocs(NAMESPACE),
+    queryKey: ['kb-docs-all', nsKey],
+    queryFn: () => fetchAllDocs(NAMESPACES),
     staleTime: 30_000,
   })
 
-  const { data: templates } = useQuery<TemplateListResponse>({
-    queryKey: ['templates', NAMESPACE],
-    queryFn: () =>
-      wipFetchJson<TemplateListResponse>(
-        `/api/template-store/templates?namespace=${NAMESPACE}&latest_only=true&page_size=100`,
-      ),
+  const { data: edgeTypeKeys } = useQuery<Set<string>>({
+    queryKey: ['edge-type-keys', nsKey],
+    queryFn: () => fetchEdgeTypeKeys(NAMESPACES),
     staleTime: 5 * 60_000,
   })
 
   if (isLoading) return <p className="text-sm text-text-muted">Loading…</p>
   if (error) return <p className="text-sm text-danger">Failed to load: {(error as Error).message}</p>
 
-  const edgeTypes = new Set(
-    (templates?.items ?? []).filter((t) => t.usage === 'relationship').map((t) => t.value),
-  )
-
+  const edgeKeys = edgeTypeKeys ?? new Set<string>()
   const allItems = data ?? []
   const items = allItems.filter(
-    (d) => !edgeTypes.has(d.template_value) && !HIDDEN_TYPES.has(d.template_value),
+    (d) =>
+      !edgeKeys.has(`${d.namespace}:${d.template_value}`) &&
+      !HIDDEN_TYPES.has(d.template_value),
   )
 
   if (items.length === 0) {
