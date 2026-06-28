@@ -23,6 +23,7 @@ interface DocItem {
     severity?: string
     app?: string
     status?: string
+    release?: string
     [k: string]: unknown
   }
   metadata?: {
@@ -303,6 +304,7 @@ export default function SearchPage() {
   const kFilter = useMemo(() => csvSet(params.get('k')), [params])
   const vFilter = useMemo(() => csvSet(params.get('v')), [params])
   const pFilter = useMemo(() => csvSet(params.get('p')), [params])
+  const rFilter = useMemo(() => csvSet(params.get('r')), [params])
   const [page, setPage] = useState(1)
 
   const [draft, setDraft] = useState(query)
@@ -438,6 +440,20 @@ export default function SearchPage() {
       ).sort(),
     [filterableDocs],
   )
+  // Release = LIBRARY_DOC.data.release (wip-v1, wip-v2, …) — the product release
+  // line. The whole point of parallel libraries (CASE-518): filter to one line.
+  // Only LIBRARY_DOC carries it, so the section auto-hides when none is in scope.
+  const allReleases = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          docsInTypeScope
+            .map((d) => d.data.release)
+            .filter((s): s is string => typeof s === 'string' && s.length > 0),
+        ),
+      ).sort(),
+    [docsInTypeScope],
+  )
 
   type Hit = { doc: DocItem; score: number | null; snippet: string | null }
   const hits: Hit[] = useMemo(() => {
@@ -482,9 +498,10 @@ export default function SearchPage() {
         if (kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
         if (vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
         if (pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
+        if (rFilter.size > 0 && !rFilter.has(doc.data.release ?? '')) return false
         return true
       }),
-    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, appOf],
+    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, appOf],
   )
 
   // Per-option counts for each facet. "What would the result count be if I
@@ -492,7 +509,7 @@ export default function SearchPage() {
   // standard faceted-search semantics. Zero-counts stay visible (rendered
   // muted by FacetCheckbox) so the operator sees the "no current match"
   // signal without having to click.
-  type FacetKey = 't' | 's' | 'a' | 'k' | 'v' | 'p'
+  type FacetKey = 't' | 's' | 'a' | 'k' | 'v' | 'p' | 'r'
   const facetCounts = useMemo(() => {
     function passes(doc: DocItem, skip: FacetKey): boolean {
       // Default-hidden CASE_RESPONSE shouldn't inflate other facets' counts, but
@@ -505,6 +522,7 @@ export default function SearchPage() {
       if (skip !== 'k' && kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
       if (skip !== 'v' && vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
       if (skip !== 'p' && pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
+      if (skip !== 'r' && rFilter.size > 0 && !rFilter.has(doc.data.release ?? '')) return false
       return true
     }
     function bucket(skip: FacetKey, get: (d: DocItem) => string | undefined): Map<string, number> {
@@ -523,8 +541,9 @@ export default function SearchPage() {
       k: bucket('k', (d) => d.data.kind),
       v: bucket('v', (d) => d.data.severity),
       p: bucket('p', (d) => appOf(d)),
+      r: bucket('r', (d) => d.data.release),
     }
-  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, appOf])
+  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, appOf])
 
   const hasCaseInScope = useMemo(
     () => filtered.some((h) => typeof h.doc.data.case_number === 'number'),
@@ -594,7 +613,7 @@ export default function SearchPage() {
   }
 
   const activeFilterCount =
-    tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size + pFilter.size
+    tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size + pFilter.size + rFilter.size
   const isLoading =
     allDocsQ.isLoading || edgeKeysQ.isLoading || (query.trim() && searchQ.isLoading)
   const error = allDocsQ.error ?? edgeKeysQ.error ?? searchQ.error
@@ -612,6 +631,17 @@ export default function SearchPage() {
                 count={facetCounts.t.get(t) ?? 0}
                 checked={tFilter.has(t)}
                 onChange={() => toggleSet('t', tFilter, t)}
+              />
+            ))}
+          </FacetSection>
+          <FacetSection title="Release" allOptions={allReleases} defaultOpen>
+            {allReleases.map((r) => (
+              <FacetCheckbox
+                key={r}
+                label={r}
+                count={facetCounts.r.get(r) ?? 0}
+                checked={rFilter.has(r)}
+                onChange={() => toggleSet('r', rFilter, r)}
               />
             ))}
           </FacetSection>
