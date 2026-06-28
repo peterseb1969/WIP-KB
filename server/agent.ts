@@ -25,6 +25,7 @@ const env = () => ({
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
   CLAUDE_MODEL: process.env.CLAUDE_MODEL || 'claude-haiku-4-5',
   WIP_NAMESPACE: process.env.WIP_NAMESPACE || '',
+  KB_LIBRARY_NAMESPACE: process.env.KB_LIBRARY_NAMESPACE || '',
   WIP_API_KEY: process.env.WIP_API_KEY || '',
   MAX_TURNS: parseInt(process.env.MAX_TURNS || '15'),
   SESSION_TTL_MS: parseInt(process.env.SESSION_TTL_MINUTES || '30') * 60_000,
@@ -281,6 +282,26 @@ export async function initAgent() {
 
   // (A) Standing tool-use policy — steer away from full-document dumps.
   systemPrompt += '\n\n' + QUERY_TOOL_POLICY
+
+  // Two-namespace awareness (CASE-518): when a Library namespace is configured,
+  // tell the model what each namespace holds and that it must pass `namespace`
+  // to scope each tool call. Tool calls default to the corpus; a question about
+  // the Technical Library (generated-from-code docs) needs namespace=<library>;
+  // to cover both, query each. Namespace is clamped to these two server-side, so
+  // the model can only reach the corpus and the Library.
+  const e = env()
+  if (e.KB_LIBRARY_NAMESPACE) {
+    systemPrompt +=
+      `\n\n## Namespaces\n` +
+      `This KB spans two namespaces — pass \`namespace\` on every tool call to scope it:\n` +
+      `- \`${e.WIP_NAMESPACE}\` (the **corpus**, default): cases, design decisions, lessons, ` +
+      `firesides, journey entries, sessions, agent memory, git stats.\n` +
+      `- \`${e.KB_LIBRARY_NAMESPACE}\` (the **Technical Library**): generated-from-code docs ` +
+      `(template LIBRARY_DOC), organized by release line (e.g. wip-v1, wip-v2).\n` +
+      `For a question about the Technical Library / generated API/CLI/lib/concept docs, pass ` +
+      `namespace="${e.KB_LIBRARY_NAMESPACE}". For anything else, the corpus default applies. ` +
+      `If a question could span both, run the query against each namespace and combine.`
+  }
 }
 
 // ---------- Ask ----------
@@ -366,15 +387,20 @@ export async function ask(
 
       const args = block.input as Record<string, unknown>
 
-      // Inject namespace if configured and the tool accepts it
-      if (e.WIP_NAMESPACE && 'namespace' in (args || {})) {
-        args.namespace = e.WIP_NAMESPACE
-      } else if (e.WIP_NAMESPACE && args && !('namespace' in args)) {
-        // Only inject if the tool likely accepts namespace
+      // Scope each tool call to a configured namespace (CASE-518). The model may
+      // choose `namespace` per call (corpus vs Technical Library — see the system
+      // prompt); we respect a valid choice and otherwise default to the corpus.
+      // The choice is CLAMPED to the configured set so the agent can't reach other
+      // namespaces on the instance (the privileged key is cross-namespace).
+      if (e.WIP_NAMESPACE) {
         const toolDef = mcpTools.find(t => t.name === block.name)
         const props = (toolDef?.input_schema as any)?.properties || {}
-        if ('namespace' in props) {
-          args.namespace = e.WIP_NAMESPACE
+        const accepts = (args && 'namespace' in args) || 'namespace' in props
+        if (accepts) {
+          const allowed = [e.WIP_NAMESPACE, e.KB_LIBRARY_NAMESPACE].filter(Boolean)
+          const chosen = args?.namespace
+          args.namespace =
+            typeof chosen === 'string' && allowed.includes(chosen) ? chosen : e.WIP_NAMESPACE
         }
       }
 
