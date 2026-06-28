@@ -459,8 +459,8 @@ export default function DocPage() {
 }
 
 // Renders document-reference values (a single id or an array) as links to the
-// referenced docs, labelled by title + template, with a namespace chip when the
-// ref points outside this doc's namespace (a Library → KB cross-namespace link).
+// referenced docs, each labelled by title + a template chip. Reads resolve by
+// global UUID, so a cross-namespace ref (Library → KB) links the same way.
 function RefValue({
   value,
   refDocs,

@@ -182,16 +182,47 @@ export async function runBootstrap(
   }
 
   try {
+    // Per-namespace use-on-exists (CASE-518 review #3): seed ONLY the namespaces
+    // that don't exist yet. checkStatus offers bootstrap when ANY planned namespace
+    // is missing; without this guard, confirming would re-run the seed against an
+    // already-populated namespace (e.g. an existing canonical `kb`) — re-writing
+    // WRITE_POLICY docs and, since terminology creates use no on_conflict, aborting
+    // on the first `already_exists`. An existing namespace is used as-is.
+    let existing: Set<string>
+    try {
+      const nss = (await wipGet('/api/registry/namespaces')) as Array<{ prefix: string }>
+      existing = new Set(nss.map((n) => n.prefix))
+    } catch {
+      existing = new Set()
+    }
     for (const plan of plans) {
+      if (existing.has(plan.namespace)) {
+        onProgress({
+          step: 'skip',
+          detail: `[${plan.label}] ${plan.namespace} already exists — using as-is (no re-seed)`,
+          done: false,
+        })
+        continue
+      }
       await seedNamespace(plan, onProgress, created)
     }
 
     // BOOTSTRAP_RECORD goes to the corpus namespace (only it carries the
-    // template), recording everything created across both namespaces.
+    // template), recording everything created across both namespaces. Best-effort:
+    // the audit is provenance, not load-bearing, and must not fail the bootstrap
+    // (e.g. if the corpus was skipped as already-existing but lacks the template).
     const auditPlan = plans.find((p) => p.audit)
     if (auditPlan) {
       onProgress({ step: 'audit', detail: 'Writing BOOTSTRAP_RECORD audit doc...', done: false })
-      await writeBootstrapRecord(auditPlan.namespace, { startedAt, ...created })
+      try {
+        await writeBootstrapRecord(auditPlan.namespace, { startedAt, ...created })
+      } catch (err) {
+        onProgress({
+          step: 'audit',
+          detail: `BOOTSTRAP_RECORD skipped (${(err as Error).message})`,
+          done: false,
+        })
+      }
     }
 
     onProgress({ step: 'done', detail: 'Bootstrap complete', done: true })

@@ -3,6 +3,6 @@
   "description": "WIP Technical Library — generated-from-code docs (CASE-518). Cross-refs the KB corpus namespace.",
   "isolation_mode": "open",
   "allowed_external_refs": ["kb-libdev"],
-  "deletion_mode": "full",
-  "_note": "allowed_external_refs lets LIBRARY_DOCs reference KB-corpus docs across namespaces (Library → KB edges). In a deployed instance the external ref is the deployment's KB-corpus namespace name (kb-libdev in dev). deletion_mode:full is a dev convenience for teardown/reset."
+  "deletion_mode": "retain",
+  "_note": "allowed_external_refs lets LIBRARY_DOCs reference KB-corpus docs across namespaces (Library → KB links). In a deployed instance the external ref is the deployment's KB-corpus namespace name (kb-libdev in dev); bootstrap resolves it to the actual corpus name. deletion_mode:retain matches the KB soft-delete discipline (Vision §Prefer Deactivation) — canonical must NOT ship `full` (CASE-518 review #2). The cut-over is namespace-level delete+restore, independent of deletion_mode. A dev sandbox may flip its own namespace to `full` for teardown, but the seed (the canonical source) stays retain."
 }

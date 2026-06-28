@@ -100,15 +100,18 @@ async function templateId(value: string, ns: string, key: string): Promise<strin
 // inbound ?namespace= pin (the kb-client always sends its configured one) must not
 // misroute it. Everything else keeps the corpus default + ?namespace= override.
 // Cached per type (a template's home doesn't move).
-const libTypeCache = new Map<string, boolean>()
+// Positive-only cache (CASE-518 review #5): we cache only types KNOWN to be
+// Library-owned. A negative is NOT cached — otherwise a LIBRARY_DOC write attempted
+// before the Library template exists would cache `false` forever and route to the
+// corpus until process restart. Re-checking a miss each time is cheap and correct.
+const libTypeCache = new Set<string>()
 async function libraryOwnsType(type: string, key: string): Promise<boolean> {
   if (!NS_LIBRARY) return false
-  const hit = libTypeCache.get(type)
-  if (hit !== undefined) return hit
+  if (libTypeCache.has(type)) return true
   const t = await wipReq('GET', `/api/template-store/templates/by-value/${type}?namespace=${NS_LIBRARY}`, key)
     .catch(() => null)
   const owns = !!(t && (t.id || t.template_id))
-  libTypeCache.set(type, owns)
+  if (owns) libTypeCache.add(type)
   return owns
 }
 async function resolveWriteNs(type: string, reqNs: string | undefined, key: string): Promise<string> {
@@ -694,7 +697,9 @@ router.get('/types', async (req, res) => {
       }),
     )
     const types = perNs.flat().sort((a: AnyObj, b: AnyObj) => String(a.type).localeCompare(String(b.type)))
-    res.json({ namespaces, total: types.length, types })
+    // `namespace` (the corpus/first) is kept for back-compat alongside `namespaces`
+    // (CASE-518 review #6) — a consumer reading the old top-level field still works.
+    res.json({ namespace: namespaces[0], namespaces, total: types.length, types })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
