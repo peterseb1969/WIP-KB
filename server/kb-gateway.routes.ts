@@ -26,6 +26,10 @@ const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\
 // Env-driven so a deployment / dev branch points at its own corpus namespace
 // (kb-libdev on lib-dev). The ?namespace= override still rides every handler.
 const NS_DEFAULT = process.env.WIP_NAMESPACE || 'kb'
+// The Library namespace (CASE-518). When set, a write whose TYPE is owned by the
+// Library namespace routes there — the gateway is the single receive surface for
+// both namespaces, agnostic to who produces the doc or how. Empty = single-namespace.
+const NS_LIBRARY = process.env.KB_LIBRARY_NAMESPACE || ''
 const ALLOC_MAX_RETRIES = 100
 const PATCH_MAX_RETRIES = 3
 
@@ -87,6 +91,29 @@ async function getTemplate(value: string, ns: string, key: string): Promise<AnyO
 async function templateId(value: string, ns: string, key: string): Promise<string> {
   const t = await getTemplate(value, ns, key)
   return t.id || t.template_id
+}
+
+// Type → home namespace (CASE-518). A doc type lives in exactly one configured
+// namespace; the gateway routes a write there so a producer just says "write a
+// LIBRARY_DOC" without knowing namespaces. Library-owned types (LIBRARY_DOC, …)
+// route to NS_LIBRARY authoritatively — a LIBRARY_DOC can only live there, so an
+// inbound ?namespace= pin (the kb-client always sends its configured one) must not
+// misroute it. Everything else keeps the corpus default + ?namespace= override.
+// Cached per type (a template's home doesn't move).
+const libTypeCache = new Map<string, boolean>()
+async function libraryOwnsType(type: string, key: string): Promise<boolean> {
+  if (!NS_LIBRARY) return false
+  const hit = libTypeCache.get(type)
+  if (hit !== undefined) return hit
+  const t = await wipReq('GET', `/api/template-store/templates/by-value/${type}?namespace=${NS_LIBRARY}`, key)
+    .catch(() => null)
+  const owns = !!(t && (t.id || t.template_id))
+  libTypeCache.set(type, owns)
+  return owns
+}
+async function resolveWriteNs(type: string, reqNs: string | undefined, key: string): Promise<string> {
+  if (await libraryOwnsType(type, key)) return NS_LIBRARY
+  return reqNs || NS_DEFAULT
 }
 
 // CASE-<n> Registry synonym -> document_id (the v2 resolution handle, CASE-425)
@@ -319,8 +346,16 @@ function callerKey(req: Request, res: Response): string | null {
 router.post('/write/:type', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
-  const ns = String(req.query.namespace || NS_DEFAULT)
   const type = req.params.type
+  // Route by the type's home namespace (CASE-518): Library-owned types → the
+  // Library namespace, everything else → corpus (with the ?namespace= override).
+  let ns: string
+  try {
+    ns = await resolveWriteNs(type, req.query.namespace ? String(req.query.namespace) : undefined, key)
+  } catch (e) {
+    const we = e as WipError
+    return res.status(we.status || 502).json({ error: we.message })
+  }
   const b: AnyObj = req.body || {}
 
   // --- patch mode: partial update of an existing doc, located by a match field ---
