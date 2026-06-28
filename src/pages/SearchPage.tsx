@@ -242,11 +242,9 @@ async function fetchEdgeTypeKeys(namespaces: string[]): Promise<Set<string>> {
 // spans both namespaces) regardless of source. One namespace erroring (e.g. no
 // FTS data yet) must not sink the whole search, so each fetch is caught.
 //
-// Namespace scoping rides the request BODY (CASE-541): reporting-sync's /search
-// reads `namespace` from the body, where it filters `d.namespace = $N`. The
-// `?namespace=` URL param was historically dropped silently; the backend fix to
-// honour it (query-wins) is rolling out, so we send it both ways with the same
-// value — body works today, query param works once live, and they agree.
+// `?namespace=` scopes the search to that namespace (filters `d.namespace = $N`),
+// so each fan-out call is genuinely scoped — without it the search runs global
+// across every namespace's reporting rows (CASE-541).
 async function fetchSearch(
   namespaces: string[],
   query: string,
@@ -256,7 +254,7 @@ async function fetchSearch(
     namespaces.map((ns) =>
       wipFetchJson<FtsResponse>(`/api/reporting-sync/search?namespace=${ns}`, {
         method: 'POST',
-        body: JSON.stringify({ query, mode, types: ['document'], page_size: 100, namespace: ns }),
+        body: JSON.stringify({ query, mode, types: ['document'], page_size: 100 }),
       }).catch(() => null),
     ),
   )
