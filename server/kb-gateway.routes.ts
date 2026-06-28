@@ -674,7 +674,8 @@ router.get('/types', async (req, res) => {
     const perNs = await Promise.all(
       namespaces.map(async (ns) => {
         const [d, policies] = await Promise.all([
-          wipReq('GET', `/api/template-store/templates?namespace=${ns}&page_size=100`, key),
+          // latest_only so a multi-version template (e.g. LIBRARY_DOC v1+v2) lists once.
+          wipReq('GET', `/api/template-store/templates?namespace=${ns}&latest_only=true&page_size=100`, key),
           loadPolicies(ns, key),
         ])
         return (d.items || [])
