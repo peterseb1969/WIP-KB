@@ -42,6 +42,18 @@ interface TemplateField {
   name: string
   label?: string
   type?: string
+  array_item_type?: string
+}
+
+/** A field whose value(s) are document references (kb_refs → corpus docs). */
+function isReferenceField(f: TemplateField): boolean {
+  return f.type === 'reference' || (f.type === 'array' && f.array_item_type === 'reference')
+}
+
+interface RefDocMeta {
+  title: string
+  template_value: string
+  namespace: string
 }
 
 /**
@@ -56,6 +68,46 @@ export default function DocPage() {
   const [flagOpen, setFlagOpen] = useState(false)
   const { data: doc, isLoading: docLoading, error: docError } = useDocument(id)
   const { data: template } = useTemplate(doc?.template_id ?? '')
+
+  // CASE-518: document-reference fields (e.g. LIBRARY_DOC.kb_refs → corpus docs)
+  // store an array of document_ids. Collect them across all reference fields and
+  // resolve each to a title/type for a readable link (the refs may live in another
+  // namespace — reads are by global UUID, so no namespace needed).
+  const refIds = useMemo(() => {
+    const fields = (template?.fields as TemplateField[] | undefined) ?? []
+    const data = (doc?.data ?? {}) as Record<string, unknown>
+    const ids = new Set<string>()
+    for (const f of fields) {
+      if (!isReferenceField(f)) continue
+      const v = data[f.name]
+      if (typeof v === 'string') ids.add(v)
+      else if (Array.isArray(v)) for (const x of v) if (typeof x === 'string') ids.add(x)
+    }
+    return Array.from(ids).sort()
+  }, [template, doc])
+
+  const { data: refDocs } = useQuery<Record<string, RefDocMeta>>({
+    queryKey: ['kb-refs', refIds],
+    queryFn: async () => {
+      const base = import.meta.env.BASE_URL
+      const out: Record<string, RefDocMeta> = {}
+      await Promise.all(
+        refIds.map(async (rid) => {
+          const res = await fetch(`${base}wip/api/document-store/documents/${rid}`)
+          if (!res.ok) return
+          const d = await res.json()
+          out[rid] = {
+            title: d.data?.title ?? rid,
+            template_value: d.template_value ?? '',
+            namespace: d.namespace ?? '',
+          }
+        }),
+      )
+      return out
+    },
+    enabled: refIds.length > 0,
+    staleTime: 30_000,
+  })
 
   // location.key === 'default' means the user landed directly on this URL
   // with no prior history (deep-link / refresh) — navigate(-1) would leave
@@ -351,7 +403,11 @@ export default function DocPage() {
               <Fragment key={f.name}>
                 <dt className="text-text-muted">{f.label || f.name}</dt>
                 <dd className="text-text">
-                  <FieldValue value={data[f.name]} />
+                  {isReferenceField(f) ? (
+                    <RefValue value={data[f.name]} refDocs={refDocs ?? {}} />
+                  ) : (
+                    <FieldValue value={data[f.name]} />
+                  )}
                 </dd>
               </Fragment>
             ))}
@@ -399,6 +455,43 @@ export default function DocPage() {
       )}
     </div>
     </>
+  )
+}
+
+// Renders document-reference values (a single id or an array) as links to the
+// referenced docs, labelled by title + template, with a namespace chip when the
+// ref points outside this doc's namespace (a Library → KB cross-namespace link).
+function RefValue({
+  value,
+  refDocs,
+}: {
+  value: unknown
+  refDocs: Record<string, RefDocMeta>
+}) {
+  const ids = Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === 'string')
+    : typeof value === 'string'
+      ? [value]
+      : []
+  if (ids.length === 0) return <span className="text-text-muted">—</span>
+  return (
+    <ul className="space-y-1">
+      {ids.map((rid) => {
+        const meta = refDocs[rid]
+        return (
+          <li key={rid} className="flex flex-wrap items-baseline gap-1.5">
+            <Link to={`/doc/${rid}`} className="underline-offset-2 hover:underline">
+              {meta?.title || <span className="font-mono text-xs">{rid}</span>}
+            </Link>
+            {meta?.template_value && (
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                {meta.template_value}
+              </span>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

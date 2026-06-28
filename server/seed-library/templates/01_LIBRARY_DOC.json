@@ -14,6 +14,7 @@
     { "name": "audience",           "label": "Audience",           "type": "string",  "full_text_indexed": true },
     { "name": "source_scope",       "label": "Source Scope",       "type": "array",   "array_item_type": "string" },
     { "name": "generated_from_rev", "label": "Generated From Rev", "type": "string" },
+    { "name": "kb_refs",            "label": "KB Refs",            "type": "array",   "array_item_type": "reference", "description": "Canonical-reading anchors / Library->KB links: document references into the corpus namespace. Unconstrained doc refs (no target_templates) so they are deployment-agnostic — the corpus template_ids are per-instance, and cross-namespace value resolution does not traverse allowed_external_refs (CASE-538 spike). Cross-namespace relationships are unsupported, but plain reference fields resolve cross-namespace given allowed_external_refs." },
     { "name": "do_not_edit",        "label": "Do Not Edit",        "type": "boolean", "default_value": true },
     { "name": "authored_by",        "label": "Authored By",        "type": "string" },
     { "name": "doc_status",         "label": "Doc Status",         "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "LIBRARY_STATUS", "default_value": "published" },
