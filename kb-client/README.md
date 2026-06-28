@@ -41,6 +41,14 @@ One generic write path; per-type behaviour is **data**, not code:
 - **Case flow:** file→`/write/CASE_RECORD`; respond→`/write/CASE_RESPONSE` +
   `RESPONDS_TO`; close→`--patch status=…`. The client enforces transition validity;
   the gateway is pure persistence.
+- **Library submissions (CASE-518):** the same generic surface also accepts
+  `LIBRARY_DOC` — the WIP Technical Library doc-type, in a **separate `library`
+  namespace**. `kb-write.py LIBRARY_DOC <file.md>` routes there automatically (the
+  gateway resolves a type's home namespace). Natural-upsert by `[slug, release]` —
+  `release` (`wip-v1`, …) is the product line, so v1/v2 libraries stay live in
+  parallel. `--list` shows it with its namespace. The library is agnostic to who
+  produces the doc or how; it owns only the receive format. See the Client page's
+  **Library submissions** section / `IMPORT_FORMATS.md` for the field contract.
 
 ## Versioning — two independent signals
 - **`schema_version`** — RETIRED as a write gate (CASE-464 Roll B: no write

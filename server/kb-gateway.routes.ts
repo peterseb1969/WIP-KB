@@ -664,26 +664,36 @@ router.get('/firesides/:id', async (req, res) => {
 router.get('/types', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
-  const ns = String(req.query.namespace || NS_DEFAULT)
+  // Span every configured namespace (CASE-518): a producer's --list must show
+  // Library types (LIBRARY_DOC) alongside corpus types; each type is tagged with
+  // its home namespace. An explicit ?namespace= still scopes to one.
+  const namespaces = req.query.namespace
+    ? [String(req.query.namespace)]
+    : [NS_DEFAULT, ...(NS_LIBRARY ? [NS_LIBRARY] : [])]
   try {
-    const [d, policies] = await Promise.all([
-      wipReq('GET', `/api/template-store/templates?namespace=${ns}&page_size=100`, key),
-      loadPolicies(ns, key),
-    ])
-    const types = (d.items || [])
-      .filter((t: AnyObj) => (t.usage || 'entity') !== 'relationship')
-      .map((t: AnyObj) => {
-        const cfg = policies.get(t.value)
-        return {
-          type: t.value,
-          label: t.label || t.value,
-          write_mode: cfg ? 'mint' : 'natural',
-          synonym_prefix: cfg?.prefix || null,
-          identity_fields: t.identity_fields || [],
-        }
-      })
-      .sort((a: AnyObj, b: AnyObj) => String(a.type).localeCompare(String(b.type)))
-    res.json({ namespace: ns, total: types.length, types })
+    const perNs = await Promise.all(
+      namespaces.map(async (ns) => {
+        const [d, policies] = await Promise.all([
+          wipReq('GET', `/api/template-store/templates?namespace=${ns}&page_size=100`, key),
+          loadPolicies(ns, key),
+        ])
+        return (d.items || [])
+          .filter((t: AnyObj) => (t.usage || 'entity') !== 'relationship')
+          .map((t: AnyObj) => {
+            const cfg = policies.get(t.value)
+            return {
+              type: t.value,
+              namespace: ns,
+              label: t.label || t.value,
+              write_mode: cfg ? 'mint' : 'natural',
+              synonym_prefix: cfg?.prefix || null,
+              identity_fields: t.identity_fields || [],
+            }
+          })
+      }),
+    )
+    const types = perNs.flat().sort((a: AnyObj, b: AnyObj) => String(a.type).localeCompare(String(b.type)))
+    res.json({ namespaces, total: types.length, types })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }

@@ -529,10 +529,11 @@ def cmd_list(fmt: str) -> int:
     if fmt == "json":
         sys.stdout.write(json.dumps(types, indent=2) + "\n")
         return 0
-    out = ["| Type | Write mode | Synonym | Identity fields |", "|---|---|---|---|"]
+    out = ["| Type | Namespace | Write mode | Synonym | Identity fields |", "|---|---|---|---|---|"]
     for t in types:
         out.append(
-            f"| {t.get('type')} | {t.get('write_mode')} | {t.get('synonym_prefix') or ''} | "
+            f"| {t.get('type')} | {t.get('namespace') or ''} | {t.get('write_mode')} | "
+            f"{t.get('synonym_prefix') or ''} | "
             f"{', '.join(t.get('identity_fields') or [])} |"
         )
     sys.stdout.write("\n".join(out) + "\n")

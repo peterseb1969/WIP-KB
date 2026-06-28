@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Copy, Check, Download, Terminal, RefreshCw, KeyRound, FileText } from 'lucide-react'
+import { Copy, Check, Download, Terminal, RefreshCw, KeyRound, FileText, Library } from 'lucide-react'
 
 // The app's own backend (not the WIP proxy): kb-client + gateway routes are
 // served at {BASE_URL}server-api/* and authed by the app session — no X-API-Key
@@ -40,6 +40,35 @@ const FILE_ROLES: Record<string, Role> = {
 // Order extras after the scripts; manifest.json last.
 const EXTRA_ORDER = ['kb-client.sh', 'install.sh', 'case-workflow.md', 'README.md', 'manifest.json']
 
+// The LIBRARY_DOC receive contract (CASE-518) — the fields a producer supplies to
+// submit a doc to the Technical Library. Identity in bold; the library is agnostic
+// to who/how a doc is produced, it owns only this format.
+const LIBRARY_FIELDS: Array<[string, string, string]> = [
+  ['slug', 'identity', 'manifest doc-slug, e.g. document-store-api'],
+  ['release', 'identity', 'product line term (wip-v1, wip-v2…) — keeps v1/v2 libraries parallel; NOT the doc version'],
+  ['category', 'required', 'concept | api | lib | cli'],
+  ['title', 'required', 'display title'],
+  ['body', 'required', 'the markdown after the frontmatter fence'],
+  ['doc_status', 'default published', 'draft | published | deprecated'],
+  ['audience', 'optional', 'target reader'],
+  ['source_scope', 'optional', 'array of code paths/sources (provenance)'],
+  ['generated_from_rev', 'optional', 'git sha at generation (provenance; carried, not acted on)'],
+  ['kb_refs', 'optional', 'array of corpus document_ids — Library→KB links'],
+]
+
+const LIBRARY_SAMPLE = `---
+slug: document-store-api
+release: wip-v1
+category: api
+title: Document Store API
+audience: integrators
+source_scope: [schemas/document-store.json, components/document-store/src]
+generated_from_rev: 69841f4f
+---
+
+# Document Store API
+… generated body …`
+
 const SERVING_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb-client/manifest', 'files[] + bundle_digest (derived at serve time)'],
   ['GET', 'kb-client/download', 'whole bundle as one-shot JSON { files: {name: content} }'],
@@ -51,8 +80,8 @@ const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb/cases/:n?view=both|case|responses[&response=latest|<seq>]', 'one case: body, response thread, or both (default both)'],
   ['GET', 'kb/sessions  ·  kb/journeys/:day', 'list sessions / a journey day'],
   ['GET', 'kb/firesides  ·  kb/firesides/:id', 'list firesides / one fireside body'],
-  ['GET', 'kb/types', 'doc-type manifest — write_mode per type (from WRITE_POLICY docs)'],
-  ['POST', 'kb/write/:type', 'THE write path — {data, edges[]} (create/mint/upsert) or {patch, match} (partial update)'],
+  ['GET', 'kb/types', 'doc-type manifest — write_mode + home namespace per type (spans corpus + library)'],
+  ['POST', 'kb/write/:type', 'THE write path — {data, edges[]} or {patch, match}. Routes to the type’s home namespace (LIBRARY_DOC → library)'],
 ]
 
 function Copyable({ text, label }: { text: string; label?: string }) {
@@ -247,6 +276,66 @@ export default function ClientPage() {
           gateway persists — mint or upsert per the type's <code className="font-mono text-xs">WRITE_POLICY</code>,
           link any edge-intents, or apply a <code className="font-mono text-xs">{'{patch, match}'}</code> field
           update. The playbook below is the authoritative how-to for filing and transitioning cases.
+        </p>
+      </Section>
+
+      <Section icon={Library} title="Library submissions">
+        <p className="mb-3 text-sm text-text-muted">
+          The <strong className="text-text">WIP Technical Library</strong> is a distinct doc-type
+          (<code className="font-mono text-xs">LIBRARY_DOC</code>) in its own{' '}
+          <code className="font-mono text-xs">library</code> namespace. A producer submits a doc
+          through the same write client — the gateway routes{' '}
+          <code className="font-mono text-xs">LIBRARY_DOC</code> to the Library namespace
+          automatically (no <code className="font-mono text-xs">--namespace</code> needed):
+        </p>
+        <Copyable
+          text={`bash ~/.cache/wip-kb-client/kb-client.sh kb-write.py LIBRARY_DOC document-store-api.md`}
+          label="Copy library submit command"
+        />
+        <p className="mb-2 mt-3 text-sm text-text-muted">
+          The library is <strong className="text-text">agnostic to who produces a doc or how</strong>{' '}
+          — generation is upstream. It owns only this <strong className="text-text">receive format</strong>:
+          markdown frontmatter → fields, body → <code className="font-mono text-xs">data.body</code>.
+          Identity is <code className="font-mono text-xs">[slug, release]</code> (natural-upsert:
+          re-submitting the same slug+release versions in place; a new{' '}
+          <code className="font-mono text-xs">release</code> is a new parallel doc).
+        </p>
+        <div className="overflow-x-auto rounded-md border border-gray-200">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-background text-text-muted">
+              <tr>
+                <th className="px-3 py-2 font-medium">Field</th>
+                <th className="px-3 py-2 font-medium">Required</th>
+                <th className="px-3 py-2 font-medium">Notes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {LIBRARY_FIELDS.map(([field, req, notes]) => (
+                <tr key={field}>
+                  <td className="whitespace-nowrap px-3 py-2 font-mono text-text">{field}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-text-muted">
+                    {req === 'identity' ? (
+                      <span className="rounded bg-primary/10 px-1.5 py-0.5 font-semibold text-primary">
+                        identity
+                      </span>
+                    ) : (
+                      req
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-text-muted">{notes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mb-2 mt-3 text-sm text-text-muted">Example submission file:</p>
+        <Copyable text={LIBRARY_SAMPLE} label="Copy LIBRARY_DOC sample" />
+        <p className="mt-3 text-sm text-text-muted">
+          <code className="font-mono text-xs">kb-write.py --list</code> shows{' '}
+          <code className="font-mono text-xs">LIBRARY_DOC</code> with its namespace.{' '}
+          <code className="font-mono text-xs">generated_from_rev</code> /{' '}
+          <code className="font-mono text-xs">source_scope</code> are provenance the library carries
+          but never acts on — fix the source and regenerate, never hand-edit.
         </p>
       </Section>
 
