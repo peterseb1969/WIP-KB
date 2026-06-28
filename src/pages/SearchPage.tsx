@@ -6,12 +6,11 @@ import { wipFetchJson } from '../lib/wipBulk'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
-import { CORPUS_NS } from '../lib/namespaces'
-
-const NAMESPACE = CORPUS_NS
+import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 
 interface DocItem {
   document_id: string
+  namespace: string
   template_value: string
   data: {
     title?: string
@@ -52,6 +51,9 @@ interface DocItem {
 // and surfaces here with zero code change. Falls back to raw data.app on docs
 // that have no term_ref (pre-(A) data / unset app).
 const EMPTY_APP_TERMS = new Map<string, string>()
+// Stable empty edge-key set so the filterableDocs memo dep doesn't churn before
+// the edge-type query resolves.
+const EMPTY_EDGE_KEYS = new Set<string>()
 
 async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
   try {
@@ -187,7 +189,7 @@ function compareCaseNumber(a: DocItem, b: DocItem, dir: 'asc' | 'desc'): number 
 
 const PAGE_SIZE = 25
 
-async function fetchAllDocs(namespace: string): Promise<DocItem[]> {
+async function fetchNamespaceDocs(namespace: string): Promise<DocItem[]> {
   // Fetch page 1 to learn the page count, then fetch the rest CONCURRENTLY
   // (CASE-501): the old serial loop paid per-request RTT N times — the dominant
   // cost on kb.internal (Pi). Wall-clock is now ~2×RTT instead of N×RTT.
@@ -199,18 +201,73 @@ async function fetchAllDocs(namespace: string): Promise<DocItem[]> {
     `/api/document-store/documents?namespace=${namespace}&page_size=${pageSize}&latest_only=true&page=${page}`
   const first = await wipFetchJson<ListResponse>(url(1))
   const pages = first.pages || 1
-  if (pages <= 1) return first.items
-  const rest = await Promise.all(
-    Array.from({ length: pages - 1 }, (_, i) => wipFetchJson<ListResponse>(url(i + 2))),
-  )
-  return [...first.items, ...rest.flatMap((r) => r.items)]
+  const items =
+    pages <= 1
+      ? first.items
+      : [
+          ...first.items,
+          ...(
+            await Promise.all(
+              Array.from({ length: pages - 1 }, (_, i) =>
+                wipFetchJson<ListResponse>(url(i + 2)),
+              ),
+            )
+          ).flatMap((r) => r.items),
+        ]
+  return items.map((d) => ({ ...d, namespace }))
 }
 
-async function fetchSearch(namespace: string, query: string, mode: string): Promise<FtsResponse> {
-  return wipFetchJson<FtsResponse>(`/api/reporting-sync/search?namespace=${namespace}`, {
-    method: 'POST',
-    body: JSON.stringify({ query, mode, types: ['document'], page_size: 100 }),
-  })
+// Unified browse set across all configured namespaces (corpus + library).
+async function fetchAllDocs(namespaces: string[]): Promise<DocItem[]> {
+  const perNs = await Promise.all(namespaces.map(fetchNamespaceDocs))
+  return perNs.flat()
+}
+
+// Edge-type templates keyed `${namespace}:${value}` — edge-type sets differ per
+// namespace, and a relationship doc is filtered out of the candidate set by this key.
+async function fetchEdgeTypeKeys(namespaces: string[]): Promise<Set<string>> {
+  const perNs = await Promise.all(
+    namespaces.map(async (ns) => {
+      const r = await wipFetchJson<TemplateListResponse>(
+        `/api/template-store/templates?namespace=${ns}&latest_only=true&page_size=100`,
+      )
+      return r.items.filter((t) => t.usage === 'relationship').map((t) => `${ns}:${t.value}`)
+    }),
+  )
+  return new Set(perNs.flat())
+}
+
+// Unified FTS: fan out to each namespace's reporting-sync search and merge the
+// per-type buckets. Hits carry global-UUID ids, so they join docsById (which
+// spans both namespaces) regardless of source. One namespace erroring (e.g. no
+// FTS data yet) must not sink the whole search, so each fetch is caught.
+async function fetchSearch(
+  namespaces: string[],
+  query: string,
+  mode: string,
+): Promise<FtsResponse> {
+  const perNs = await Promise.all(
+    namespaces.map((ns) =>
+      wipFetchJson<FtsResponse>(`/api/reporting-sync/search?namespace=${ns}`, {
+        method: 'POST',
+        body: JSON.stringify({ query, mode, types: ['document'], page_size: 100 }),
+      }).catch(() => null),
+    ),
+  )
+  const results: Record<string, FtsTypeBucket> = {}
+  for (const r of perNs) {
+    if (!r) continue
+    for (const [type, bucket] of Object.entries(r.results ?? {})) {
+      const existing = results[type]
+      if (existing) {
+        existing.items.push(...bucket.items)
+        existing.total += bucket.total
+      } else {
+        results[type] = { ...bucket, items: [...bucket.items] }
+      }
+    }
+  }
+  return { query, mode, results }
 }
 
 function csvSet(s: string | null): Set<string> {
@@ -247,33 +304,32 @@ export default function SearchPage() {
   const [draft, setDraft] = useState(query)
   useEffect(() => setDraft(query), [query])
 
+  const nsKey = NAMESPACES.join(',')
   const allDocsQ = useQuery<DocItem[]>({
-    queryKey: ['kb-docs-all', NAMESPACE],
-    queryFn: () => fetchAllDocs(NAMESPACE),
+    queryKey: ['kb-docs-all', nsKey],
+    queryFn: () => fetchAllDocs(NAMESPACES),
     staleTime: 30_000,
   })
 
-  const templatesQ = useQuery<TemplateListResponse>({
-    queryKey: ['templates', NAMESPACE],
-    queryFn: () =>
-      wipFetchJson<TemplateListResponse>(
-        `/api/template-store/templates?namespace=${NAMESPACE}&latest_only=true&page_size=100`,
-      ),
+  const edgeKeysQ = useQuery<Set<string>>({
+    queryKey: ['edge-type-keys', nsKey],
+    queryFn: () => fetchEdgeTypeKeys(NAMESPACES),
     staleTime: 5 * 60_000,
   })
 
   const searchQ = useQuery<FtsResponse>({
-    queryKey: ['fts-search', NAMESPACE, query, mode],
-    queryFn: () => fetchSearch(NAMESPACE, query, mode),
+    queryKey: ['fts-search', nsKey, query, mode],
+    queryFn: () => fetchSearch(NAMESPACES, query, mode),
     enabled: query.trim().length > 0,
     staleTime: 30_000,
   })
 
   // CASE-422: resolve a doc's canonical app from its term_reference (term_id →
   // KB_APP value), falling back to the raw data.app when there is no term_ref.
+  // KB_APP lives in the corpus namespace only, so this stays corpus-scoped.
   const appTermsQ = useQuery<Map<string, string>>({
-    queryKey: ['kb-app-terms', NAMESPACE],
-    queryFn: () => fetchAppTerms(NAMESPACE),
+    queryKey: ['kb-app-terms', CORPUS_NS],
+    queryFn: () => fetchAppTerms(CORPUS_NS),
     staleTime: 5 * 60_000,
   })
   const appTermMap = appTermsQ.data ?? EMPTY_APP_TERMS
@@ -286,15 +342,7 @@ export default function SearchPage() {
     [appTermMap],
   )
 
-  const edgeTypes = useMemo(
-    () =>
-      new Set(
-        (templatesQ.data?.items ?? [])
-          .filter((t) => t.usage === 'relationship')
-          .map((t) => t.value),
-      ),
-    [templatesQ.data],
-  )
+  const edgeKeys = edgeKeysQ.data ?? EMPTY_EDGE_KEYS
 
   const docsById = useMemo(() => {
     const m = new Map<string, DocItem>()
@@ -305,9 +353,11 @@ export default function SearchPage() {
   const filterableDocs = useMemo(
     () =>
       (allDocsQ.data ?? []).filter(
-        (d) => !edgeTypes.has(d.template_value) && d.template_value !== 'BOOTSTRAP_RECORD',
+        (d) =>
+          !edgeKeys.has(`${d.namespace}:${d.template_value}`) &&
+          d.template_value !== 'BOOTSTRAP_RECORD',
       ),
-    [allDocsQ.data, edgeTypes],
+    [allDocsQ.data, edgeKeys],
   )
 
   const allTemplates = useMemo(
@@ -408,13 +458,13 @@ export default function SearchPage() {
         seen.add(h.id)
         const doc = docsById.get(h.id)
         if (!doc) continue
-        if (edgeTypes.has(doc.template_value) || doc.template_value === 'BOOTSTRAP_RECORD') continue
+        if (edgeKeys.has(`${doc.namespace}:${doc.template_value}`) || doc.template_value === 'BOOTSTRAP_RECORD') continue
         result.push({ doc, score: h.score, snippet: h.snippet })
       }
       return result
     }
     return filterableDocs.map((d) => ({ doc: d, score: null, snippet: null }))
-  }, [query, searchQ.data, docsById, edgeTypes, filterableDocs])
+  }, [query, searchQ.data, docsById, edgeKeys, filterableDocs])
 
   const filtered = useMemo(
     () =>
@@ -542,8 +592,8 @@ export default function SearchPage() {
   const activeFilterCount =
     tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size + pFilter.size
   const isLoading =
-    allDocsQ.isLoading || templatesQ.isLoading || (query.trim() && searchQ.isLoading)
-  const error = allDocsQ.error ?? templatesQ.error ?? searchQ.error
+    allDocsQ.isLoading || edgeKeysQ.isLoading || (query.trim() && searchQ.isLoading)
+  const error = allDocsQ.error ?? edgeKeysQ.error ?? searchQ.error
 
   return (
     <div className="flex gap-6">
