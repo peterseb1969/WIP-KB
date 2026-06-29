@@ -29,7 +29,7 @@ const NS_DEFAULT = process.env.WIP_NAMESPACE || 'kb'
 // The Library namespace (CASE-518). When set, a write whose TYPE is owned by the
 // Library namespace routes there — the gateway is the single receive surface for
 // both namespaces, agnostic to who produces the doc or how. Empty = single-namespace.
-const NS_LIBRARY = process.env.KB_LIBRARY_NAMESPACE || ''
+const NS_LIBRARY = process.env.KB_LIBRARY_NAMESPACE || 'library'
 const ALLOC_MAX_RETRIES = 100
 const PATCH_MAX_RETRIES = 3
 

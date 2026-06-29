@@ -25,7 +25,7 @@ const env = () => ({
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
   CLAUDE_MODEL: process.env.CLAUDE_MODEL || 'claude-haiku-4-5',
   WIP_NAMESPACE: process.env.WIP_NAMESPACE || '',
-  KB_LIBRARY_NAMESPACE: process.env.KB_LIBRARY_NAMESPACE || '',
+  KB_LIBRARY_NAMESPACE: process.env.KB_LIBRARY_NAMESPACE || 'library',
   WIP_API_KEY: process.env.WIP_API_KEY || '',
   MAX_TURNS: parseInt(process.env.MAX_TURNS || '15'),
   SESSION_TTL_MS: parseInt(process.env.SESSION_TTL_MINUTES || '30') * 60_000,

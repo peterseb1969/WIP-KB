@@ -15,11 +15,15 @@
 /** The KB-corpus namespace (cases, decisions, lessons, sessions, memory, …). */
 export const CORPUS_NS: string = import.meta.env.VITE_KB_NAMESPACE || 'kb'
 
-/** The Technical Library namespace. Empty string = library disabled (single-ns). */
-export const LIBRARY_NS: string = import.meta.env.VITE_LIBRARY_NAMESPACE || ''
+/**
+ * The Technical Library namespace. Defaults to `library` — the KB is two-namespace
+ * by default (CASE-518 cutover). A deployment overrides via VITE_LIBRARY_NAMESPACE;
+ * if the namespace doesn't exist yet, BootstrapGate offers to bootstrap it.
+ */
+export const LIBRARY_NS: string = import.meta.env.VITE_LIBRARY_NAMESPACE || 'library'
 
 /**
- * Every namespace the unified UI aggregates over, corpus first. When LIBRARY_NS
- * is unset this is just [CORPUS_NS] and the app behaves single-namespace.
+ * Every namespace the unified UI aggregates over, corpus first. Two-namespace by
+ * default; if LIBRARY_NS were ever explicitly empty this collapses to [CORPUS_NS].
  */
 export const NAMESPACES: string[] = [CORPUS_NS, ...(LIBRARY_NS ? [LIBRARY_NS] : [])]

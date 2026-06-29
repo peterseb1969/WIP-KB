@@ -53,9 +53,9 @@ interface NamespacePlan {
  *
  * - Corpus namespace = KB_BOOTSTRAP_NAMESPACE (test-harness override) ||
  *   WIP_NAMESPACE || 'kb'. Production is 'kb' (BootstrapGate offer-on-empty).
- * - Library namespace = KB_LIBRARY_NAMESPACE (empty / unset = single-namespace,
- *   no library). Suppressed when KB_BOOTSTRAP_NAMESPACE is set, so the test
- *   harness (tools/bootstrap-ns.ts) bootstraps exactly one throwaway namespace.
+ * - Library namespace = KB_LIBRARY_NAMESPACE || 'library' — two-namespace by
+ *   default (CASE-518 cutover). Suppressed when KB_BOOTSTRAP_NAMESPACE is set, so
+ *   the test harness (tools/bootstrap-ns.ts) bootstraps exactly one throwaway namespace.
  *
  * The library's allowed_external_refs is resolved to the ACTUAL corpus namespace
  * name — the seed's namespace.json carries the dev value (kb-libdev), but a
@@ -64,8 +64,8 @@ interface NamespacePlan {
 function buildPlans(): NamespacePlan[] {
   const corpus = process.env.KB_BOOTSTRAP_NAMESPACE || process.env.WIP_NAMESPACE || 'kb'
   const libraryNs = process.env.KB_BOOTSTRAP_NAMESPACE
-    ? ''
-    : process.env.KB_LIBRARY_NAMESPACE || ''
+    ? '' // single-namespace test harness (tools/bootstrap-ns.ts)
+    : process.env.KB_LIBRARY_NAMESPACE || 'library' // two-namespace by default (CASE-518)
 
   const plans: NamespacePlan[] = [
     {

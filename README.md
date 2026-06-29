@@ -55,8 +55,8 @@ npm run dev          # client (Vite, :5173) + server (Express) concurrently
 | `WIP_BASE_URL` | WIP API base (the proxy target). From `wip-deploy`'s router component. |
 | `WIP_API_KEY` | API key the proxy injects on WIP calls. From the `api-key` secret. |
 | `WIP_NAMESPACE` | KB-corpus namespace, server side (default `kb`). Gateway + bootstrap target. |
-| `VITE_KB_NAMESPACE` / `VITE_LIBRARY_NAMESPACE` | Client (bundle) namespaces (CASE-518): the KB corpus and the Technical Library. Build args / `.env`; keep in sync with `WIP_NAMESPACE` / `KB_LIBRARY_NAMESPACE`. Empty `VITE_LIBRARY_NAMESPACE` = single-namespace. |
-| `KB_LIBRARY_NAMESPACE` | Server-side Library namespace, **bootstrap only** (CASE-518): when set, BootstrapGate seeds it from `server/seed-library/` (with `allowed_external_refs` → the corpus namespace). Empty/unset = single-namespace bootstrap. Match it to `VITE_LIBRARY_NAMESPACE`. |
+| `VITE_KB_NAMESPACE` / `VITE_LIBRARY_NAMESPACE` | Client (bundle) namespaces (CASE-518): the KB corpus (default `kb`) and the Technical Library (default `library`). **Two-namespace by default** — overrides only; keep `VITE_KB_NAMESPACE` == `WIP_NAMESPACE` (review #1). |
+| `KB_LIBRARY_NAMESPACE` | Server-side Library namespace (CASE-518), default `library`. Drives BootstrapGate (seeds it from `server/seed-library/`, `allowed_external_refs` → the corpus) + gateway routing + askBar. Match it to `VITE_LIBRARY_NAMESPACE`. |
 | `PORT` | Express port (prod: `3012`). |
 | `APP_BASE_PATH` | Mount path (`/apps/kb`). Drives the router base + cookie path. |
 | `NODE_ENV` | `production` enables static `dist/` serving + SPA fallback. |
