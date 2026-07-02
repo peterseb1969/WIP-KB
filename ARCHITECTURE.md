@@ -23,16 +23,29 @@ WIP (MongoDB docs · Postgres reporting/FTS · Registry identity · NATS · MinI
 
 **The app is stateless.** All state lives in WIP. There is no client-side index, no
 per-user prefs cache, no local DB, no `localStorage` beyond the auth session. Backup
-of the app == backup of the `kb` namespace + the container image. Indexing is the
-data layer's job (Postgres `tsvector` via reporting-sync).
+of the app == backup of the `kb` + `library` namespaces + the container image.
+Indexing is the data layer's job (Postgres `tsvector` via reporting-sync).
+
+## Two namespaces (CASE-518)
+
+The app spans two WIP namespaces: the **`kb` corpus** (cases, decisions, lessons,
+sessions, memory, …) and **`library`** (the WIP Technical Library — generated-from-code
+`LIBRARY_DOC`s). Central config is `src/lib/namespaces.ts` (`CORPUS_NS`, `LIBRARY_NS`,
+`NAMESPACES = [corpus, …library]`); it is **two-namespace by default** (defaults
+`kb` + `library`) and collapses to single-namespace when `LIBRARY_NS` is unset. The
+unified UI **fans out** reads over `NAMESPACES` and merges (Home/Search); each doc
+carries its `namespace`, so edge-type filtering keys on `${namespace}:${template}`.
+The gateway routes a write to its type's home namespace (a `LIBRARY_DOC` → `library`).
+Cross-namespace **relationships** are unsupported; Library→corpus links are plain
+**reference fields** (`LIBRARY_DOC.kb_refs`, resolved via `allowed_external_refs → kb`).
 
 ## Pages & routes (`src/App.tsx`, `src/pages/`)
 
 | Route | Component | Notes |
 |---|---|---|
-| `/` | `HomePage` | Fetches all docs (paged, concurrently — CASE-501), groups by `template_value`, newest group first. `HIDDEN_TYPES` excludes structural/config types and `CASE_RESPONSE` (CASE-533). |
-| `/search` | `SearchPage` | Faceted search. Query → `POST /api/reporting-sync/search` (`mode: auto\|fts\|substring`). Facets (type/status/author/kind/severity/app) are URL params; counts are computed client-side from the candidate set. `CASE_RESPONSE` is default-off but selectable (CASE-533). |
-| `/doc/:id` | `DocPage` | One document. Renders body (markdown), structured fields, the `RelationshipGraph`, the inline `CaseThread` (CASE_RESPONSE replies — CASE-506/511), `FlagModal` (flag-for-YAC), and `PrepareButtons`. |
+| `/` | `HomePage` | Fetches all docs across `NAMESPACES` (paged, concurrently — CASE-501), groups by `template_value`, newest group first. `HIDDEN_TYPES` + per-namespace edge-type keys exclude structural/config/relationship types and `CASE_RESPONSE` (CASE-533). |
+| `/search` | `SearchPage` | Faceted search, fanned out per namespace → `POST /api/reporting-sync/search?namespace=` (scoped, CASE-541) and merged. Facets (type/status/author/kind/severity/app/**release**) are URL params; counts computed client-side. **Author** buckets are normalized to YAC roles (`docAuthors`, CASE-563); **Release** auto-hides when no `LIBRARY_DOC` is in scope. `CASE_RESPONSE` default-off but selectable (CASE-533). |
+| `/doc/:id` | `DocPage` | One document. Renders body (markdown), structured fields (document-reference fields like `kb_refs` resolve to linked titles via `RefValue`), the `RelationshipGraph`, inline `CaseThread` (CASE-506/511), `PrepareButtons`, and `FlagModal` — **flag-for-YAC is corpus-only** (`canFlag = doc.namespace === CORPUS_NS`; cross-namespace `FLAGGED_FROM` unsupported). |
 | `/client` | `ClientPage` | Renders the served kb-client manifest + per-file roles — in-app docs for the CLI. |
 | `/settings` | `SettingsPage` | Admin-gated runtime config via `/server-api/config/*`. |
 
@@ -62,15 +75,17 @@ OIDC session → anonymous. Admin endpoints (Settings config) gate on `ADMIN_GRO
 
 ## Bootstrap (`BootstrapGate.tsx`, `server/lib/bootstrap.ts`)
 
-Offer-on-empty / use-on-exists. On launch the gate checks whether the `kb`
-namespace exists. **Missing →** show an explicit bootstrap offer (never
-auto-bootstrap). **Exists →** use as-is, no schema reconciliation (rolling
-redeploys come up clean). On user-initiated bootstrap, the seed is created in
-filename order (terminologies → terms → templates → WRITE_POLICY docs) and one
-`BOOTSTRAP_RECORD` provenance doc is written. **Consequence:** because there's no
-reconcile, a *new* doc-type added to the seed does not land on an already-bootstrapped
-namespace via redeploy — it must be created against that namespace deliberately
-(how YAC_MEMORY reached canonical in the CHANGELOG).
+Offer-on-empty / use-on-exists, now **two-namespace** (`buildPlans()` →
+`seedNamespace()` per plan). On launch the gate checks that **every** configured
+namespace (`kb` + `library`) exists. **Any missing →** show an explicit bootstrap
+offer (never auto-bootstrap). Each namespace is seeded in filename order
+(terminologies → terms → templates → WRITE_POLICY docs); the library is created with
+`allowed_external_refs → kb`; one `BOOTSTRAP_RECORD` provenance doc is written to the
+corpus. `runBootstrap` **skips any namespace that already exists** (per-namespace
+use-on-exists), so bootstrapping `library` onto an existing `kb` leaves the corpus
+untouched. **Consequence:** with no reconcile, a *new* doc-type added to a seed does
+not land on an already-bootstrapped namespace via redeploy — it must be created
+against that namespace deliberately (how YAC_MEMORY reached canonical in the CHANGELOG).
 
 ## The served kb-client (`kb-client/`, `kb-client.routes.ts`)
 
@@ -107,6 +122,7 @@ documents the gateway reads, not code. `ClientPage` renders this for operators.
 
 ## Inline documentation
 
-Exported components/hooks carry JSDoc; non-obvious logic (concurrent paging,
-frontmatter normalization, mint high-water-mark, base-path resolution) carries
-WHY-comments. Keep that up as you edit.
+Exported components/hooks carry JSDoc (incl. `namespaces.ts`'s `CORPUS_NS`/`LIBRARY_NS`/
+`NAMESPACES`); non-obvious logic (concurrent paging, namespace fan-out, author-role
+normalization, frontmatter list parsing, mint high-water-mark, base-path resolution)
+carries WHY-comments. Keep that up as you edit.

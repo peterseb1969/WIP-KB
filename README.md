@@ -18,12 +18,18 @@ The distinctive v1 feature is **flag-for-YAC**: any doc can be turned into a pro
 for cross-agent work (a `FLAG_RECORD` linked to the source doc). The KB is an
 actor, not a passive archive.
 
+As of CASE-518 the app spans **two namespaces**: the **`kb` corpus** (the docs above)
+and **`library`** — the WIP Technical Library of generated-from-code docs
+(`LIBRARY_DOC`, organized by release line). The unified UI browses/searches both;
+see **WIP_DEPENDENCIES.md** for the Library schema and **IMPORT_FORMATS.md** for its
+receive contract.
+
 ## What you see
 
 | Route | Page | Shows |
 |---|---|---|
 | `/` | **HomePage** | Start page — docs grouped by type, newest first, with per-group search/sort. Structural/config types and `CASE_RESPONSE` are hidden. |
-| `/search` | **SearchPage** | Faceted full-text + substring search across the corpus (type / status / author / kind / severity / app facets). |
+| `/search` | **SearchPage** | Faceted full-text + substring search across both namespaces (type / status / author / kind / severity / app / release facets; author buckets normalized to YAC roles). |
 | `/doc/:id` | **DocPage** | A single document: rendered body, structured fields, relationship graph, inline case-response thread, flag-for-YAC, and three "prepare a prompt" clipboard buttons. |
 | `/client` | **ClientPage** | In-app documentation of the served kb-client (the CLI YACs install to read/write the KB). |
 | `/settings` | **SettingsPage** | Admin-gated runtime config (e.g. the Anthropic API key for the askBar). |
@@ -74,11 +80,13 @@ Docker build args (baked into the static bundle).
 
 ## WIP prerequisites
 
-The app **bootstraps its own namespace** on first launch (offer-on-empty, see
-`BootstrapGate`). The data model lives in `server/seed/` — 8 terminologies, 14
-entity/config templates, 12 edge types. See **WIP_DEPENDENCIES.md** for the full
-inventory and **DESIGN.md** for the data-model rationale. Never bootstrap the `kb`
-namespace from a dev workflow — that's BootstrapGate's job at runtime.
+The app **bootstraps its own namespaces** on first launch (offer-on-empty, see
+`BootstrapGate`). The corpus model lives in `server/seed/` (8 terminologies, 14
+entity/config templates, 12 edge types) and the Technical Library in
+`server/seed-library/` (3 terminologies, `LIBRARY_DOC`, `SEE_ALSO`). See
+**WIP_DEPENDENCIES.md** for the full inventory and **DESIGN.md** for the data-model
+rationale. Never bootstrap the `kb` namespace from a dev workflow — that's
+BootstrapGate's job at runtime.
 
 ## Tech stack
 

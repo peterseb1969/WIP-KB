@@ -1,17 +1,25 @@
 # WIP_DEPENDENCIES — WIP-KB
 
-The contract between APP-KB and WIP. All entities live in the **`kb`** namespace and
-are created by `BootstrapGate` from `server/seed/`. The data-model *rationale* is in
-**DESIGN.md**; this file is the inventory the next session (or `/add-app`) needs.
+The contract between APP-KB and WIP. As of CASE-518 the app spans **two namespaces**:
+the **`kb`** corpus (cases, decisions, lessons, sessions, memory, …) and **`library`**
+(the WIP Technical Library — generated-from-code docs). Both are created by
+`BootstrapGate` — the corpus from `server/seed/`, the library from `server/seed-library/`.
+The data-model *rationale* is in **DESIGN.md**; this file is the inventory the next
+session (or `/add-app`) needs.
 
-- **Seed location:** `server/seed/terminologies/*.json`, `server/seed/templates/*.json`
-  (filename-prefixed for create order), `server/seed/write-policies.json`.
-- **Namespace:** `kb` (production) / `dev-kb` (iteration sandbox). The privileged
-  admin key is cross-namespace — always pass `namespace` explicitly on MCP calls.
-- **Ownership:** APP-KB owns the `kb` schema. All entities here are created by this
-  app; none are reused from other apps, and no template references another app's
-  templates (the KB is a self-contained corpus). Shared/platform terminologies are
-  not used today.
+- **Seed location:** corpus — `server/seed/{terminologies,templates}/*.json` +
+  `server/seed/write-policies.json`; library — `server/seed-library/` (+ its own
+  `namespace.json` declaring `isolation_mode: open`, `allowed_external_refs → kb`).
+- **Namespaces:** `kb` + `library` (production) / `kb-libdev` + `library` (dev sandbox).
+  Configured by `WIP_NAMESPACE` + `KB_LIBRARY_NAMESPACE` (server) and
+  `VITE_KB_NAMESPACE` + `VITE_LIBRARY_NAMESPACE` (client) — two-namespace by default.
+  The privileged admin key is cross-namespace — always pass `namespace` explicitly on
+  MCP calls.
+- **Ownership:** APP-KB owns both schemas. No template reuses another app's templates;
+  the only cross-namespace link is **Library → corpus** via `LIBRARY_DOC.kb_refs`
+  (a reference field, resolved through `library`'s `allowed_external_refs → kb` —
+  cross-namespace *relationships* are unsupported, CASE-538). Shared/platform
+  terminologies are not used today.
 
 ## Terminologies (8)
 
@@ -67,6 +75,32 @@ Identity fields drive upsert (same identity → new version; different → new d
 **Edge endpoint caveat:** an edge type's `source_templates`/`target_templates` are
 append-only — widen via `add_edge_type_endpoints` (`POST /templates/{id}/endpoints`,
 CASE-515), never delete+recreate (strands existing edges).
+
+> The 8 terminologies, 14 templates, and 12 edge types above are the **`kb` corpus**.
+
+## Technical Library namespace (`library`, CASE-518)
+
+Seeded from `server/seed-library/`. Self-contained so it exports/imports as a unit.
+
+**Terminologies (3, all mutable):**
+
+| Value | Used for |
+|---|---|
+| `LIBRARY_RELEASE` | Product release line a doc documents (`wip-v1`, `wip-v2`) — **in `LIBRARY_DOC` identity**, so v1/v2 libraries stay parallel. **Alias-free** (identity hashes the raw value; an alias would orphan-duplicate). |
+| `LIBRARY_CATEGORY` | Template family / generation kind: `concept` / `api` / `lib` / `cli`. Non-identity facet. |
+| `LIBRARY_STATUS` | Lifecycle: `draft` / `published` (default) / `deprecated`. Library-local (not the corpus `KB_DOC_STATUS`). |
+
+**Templates (1 entity + 1 edge):**
+
+| Template | Identity | Write mode | What it is | FTS fields |
+|---|---|---|---|---|
+| `LIBRARY_DOC` | `slug` + `release` | natural | A generated-from-code doc; body from markdown, `release`/`category`/`doc_status` are term refs. `generated_from_rev` + `source_scope` are **provenance, never identity**. `kb_refs` = cross-namespace reference field → corpus docs. `do_not_edit` marks generated output. | title, body, audience |
+| `SEE_ALSO` | `source_ref` + `target_ref` | — (`versioned: false`) | Library-internal `LIBRARY_DOC` ↔ `LIBRARY_DOC` "see also" edge. |
+
+**Receive contract:** `kb-write.py LIBRARY_DOC <file.md>` — the gateway routes
+`LIBRARY_DOC` writes to `library` automatically (no `--namespace`). Field mapping in
+**IMPORT_FORMATS.md**. The Library is agnostic to how docs are produced; it owns only
+the receive format (generation is FR-YAC-owned, upstream).
 
 ## Reporting / FTS
 

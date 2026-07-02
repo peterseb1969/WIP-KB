@@ -3,6 +3,46 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-07-02 — Author facet cleanup + frontmatter list parsing
+
+- **Fixed:** the `/search` **Author facet** listed ~79 entries. `rootAuthor` stripped
+  only a 4-digit `-HHMM` session suffix, not the 6-digit `-HHMMSS` IDs minted by
+  `/wip-setup`+`/wip-wake`, and ignored quoted / composite / mixed-case values.
+  Replaced with a multi-value `docAuthors` (`SearchPage.tsx`) that splits composites,
+  strips quotes / parentheticals / the `-YYYYMMDD[-HHMM(SS)]` suffix / `app:` prefix,
+  canonicalises casing (`FRANC`→`FRanC`), and keeps only role-shaped tokens. A doc now
+  buckets under **each** of its authors. Display-only — no `authored_by` data rewritten.
+  Facet collapses 77 → 12 clean roles. (CASE-563, `d498fa1`)
+- **Fixed:** `kb-write.py`'s `parse_frontmatter` silently dropped **multi-line YAML
+  lists** (a bare `key:` + `- item` lines) — only single-line `[a, b]` worked — which
+  nulled array fields like `LIBRARY_DOC.source_scope`/`tags` while the write reported
+  success. Extended the flat parser with a pending-list state machine (zero new deps);
+  added an offline regression test (`kb-client/test_parse_frontmatter.py`). (CASE-565,
+  `4c2e693`)
+
+## 2026-06-29 — Two-namespace Technical Library (CASE-518)
+
+- **Added:** a second namespace, **`library`** (the WIP Technical Library —
+  generated-from-code docs), alongside the `kb` corpus. New `LIBRARY_DOC` template
+  (identity `[slug, release]` — `release` keeps v1/v2 libraries parallel; provenance
+  fields excluded from identity), `SEE_ALSO` edge, and `LIBRARY_RELEASE` /
+  `LIBRARY_CATEGORY` / `LIBRARY_STATUS` terminologies. Seed in `server/seed-library/`.
+- **Changed:** the app is now **two-namespace by default** (activated by the merge, no
+  deploy-env change — `2295dbe`). Central config `src/lib/namespaces.ts`
+  (`CORPUS_NS`/`LIBRARY_NS`/`NAMESPACES`); Home/Search/Doc pages span both namespaces;
+  a **Release** search facet; the bootstrap seeds both namespaces and skips any that
+  already exist (per-namespace use-on-exists); the gateway routes `LIBRARY_DOC` writes
+  to `library`; the askBar is namespace-aware.
+- **Added:** `kb_refs` — Library→KB links as cross-namespace **reference fields**
+  (cross-namespace *relationships* are unsupported → CASE-538); resolved/rendered in
+  `DocPage`. Flag-for-YAC stays corpus-only.
+- **Fixed (platform, via BE-YAC):** reporting-sync `/search` now honours `?namespace=`
+  so per-namespace search scopes correctly (CASE-541); multi-namespace backup+restore
+  (CASE-542, the cut-over enabler).
+- **Known issues (open):** `kb_refs` array-references aren't existence-validated —
+  soft links (CASE-550); corpus namespace is dual-sourced (`WIP_NAMESPACE` vs
+  `VITE_KB_NAMESPACE`) and must agree (CASE-551). Neither blocks; both tracked.
+
 ## 2026-06-28 — Documentation baseline + search clutter trim
 
 - **Added:** the standard documentation set (README, ARCHITECTURE, WIP_DEPENDENCIES,

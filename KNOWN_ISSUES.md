@@ -5,6 +5,32 @@ re-investigate solved problems, "fix" intentional choices, or miss real gaps.
 
 ## Open / deferred
 
+### `kb_refs` cross-namespace references are not existence-validated
+**Status:** known (BE-YAC) · **Severity:** low
+A field with `array_item_type: reference` (e.g. `LIBRARY_DOC.kb_refs` → corpus docs)
+does **not** validate that the referenced document exists — a bogus id validates
+`valid:true` with an empty `references[]`, unlike a single `reference` field. Used
+deliberately as an unvalidated **soft link** (ids persist; `DocPage` resolves/links
+them, showing the raw id if missing). The open call — BE fix (validate array-item refs)
+vs accept soft links — is tracked in **CASE-550**. Not a blocker.
+
+### Corpus namespace is dual-sourced (server vs client)
+**Status:** known · **Severity:** medium (deploy-time)
+The corpus namespace is configured by **two** vars that must agree: server
+`WIP_NAMESPACE` and client `VITE_KB_NAMESPACE` (baked at build). If they drift,
+`DocPage`'s `canFlag = doc.namespace === CORPUS_NS` silently hides flag-for-YAC and
+writes misroute — no error. Mitigated by matching committed defaults (both `kb`) and a
+deploy-time check; the structural fix (client fetches the namespace from the server at
+runtime) is an ecosystem/scaffold pattern tracked in **CASE-551**. Not a blocker.
+
+### `authored_by` is free-form at write time
+**Status:** deferred · **Severity:** low
+Writers put free-form/composite text into `authored_by` (`"BE-YAC / Peter"`,
+`"Peter, APP-KB"`, quotes, day annotations), so the Author facet needs display-side
+normalization (`docAuthors`, CASE-563). The display fix keeps the facet clean, but the
+root cause — write-time discipline so `authored_by` carries a clean session role — is a
+separate, larger item, not yet filed.
+
 ### YAC_MEMORY deletes don't propagate (v1 limitation)
 **Status:** deferred · **Severity:** low
 The session-end fold-in upserts each `memory/*.md`, so adds/edits flow to kb. A
