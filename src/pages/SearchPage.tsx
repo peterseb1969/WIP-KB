@@ -279,12 +279,48 @@ function csvSet(s: string | null): Set<string> {
   return new Set((s ?? '').split(',').filter(Boolean))
 }
 
-// Author IDs carry a session suffix: "-YYYYMMDD-HHMM" (most YACs) or just
-// "-YYYYMMDD" (FRanC); some entries are bare ("FRanC"). Strip whichever form
-// is present so all sessions land in one facet bucket per YAC root.
-function rootAuthor(s: string | undefined | null): string {
-  if (!s) return ''
-  return s.replace(/-\d{8}(?:-\d{2,4})?$/, '')
+// Author attribution is free-form: clean session IDs ("APP-KB-20260628-014726"),
+// composites ("BE-YAC-… / Peter", "Peter, APP-KB-…"), quoted, mixed-case ("FRANC"),
+// or noise ("Day 30", a "CASE-36" ref). Explode each value into its constituent
+// YAC roles so a doc lands in a facet bucket for EACH of its authors (CASE-518
+// follow-up — Peter's call): split on / and ,, then per token strip surrounding
+// quotes, a trailing parenthetical, the -YYYYMMDD[-HHMM(SS)] session suffix (4- OR
+// 6-digit time — the 6-digit HHMMSS form minted by /wip-setup+/wip-wake was the bug
+// that leaked ~79 raw authors), and an "app:" prefix; canonicalise casing; keep only
+// tokens that look like a role.
+function canonRole(t: string): string {
+  const l = t.toLowerCase()
+  if (l === 'franc') return 'FRanC'
+  if (l === 'peter') return 'Peter'
+  if (l === 'unknown') return 'unknown'
+  if (/^user\d+$/.test(l)) return l.toUpperCase()
+  return t.toUpperCase() // APP-KB, BE-YAC, DOC-YAC, …
+}
+function isRole(t: string): boolean {
+  return (
+    t === 'Peter' ||
+    t === 'FRanC' ||
+    t === 'unknown' ||
+    /^USER\d+$/.test(t) ||
+    /^[A-Z]{2,}(?:-[A-Z]{2,})*$/.test(t) // APP-KB, BE-YAC, DOC-YAC (all-caps, letters only)
+  )
+}
+function docAuthors(s: string | undefined | null): string[] {
+  if (!s) return []
+  const roles = s
+    .split(/[/,]/)
+    .map((t) =>
+      t
+        .trim()
+        .replace(/^["']+|["']+$/g, '')
+        .replace(/\s*\(.*\)\s*$/, '')
+        .replace(/-\d{8}(?:-\d{2,6})?$/, '')
+        .replace(/^app:/i, '')
+        .trim(),
+    )
+    .map(canonRole)
+    .filter(isRole)
+  return Array.from(new Set(roles))
 }
 
 /**
@@ -432,11 +468,7 @@ export default function SearchPage() {
   const allAuthors = useMemo(
     () =>
       Array.from(
-        new Set(
-          filterableDocs
-            .map((d) => rootAuthor(d.data.authored_by))
-            .filter((s) => s.length > 0),
-        ),
+        new Set(filterableDocs.flatMap((d) => docAuthors(d.data.authored_by))),
       ).sort(),
     [filterableDocs],
   )
@@ -494,7 +526,8 @@ export default function SearchPage() {
         if (doc.template_value === 'CASE_RESPONSE' && !tFilter.has('CASE_RESPONSE')) return false
         if (tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
         if (sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
-        if (aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false
+        if (aFilter.size > 0 && !docAuthors(doc.data.authored_by).some((r) => aFilter.has(r)))
+          return false
         if (kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
         if (vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
         if (pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
@@ -518,26 +551,35 @@ export default function SearchPage() {
         return false
       if (skip !== 't' && tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
       if (skip !== 's' && sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
-      if (skip !== 'a' && aFilter.size > 0 && !aFilter.has(rootAuthor(doc.data.authored_by))) return false
+      if (
+        skip !== 'a' &&
+        aFilter.size > 0 &&
+        !docAuthors(doc.data.authored_by).some((r) => aFilter.has(r))
+      )
+        return false
       if (skip !== 'k' && kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
       if (skip !== 'v' && vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
       if (skip !== 'p' && pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
       if (skip !== 'r' && rFilter.size > 0 && !rFilter.has(doc.data.release ?? '')) return false
       return true
     }
-    function bucket(skip: FacetKey, get: (d: DocItem) => string | undefined): Map<string, number> {
+    function bucket(
+      skip: FacetKey,
+      get: (d: DocItem) => string | string[] | undefined,
+    ): Map<string, number> {
       const m = new Map<string, number>()
       for (const h of hits) {
         if (!passes(h.doc, skip)) continue
         const v = get(h.doc)
-        if (typeof v === 'string' && v.length > 0) m.set(v, (m.get(v) ?? 0) + 1)
+        const vals = Array.isArray(v) ? v : typeof v === 'string' ? [v] : []
+        for (const x of vals) if (x.length > 0) m.set(x, (m.get(x) ?? 0) + 1)
       }
       return m
     }
     return {
       t: bucket('t', (d) => d.template_value),
       s: bucket('s', (d) => workflowStatus(d)),
-      a: bucket('a', (d) => rootAuthor(d.data.authored_by) || undefined),
+      a: bucket('a', (d) => docAuthors(d.data.authored_by)),
       k: bucket('k', (d) => d.data.kind),
       v: bucket('v', (d) => d.data.severity),
       p: bucket('p', (d) => appOf(d)),
