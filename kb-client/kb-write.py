@@ -61,19 +61,48 @@ def _coerce(v: str) -> object:
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
     """Split a markdown doc into (frontmatter dict, body). Frontmatter is the
-    block between a leading '---' fence and the next '---'. Simple `key: value`
-    lines only (the doc types are flat); body is everything after the fence."""
+    block between a leading '---' fence and the next '---'. Supports flat
+    `key: value` scalars, single-line lists (`tags: [a, b]`), and multi-line
+    YAML lists — a bare `key:` followed by indented `- item` lines (CASE-565);
+    body is everything after the fence. Nested / list-of-object shapes stay out
+    of scope (the doc types are flat)."""
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}, text
     fm: dict[str, object] = {}
+    # A bare `key:` opens a pending list: subsequent `- item` lines accumulate
+    # into it, and the next `key:` / fence flushes it. An empty pending list (no
+    # items followed) finalizes to None — the pre-CASE-565 behaviour for a bare
+    # key, so genuinely-empty scalars are unchanged.
+    pending_key = None
+    pending_list: list = []
+
+    def flush() -> None:
+        nonlocal pending_key, pending_list
+        if pending_key is not None:
+            fm[pending_key] = pending_list if pending_list else None
+            pending_key, pending_list = None, []
+
     i = 1
     while i < len(lines) and lines[i].strip() != "---":
-        line = lines[i]
-        if line.strip() and not line.lstrip().startswith("#") and ":" in line:
-            k, _, v = line.partition(":")
-            fm[k.strip()] = _coerce(v)
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+        if stripped.startswith("- ") or stripped == "-":
+            if pending_key is not None:  # continuation item under the bare `key:`
+                pending_list.append(_coerce(stripped[1:].strip()))
+            i += 1
+            continue
+        if ":" in lines[i]:
+            flush()  # a new key ends any open multi-line list
+            k, _, v = lines[i].partition(":")
+            if v.strip() == "":
+                pending_key = k.strip()  # maybe a multi-line list — decided at flush
+            else:
+                fm[k.strip()] = _coerce(v)
         i += 1
+    flush()
     body = "\n".join(lines[i + 1:]).lstrip("\n") if i < len(lines) else ""
     return fm, body
 
