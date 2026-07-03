@@ -3,6 +3,15 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-07-03 — Sidebar quick "jump to case"
+
+- **Added:** a case-number quick-jump box in the sidebar under **Start** (`CaseJump`).
+  Digits-only input; after a 700ms pause it previews `CASE-<n> · <title>` (full title
+  in a hover tooltip, ~100 chars), and **Enter** jumps straight to the case's DocPage.
+  A global **`c`** shortcut focuses it from anywhere (`c544⏎` jumps) — guarded so it
+  never steals keystrokes in an input/textarea/askBar or clobbers Ctrl/⌘-C. Resolves
+  through the `/wip` proxy (Registry `CASE-<n>` synonym → doc-id + title); read-only.
+
 ## 2026-07-02 — Author facet cleanup + frontmatter list parsing
 
 - **Fixed:** the `/search` **Author facet** listed ~79 entries. `rootAuthor` stripped
