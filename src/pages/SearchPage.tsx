@@ -322,6 +322,13 @@ function docAuthors(s: string | undefined | null): string[] {
     .filter(isRole)
   return Array.from(new Set(roles))
 }
+// YAC_MEMORY records carry their author in `owner` (the YAC role that accrued the
+// memory — already facet-clean), not `authored_by`. No other template defines an
+// `owner` field, so this fallback fires only for memories and never mis-attributes
+// another type. Without it, memory docs land in no author bucket (CASE-603).
+function authorSource(d: DocItem): string | undefined {
+  return d.data.authored_by ?? (typeof d.data.owner === 'string' ? d.data.owner : undefined)
+}
 
 /**
  * `/search` route — faceted search over the corpus. Posts the query to
@@ -468,7 +475,7 @@ export default function SearchPage() {
   const allAuthors = useMemo(
     () =>
       Array.from(
-        new Set(filterableDocs.flatMap((d) => docAuthors(d.data.authored_by))),
+        new Set(filterableDocs.flatMap((d) => docAuthors(authorSource(d)))),
       ).sort(),
     [filterableDocs],
   )
@@ -526,7 +533,7 @@ export default function SearchPage() {
         if (doc.template_value === 'CASE_RESPONSE' && !tFilter.has('CASE_RESPONSE')) return false
         if (tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
         if (sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
-        if (aFilter.size > 0 && !docAuthors(doc.data.authored_by).some((r) => aFilter.has(r)))
+        if (aFilter.size > 0 && !docAuthors(authorSource(doc)).some((r) => aFilter.has(r)))
           return false
         if (kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
         if (vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
@@ -554,7 +561,7 @@ export default function SearchPage() {
       if (
         skip !== 'a' &&
         aFilter.size > 0 &&
-        !docAuthors(doc.data.authored_by).some((r) => aFilter.has(r))
+        !docAuthors(authorSource(doc)).some((r) => aFilter.has(r))
       )
         return false
       if (skip !== 'k' && kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
@@ -579,7 +586,7 @@ export default function SearchPage() {
     return {
       t: bucket('t', (d) => d.template_value),
       s: bucket('s', (d) => workflowStatus(d)),
-      a: bucket('a', (d) => docAuthors(d.data.authored_by)),
+      a: bucket('a', (d) => docAuthors(authorSource(d))),
       k: bucket('k', (d) => d.data.kind),
       v: bucket('v', (d) => d.data.severity),
       p: bucket('p', (d) => appOf(d)),
