@@ -1,13 +1,24 @@
-name: Build & Push Image (x86)
+name: Build & Push Image
 
-# Manually triggered: Actions tab -> Run workflow. Builds the production
-# image and pushes it to GHCR as ghcr.io/<owner>/wip-kb:<tag>. Empty tag
-# input falls back to sha-<short>. VITE_BASE_PATH must match the platform
-# manifest's APP_BASE_PATH (apps/wip-kb/wip-app.yaml in World-in-a-Pie).
+# Manually triggered: Actions tab -> "Build & Push Image" -> Run workflow.
+# Builds the production image and pushes it to GHCR as
+# ghcr.io/<owner>/wip-kb:<tag>.
 #
-# Platforms: default native amd64. Set the platforms input to e.g.
-# "linux/amd64,linux/arm64" for a multi-arch manifest via buildx + QEMU
-# (emulated arm64 npm ci/build is slow).
+# Architecture (the WIP dual-arch pattern — mirrors World-in-a-Pie's
+# .github/workflows/build.yaml): one NATIVE job per arch (amd64 on
+# ubuntu-latest, arm64 on GitHub's native arm runner ubuntu-24.04-arm — free
+# for public repos), each pushing <tag>-<arch>, then a stitch job welds the two
+# into one multi-arch index under the bare <tag> via
+# `docker buildx imagetools create` (manifest-only, no rebuild, no layer
+# transfer). No QEMU anywhere (the old single-job emulated arm64 npm ci was slow
+# and SIGILL-prone). Stitch runs only if BOTH arch builds succeed, so a bare
+# <tag> is never a half-index and both halves are built from the same commit.
+#
+# VITE_BASE_PATH must match the platform manifest's APP_BASE_PATH
+# (apps/wip-kb/wip-app.yaml in World-in-a-Pie). Tag convention: version tags
+# (e.g. 1.0.0, 20260703a) are write-once — bump, never re-push. Empty tag input
+# falls back to sha-<short>. The per-arch tags (<tag>-amd64, <tag>-arm64) stay
+# in the registry as provenance; deploys pin the bare <tag>.
 
 on:
   workflow_dispatch:
@@ -16,20 +27,14 @@ on:
         description: 'Image tag (e.g. 1.0.0). Leave empty for sha-<short-commit>.'
         required: false
         default: ''
-      platforms:
-        description: 'Comma-separated platforms. Default native amd64; e.g. linux/amd64,linux/arm64 for multi-arch (QEMU, slow).'
-        required: false
-        default: 'linux/amd64'
 
 jobs:
-  build-and-push:
+  resolve-tag:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Resolve image tag
         id: tag
         run: |
@@ -38,34 +43,58 @@ jobs:
             TAG="sha-$(git rev-parse --short HEAD)"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Building with tag: $TAG"
+          echo "Building with tag: $TAG (arch images: $TAG-amd64, $TAG-arm64)"
 
-      - name: Set up QEMU (multi-arch only)
-        if: inputs.platforms != 'linux/amd64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          # Pin a newer QEMU binfmt: the GitHub runner image update (2025-09-19
-          # Node-20 deprecation rollout) swapped in a binfmt that mis-emulates
-          # the node:20-alpine arm64 Node binary -> SIGILL ("illegal instruction"
-          # core-dump) during `npm ci`. qemu-v9.2.2 has the arm64 instruction
-          # coverage the default lacks. If this still SIGILLs, move the arm64 leg
-          # to a native ubuntu-24.04-arm runner (no emulation) instead.
-          image: tonistiigi/binfmt:qemu-v9.2.2
+  build:
+    needs: resolve-tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
+      - name: Build and push (${{ matrix.arch }}, native)
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-      - name: Build and push
-        run: |
-          docker buildx build \
-            --platform "${{ inputs.platforms }}" \
+          IMAGE="ghcr.io/${{ github.repository_owner }}/wip-kb"
+          ARCH_TAG="${{ needs.resolve-tag.outputs.tag }}-${{ matrix.arch }}"
+          docker build \
             --build-arg VITE_BASE_PATH=/apps/kb/ \
             --build-arg VITE_BUILD_STAMP="$(date -u +%FT%TZ)" \
             --build-arg VITE_BUILD_SHA="$(git rev-parse --short HEAD)" \
-            -t "ghcr.io/${{ github.repository_owner }}/wip-kb:${{ steps.tag.outputs.tag }}" \
-            --push .
+            -t "$IMAGE:$ARCH_TAG" .
+          docker push "$IMAGE:$ARCH_TAG"
+
+  stitch:
+    # Runs only if BOTH arch builds succeeded — a bare <tag> is never a
+    # half-index, and both halves come from this run's single commit.
+    needs: [resolve-tag, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Stitch per-arch images into the multi-arch tag
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          IMAGE="ghcr.io/${{ github.repository_owner }}/wip-kb"
+          TAG="${{ needs.resolve-tag.outputs.tag }}"
+          # imagetools create is manifest-only (no rebuild, no layer transfer);
+          # never pull+tag+push to retag — that flattens the index to one arch.
+          docker buildx imagetools create \
+            -t "$IMAGE:$TAG" \
+            "$IMAGE:$TAG-amd64" \
+            "$IMAGE:$TAG-arm64"
+          docker buildx imagetools inspect "$IMAGE:$TAG" | head -20
+          echo "Done: $TAG is a multi-arch index (amd64+arm64) for wip-kb."
