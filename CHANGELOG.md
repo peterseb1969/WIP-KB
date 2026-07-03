@@ -3,6 +3,16 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-07-03 — `/types` discovers Library types for any caller
+
+- **Fixed:** `kb-write.py --list` (`GET /types`) omitted `LIBRARY_DOC`/`library` for a
+  namespace-scoped caller. `/types` enumerated templates with the *caller's* key, so a
+  `kb`-scoped key (which can't LIST the `library` namespace) silently dropped its types.
+  Now `/types` enumerates with the gateway's own key (`WIP_API_KEY`, cross-namespace —
+  the same key the proxy browses `library` with); `callerKey` stays the auth gate.
+  Verified on localhost with a real `kb`-scoped key: it 404s on `library` directly, yet
+  `/types` returns all 15 types incl `LIBRARY_DOC`. (CASE-573)
+
 ## 2026-07-03 — Sidebar quick "jump to case"
 
 - **Added:** a case-number quick-jump box in the sidebar under **Start** (`CaseJump`).

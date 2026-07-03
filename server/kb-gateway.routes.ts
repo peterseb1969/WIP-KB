@@ -30,6 +30,12 @@ const NS_DEFAULT = process.env.WIP_NAMESPACE || 'kb'
 // Library namespace routes there — the gateway is the single receive surface for
 // both namespaces, agnostic to who produces the doc or how. Empty = single-namespace.
 const NS_LIBRARY = process.env.KB_LIBRARY_NAMESPACE || 'library'
+// Type discovery is metadata, not data: `/types` enumerates with the gateway's own
+// key (the cross-namespace key the proxy uses to browse both namespaces) so a
+// namespace-SCOPED caller still sees every writable type — including Library types
+// whose namespace their own key can't LIST (CASE-573). Empty in dev without
+// WIP_API_KEY → the handler falls back to the caller's key (original behaviour).
+const GATEWAY_KEY = process.env.WIP_API_KEY || ''
 const ALLOC_MAX_RETRIES = 100
 const PATCH_MAX_RETRIES = 3
 
@@ -667,6 +673,9 @@ router.get('/firesides/:id', async (req, res) => {
 router.get('/types', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
+  // Enumerate with the gateway key so a namespace-scoped caller still discovers
+  // Library types their own key can't LIST (CASE-573); callerKey stays the auth gate.
+  const enumKey = GATEWAY_KEY || key
   // Span every configured namespace (CASE-518): a producer's --list must show
   // Library types (LIBRARY_DOC) alongside corpus types; each type is tagged with
   // its home namespace. An explicit ?namespace= still scopes to one.
@@ -678,8 +687,8 @@ router.get('/types', async (req, res) => {
       namespaces.map(async (ns) => {
         const [d, policies] = await Promise.all([
           // latest_only so a multi-version template (e.g. LIBRARY_DOC v1+v2) lists once.
-          wipReq('GET', `/api/template-store/templates?namespace=${ns}&latest_only=true&page_size=100`, key),
-          loadPolicies(ns, key),
+          wipReq('GET', `/api/template-store/templates?namespace=${ns}&latest_only=true&page_size=100`, enumKey),
+          loadPolicies(ns, enumKey),
         ])
         return (d.items || [])
           .filter((t: AnyObj) => (t.usage || 'entity') !== 'relationship')
