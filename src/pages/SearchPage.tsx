@@ -6,6 +6,7 @@ import { wipFetchJson } from '../lib/wipBulk'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
+import { CaseStats } from '../components/CaseStats'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 
 interface DocItem {
@@ -809,6 +810,8 @@ export default function SearchPage() {
             Search
           </button>
         </form>
+
+        <CaseStats docs={filterableDocs} className="mb-4" />
 
         {/* Active filter chips */}
         {activeFilterCount > 0 && (

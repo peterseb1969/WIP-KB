@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { wipFetchJson } from '../lib/wipBulk'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
+import { CaseStats } from '../components/CaseStats'
 import { NAMESPACES } from '../lib/namespaces'
 
 // Structural / config doc types — not KB content, hidden from the start page.
@@ -410,10 +411,13 @@ export default function HomePage() {
 
   return (
     <div>
-      <p className="mb-6 text-sm text-text-muted">
-        {items.length} doc{items.length === 1 ? '' : 's'} across {groups.length} type
-        {groups.length === 1 ? '' : 's'}.
-      </p>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-text-muted">
+          {items.length} doc{items.length === 1 ? '' : 's'} across {groups.length} type
+          {groups.length === 1 ? '' : 's'}.
+        </p>
+        <CaseStats docs={allItems} />
+      </div>
 
       <div className="space-y-3">
         {groups.map((g) => (
