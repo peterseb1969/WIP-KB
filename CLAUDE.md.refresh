@@ -64,7 +64,7 @@ curl -k -X POST https://localhost:8443/api/registry/api-keys \
 
 ## The wip-deployable app contract
 
-**Read this before scaffolding any app code:** `FR-YAC/papers/wip-deployable-app-contract.md`. Four-line summary:
+**Read this before scaffolding any app code:** `docs/wip-deployable-app-contract.md` (bundled into this project by the scaffold). Four-line summary:
 
 1. **Source repo** needs `Dockerfile.dev` + correct `vite.config.ts` (`server.host: '0.0.0.0'`, dev proxy targets *your* Express port, not 3001). Client fetches use `import.meta.env.BASE_URL`, never bare paths.
 2. **WIP repo `apps/<name>/wip-app.yaml`** declares both http and dev ports, `WIP_BASE_URL` via `from_component: router`, `APP_BASE_PATH` literal, and a healthcheck that doesn't depend on WIP being reachable.
@@ -127,6 +127,7 @@ Read each template's header comment, fill in the TODO markers (namespace, app ti
 ## Reference Documentation
 
 Read these before starting:
+- `docs/Vision.md` — WIP's theses and design principles; the drift-correction mechanism when work bends toward a use case at the expense of the generic engine. Read first.
 - `docs/AI-Assisted-Development.md` — 4-phase process, data model design guide, PoNIFs quick reference
 - `docs/WIP_PoNIFs.md` — Full guide to WIP's 8 non-intuitive behaviours
 - `docs/WIP_DevGuardrails.md` — UI stack, app skeleton, testing conventions
@@ -134,6 +135,7 @@ Read these before starting:
 - `docs/technology-stack.md` — **Canonical** v1 stack (React 19 + TS + Vite + TanStack Query + Tailwind 3 + Inter); required @wip/* libraries; forbidden choices. Read before any architecture call.
 - `docs/ui-guidance.md` — **Canonical** v1 visual anchor: brand palette tokens (primary/accent/success/danger), typography hierarchy (text-2xl page titles, NOT text-3xl), component shapes (cards, modals, tinted callouts), accessibility floor. `tailwind.config.js` ships pre-extended with these tokens — use the named classes (`bg-primary`, `text-text-muted`), not inline hex.
 - `docs/ontology-support.md` — Term relations, polyhierarchy, typed relations, traversal queries
+- `docs/wip-deployable-app-contract.md` — what your app must satisfy to ship under `wip-deploy install` (Dockerfile.dev, vite.config, `apps/<name>/wip-app.yaml` ports, WIP-independent healthcheck). Read before scaffolding.
 - `templates/bootstrap/*.template` — Bootstrap pattern starting points (see "Namespace Bootstrap on Launch" above)
 
 ## Key Identity Concepts

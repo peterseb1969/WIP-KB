@@ -2,13 +2,17 @@
 
 The operator-facing guide for installing, securing, and running World In a Pie. If you are deploying WIP, configuring auth or networking, packaging an app to run alongside it, or hardening a production install — this is your one stop.
 
-> **Audience.** You have a target host with Podman (or Kubernetes) installed and want WIP up and useful. You are comfortable with the shell, podman/docker, and editing config files. You do not need to read the codebase to follow this guide. Host-prep advice (Pi SSD setup, macOS Podman machine sizing, cloud VM specs) lives in the project [README's Hardware section](../README.md#hardware).
+> **Audience.** You have a target host with Podman (or Kubernetes) installed and want WIP up and useful. You are comfortable with the shell, podman/docker, and editing config files. You do not need to read the codebase to follow this guide. Host-prep advice (Pi SSD setup, macOS Podman machine sizing, cloud VM specs) lives in the [single-host quickstart's Host prep appendix](deploy/podman/README.md#appendix-host-prep-pi-ssd-podman-sizing).
 
 For the *why* — design philosophy, theses, use cases — see [Vision](Vision.md) and the FAQ section in the [README](../README.md). For the data model and APIs, see [api-conventions.md](api-conventions.md), [data-models.md](data-models.md), and the MCP `wip://` resources.
 
 ---
 
 ## 1. Quick Start
+
+> **Prefer a guided, validated walkthrough?** Pick your target:
+> **[single-host — podman + GHCR images](deploy/podman/README.md)** · **[hot-reload dev — local source](deploy/dev/README.md)** · **[Kubernetes](deploy/k8s/README.md)**.
+> Building an app on WIP → **[APP-YAC setup tutorial](app-yac-tutorial.md)**. The commands below are the condensed operator reference underneath those guides.
 
 ### Install (compose)
 
