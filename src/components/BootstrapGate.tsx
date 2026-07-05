@@ -20,14 +20,13 @@
  *     `import.meta.env.BASE_URL` so they resolve correctly both in
  *     local dev (`/server-api/...`) and behind an ingress prefix
  *     (`/apps/kb/server-api/...`).
- *   - NAMESPACE_LABEL = 'kb', APP_TITLE = 'KB'.
+ *   - namespace label reads the runtime-loaded CORPUS_NS (CASE-551); APP_TITLE = 'KB'.
  */
 
 import { useState, useEffect, useCallback } from 'react'
 import { Database, AlertTriangle, RefreshCw, Loader2, ServerCrash } from 'lucide-react'
 import { CORPUS_NS } from '../lib/namespaces'
 
-const NAMESPACE_LABEL = CORPUS_NS
 const APP_TITLE = 'KB'
 
 // Vite BASE_URL always ends in `/`. In dev it's `/`; in prod (behind
@@ -155,7 +154,7 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
               <div>
                 <p className="font-medium text-amber-800">Namespace not found</p>
                 <p className="mt-1 text-sm text-amber-600">
-                  The <code className="rounded bg-amber-100 px-1">{NAMESPACE_LABEL}</code> namespace
+                  The <code className="rounded bg-amber-100 px-1">{CORPUS_NS}</code> namespace
                   does not exist. You can bootstrap it now, or restore from a backup first
                   (via the WIP console / <code className="rounded bg-amber-100 px-1">wip-deploy</code>).
                 </p>

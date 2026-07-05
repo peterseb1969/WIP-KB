@@ -31,10 +31,6 @@ interface BulkResponse {
   results: BulkItemResult[]
 }
 
-// FLAG_RECORD lives in the KB-corpus namespace. Flagging a Library doc across
-// namespaces is a separate concern (cross-namespace FLAGGED_FROM edges are
-// unsupported — CASE-538); handled when unified flagging lands.
-const NAMESPACE = CORPUS_NS
 const TARGET_YAC_TERMINOLOGY = 'KB_TARGET_YAC'
 
 /**
@@ -43,6 +39,12 @@ const TARGET_YAC_TERMINOLOGY = 'KB_TARGET_YAC'
  * @param sourceDocId/sourceDocTitle - the doc being flagged. @param onClose - dismiss callback.
  */
 export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
+  // FLAG_RECORD lives in the KB-corpus namespace. Read CORPUS_NS here (at render),
+  // not as a module-level const — it's a runtime-loaded value now (CASE-551), so a
+  // top-level capture would freeze the pre-fetch default. Flagging a Library doc
+  // across namespaces is a separate concern (cross-namespace FLAGGED_FROM edges
+  // unsupported — CASE-538); handled when unified flagging lands.
+  const NAMESPACE = CORPUS_NS
   const qc = useQueryClient()
   const [targetYac, setTargetYac] = useState('')
   const [reason, setReason] = useState('')

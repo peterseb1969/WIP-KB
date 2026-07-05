@@ -88,6 +88,20 @@ router.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'wip-kb' })
 })
 
+// App config (CASE-551) — the single runtime source for per-deployment config the
+// client needs. The client fetches this at boot instead of baking VITE_* vars, so
+// server and client can't drift (a mismatch used to silently hide the Flag button).
+// Allowlist by construction: an explicit object, never a process.env dump — the
+// same process holds WIP_API_KEY. no-store so a redeploy's new namespace is picked
+// up on reload, not served stale from a cache.
+router.get('/api/app-config', (_req, res) => {
+  res.set('Cache-Control', 'no-store')
+  res.json({
+    namespace: process.env.WIP_NAMESPACE || 'kb',
+    library_namespace: process.env.KB_LIBRARY_NAMESPACE || 'library',
+  })
+})
+
 // Ask endpoint
 router.post('/api/ask', async (req, res) => {
   const { question, sessionId } = req.body
