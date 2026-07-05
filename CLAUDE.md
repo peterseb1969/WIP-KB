@@ -181,6 +181,34 @@ Two gotchas:
 
 ---
 
+## WIP Toolkit
+
+`wip-toolkit` is a CLI for backup, export, import, and data migration. Install from the wheel in `libs/`:
+
+```bash
+pip install libs/wip_toolkit-*.whl
+```
+
+Key commands:
+- `wip-toolkit export <namespace> <output.zip>` — Export namespace to archive
+- `wip-toolkit import <archive.zip> --mode fresh` — Import with new IDs (cross-namespace)
+- `wip-toolkit import <archive.zip> --mode restore` — Restore with original IDs (disaster recovery)
+
+Remote WIP instances:
+```bash
+wip-toolkit --host kb.internal --proxy export kb /tmp/kb-backup.zip
+```
+
+---
+
+## Tool use — Bash timeouts and waits
+
+- **Never set Bash `timeout > 60000` ms.** Use `run_in_background: true` for any command that may exceed 60 s. Use `Monitor` for streaming output, or wait for the auto-completion notification when the background task finishes. A user-scoped PreToolUse hook (`~/.claude/hooks/block-long-bash-timeout.sh`) mechanically rejects calls with `timeout > 60000` — the discipline rule still applies even if the hook is disabled or absent. *Origin: this rule once lived only in feedback memory and still failed to prevent recurrence twice in 90 minutes within one session — hence the mechanical hook.*
+- **Verify-before-wait.** Before scheduling any wait on a long-running command, verify the prerequisites that command depends on can succeed. For npm/test runs that hit a backend cluster: check the host-bound port (e.g., `nc -z localhost 8443`) before kicking the wait off. The class of failure is *waiting on an action that depends on unverified state* — the wait then can't complete and burns wall time on a hang. *Origin: an agent once waited 10 minutes for tests that couldn't finish because the deployer no longer exposed the relevant port.*
+- **Bash hygiene — don't prefix commands with `cd`.** Your commands already run from the project root, so a `cd` prefix is unnecessary *and* trips approval prompts: `cd "${CLAUDE_PROJECT_DIR:-$PWD}" && …` forces an *expansion* prompt (shell expansion can't be statically verified against the allowlist), and `cd dir && … > file` forces a *path-bypass* prompt (the redirect could land outside an allowlisted path). Both are avoidable — use explicit / relative-to-root paths for reading **and** writing. Keeps inspection and file writes prompt-free *and* safer.
+
+---
+
 ## Process
 
 Standard 4-phase development:
