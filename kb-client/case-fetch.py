@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-case-fetch.py — read-side commands for the KB client (cases, journeys, list, firesides).
+case-fetch.py — read-side commands for the KB client (cases, journeys, list, firesides, library).
 
 Every read goes through the KB **gateway** API (`{BASE_PATH}/server-api/kb/…`) via
 kb_client_core — the app-specific layer that owns projection, namespace discipline,
@@ -8,7 +8,7 @@ and identity. Clients never reach past it into the document-store backend (CASE-
 the "straight to MongoDB" anti-pattern). Transport, target config, and local→remote
 failover all live in the core; this file is thin command handlers + output shaping.
 
-(The filename is historical — it now serves journeys, list, and firesides too.)
+(The filename is historical — it now serves journeys, list, firesides, and library too.)
 
 Exit codes:
     0 = success (body / table printed to stdout)
@@ -22,6 +22,8 @@ Usage:
                        [--component …] [--app …] [--limit N] [--format table|json]
     case-fetch.py fireside list [--topic …] [--author …] [--limit N] [--format …]
     case-fetch.py fireside <document_id>
+    case-fetch.py library list [--release …] [--category …] [--audience …] [--limit N] [--format …]
+    case-fetch.py library <slug> --release <release>
 
 Env: see kb_client_core (KB_BASE_URL / KB_API_KEY_FILE / KB_PREFER_LOCAL / …).
 """
@@ -179,6 +181,50 @@ def _format_fireside_table(rows: list[dict]) -> str:
 
 
 # ----------------------------------------------------------------------------
+# library mode (CASE-616) — list published LIBRARY_DOCs, fetch one body by slug
+# ----------------------------------------------------------------------------
+
+def list_library_docs(release: str | None, category: str | None,
+                      audience: str | None, limit: int) -> list[dict]:
+    """GET /library-docs?<facets>. Published docs only (the gateway enforces it);
+    bodies omitted. Returns the gateway's projected rows."""
+    params: dict[str, str] = {"page_size": str(min(limit, 100))}
+    if release:
+        params["release"] = release
+    if category:
+        params["category"] = category
+    if audience:
+        params["audience"] = audience
+    payload = gw_get("/library-docs?" + urllib.parse.urlencode(params)) or {}
+    return payload.get("items") or []
+
+
+def fetch_library_doc(slug: str, release: str) -> str | None:
+    """GET /library-docs/:slug?release= — the doc body, or None if absent.
+    Identity is [slug, release], so release is required to disambiguate."""
+    q = f"/library-docs/{urllib.parse.quote(slug)}?release={urllib.parse.quote(release)}"
+    payload = gw_get(q)
+    return payload.get("body") if payload is not None else None
+
+
+def _format_library_table(rows: list[dict]) -> str:
+    header = (
+        "| Slug | Release | Category | Audience | Title |\n"
+        "|---|---|---|---|---|"
+    )
+    if not rows:
+        return f"{header}\n_(no matches)_\n"
+    out = [header]
+    for r in rows:
+        out.append(
+            f"| {r.get('slug') or ''} | {r.get('release') or ''} | "
+            f"{r.get('category') or ''} | {r.get('audience') or ''} | "
+            f"{r.get('title') or ''} |"
+        )
+    return "\n".join(out) + "\n"
+
+
+# ----------------------------------------------------------------------------
 
 def _emit_body(body: str | None, what: str) -> None:
     if body is None:
@@ -231,6 +277,14 @@ def main() -> None:
     fireside_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
     fireside_sp.add_argument("--format", choices=["table", "json"], default="table")
 
+    library_sp = sub.add_parser("library", help="list published LIBRARY_DOCs, or fetch one body by slug")
+    library_sp.add_argument("target", help="'list', or a LIBRARY_DOC slug")
+    library_sp.add_argument("--release", help="release line (e.g. wip-v1); REQUIRED when fetching a slug")
+    library_sp.add_argument("--category", help="filter list by exact category")
+    library_sp.add_argument("--audience", help="filter list by exact audience")
+    library_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
+    library_sp.add_argument("--format", choices=["table", "json"], default="table")
+
     args = ap.parse_args()
 
     try:
@@ -274,6 +328,19 @@ def main() -> None:
                 _emit_rows(rows, args.format, _format_fireside_table(rows))
             else:
                 _emit_body(fetch_fireside(args.target), f"fireside {args.target}")
+
+        elif args.mode == "library":
+            if args.target == "list":
+                rows = list_library_docs(args.release, args.category, args.audience, args.limit)
+                rows.sort(key=lambda r: (r.get("release") or "", r.get("slug") or ""))
+                _emit_rows(rows, args.format, _format_library_table(rows))
+            else:
+                if not args.release:
+                    print("ERROR: --release is required to fetch a LIBRARY_DOC "
+                          "(identity is [slug, release])", file=sys.stderr)
+                    sys.exit(2)
+                _emit_body(fetch_library_doc(args.target, args.release),
+                           f"library doc {args.target!r} (release {args.release})")
     except RuntimeError as e:
         print(f"ERROR: transport failure: {e}", file=sys.stderr)
         sys.exit(2)

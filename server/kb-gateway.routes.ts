@@ -665,6 +665,82 @@ router.get('/firesides/:id', async (req, res) => {
   }
 })
 
+function libraryDocProjection(it: AnyObj): AnyObj {
+  const d = it.data || {}
+  return {
+    slug: d.slug, title: d.title, release: d.release || '',
+    category: d.category || '', audience: d.audience || '', tags: d.tags || [],
+    doc_status: d.doc_status || '',
+    document_id: it.document_id, doc_version: it.version, updated_at: it.updated_at,
+  }
+}
+
+// GET /library-docs?release=&category=&audience=&page=&page_size= — discovery list
+// of PUBLISHED LIBRARY_DOCs (bodies omitted, like /firesides). CASE-616: the read
+// surface for WEB-YAC's export pipeline. Library-owned type → NS_LIBRARY
+// AUTHORITATIVELY: an inbound ?namespace= is IGNORED, because the served client
+// pins its configured namespace (usually 'kb') on every call, which would misroute
+// a library read to the corpus — the same trap the write path solves (CASE-518).
+router.get('/library-docs', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  if (!NS_LIBRARY) { // no Library namespace configured → nothing to list
+    res.json({ total: 0, page: 1, pages: 1, items: [] })
+    return
+  }
+  const ns = NS_LIBRARY
+  const { page, pageSize } = pageParams(req)
+  // doc_status=published is enforced, not a caller option — only published docs
+  // are in scope for the public website (CASE-616 / CASE-611).
+  const filters: AnyObj[] = [{ field: 'data.doc_status', operator: 'eq', value: 'published' }]
+  for (const f of ['release', 'category', 'audience']) {
+    if (req.query[f]) filters.push({ field: `data.${f}`, operator: 'eq', value: String(req.query[f]) })
+  }
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'LIBRARY_DOC', filters, page, page_size: pageSize })
+    res.json({ total: d.total, page: d.page, pages: d.pages, items: (d.items || []).map(libraryDocProjection) })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// GET /library-docs/:slug?release= — one PUBLISHED LIBRARY_DOC incl. body. Identity
+// is [slug, release], so release is required to disambiguate across release lines
+// (a slug can exist in wip-v1 and wip-v2). Discover slugs via GET /library-docs.
+// NS_LIBRARY is authoritative (see the list route) — inbound ?namespace= ignored.
+router.get('/library-docs/:slug', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const release = req.query.release !== undefined ? String(req.query.release) : ''
+  if (!release) {
+    res.status(422).json({ error: 'release query param is required — LIBRARY_DOC identity is [slug, release]' })
+    return
+  }
+  if (!NS_LIBRARY) {
+    res.status(404).json({ error: 'no Library namespace configured' })
+    return
+  }
+  const ns = NS_LIBRARY
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'LIBRARY_DOC',
+        filters: [
+          { field: 'data.slug', operator: 'eq', value: req.params.slug },
+          { field: 'data.release', operator: 'eq', value: release },
+          { field: 'data.doc_status', operator: 'eq', value: 'published' },
+        ], page: 1, page_size: 2 })
+    const it = (d.items || [])[0]
+    if (!it) {
+      res.status(404).json({ error: `no published LIBRARY_DOC '${req.params.slug}' for release ${release} in ${ns}` })
+      return
+    }
+    res.json({ ...libraryDocProjection(it), body: it.data?.body || '' })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
 // GET /types — the doc-type manifest the write client lists/validates against
 // (CASE-482). Entity templates only; write_mode is derived from the same
 // metadata.custom.write the gateway mints from ('mint' when present, else
