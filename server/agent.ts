@@ -24,7 +24,13 @@ const env = () => ({
   MCP_MODULE: process.env.MCP_MODULE || 'wip_mcp',
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
   CLAUDE_MODEL: process.env.CLAUDE_MODEL || 'claude-haiku-4-5',
-  WIP_NAMESPACE: process.env.WIP_NAMESPACE || '',
+  // Corpus default 'kb' matches the gateway (kb-gateway.routes.ts NS_DEFAULT) and
+  // the client (CORPUS_NS), so all corpus-namespace sources agree when unset
+  // (CASE-551). Previously '' — which left the askBar prompt interpolating an
+  // empty namespace and the tool-call clamp (below) disabled whenever
+  // WIP_NAMESPACE was unset (as on kb.internal). 'kb' fixes both and keeps the
+  // clamp scoping tool calls to corpus+library.
+  WIP_NAMESPACE: process.env.WIP_NAMESPACE || 'kb',
   KB_LIBRARY_NAMESPACE: process.env.KB_LIBRARY_NAMESPACE || 'library',
   WIP_API_KEY: process.env.WIP_API_KEY || '',
   MAX_TURNS: parseInt(process.env.MAX_TURNS || '15'),
