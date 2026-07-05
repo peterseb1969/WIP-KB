@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useDocument, useTemplate } from '@wip/react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkFrontmatter from 'remark-frontmatter'
 import { ArrowLeft } from 'lucide-react'
@@ -218,6 +218,81 @@ export default function DocPage() {
     staleTime: 30_000,
   })
 
+  // Day-journal back-links: journal bodies link to adjacent days by
+  // FRanC's source FILENAME — `[Day 84: …](WIP_Journey_Day84.md)` — never a WIP
+  // document_id, so the raw href resolves to /doc/WIP_Journey_Day84.md and 404s.
+  // Resolve those to real docs: build a day_number → document_id map (JOURNEY_ENTRY
+  // identity is day_number) and rewrite the markdown anchor. Fetched only when the
+  // body actually carries such links. Journals live in the corpus, so query this
+  // doc's own namespace.
+  const journalNs = doc?.namespace ?? CORPUS_NS
+  const bodyHasJournalLinks =
+    typeof doc?.data?.body === 'string' && /WIP_Journey_Day\d/.test(doc.data.body)
+  const { data: journalDayMap } = useQuery<Record<string, string>>({
+    queryKey: ['journal-day-map', journalNs],
+    queryFn: async () => {
+      const base = import.meta.env.BASE_URL
+      const map: Record<string, string> = {}
+      let page = 1
+      for (;;) {
+        const res = await fetch(
+          `${base}wip/api/document-store/documents/query?namespace=${journalNs}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template_id: 'JOURNEY_ENTRY', filters: [], page, page_size: 100 }),
+          },
+        )
+        if (!res.ok) break
+        const d = await res.json()
+        for (const it of (d.items ?? []) as Array<{ document_id?: string; data?: { day_number?: number } }>) {
+          const dn = it.data?.day_number
+          if (dn != null && it.document_id) map[String(dn)] = it.document_id
+        }
+        if (page >= (d.pages || 1) || (d.items ?? []).length === 0) break
+        page += 1
+      }
+      return map
+    },
+    enabled: bodyHasJournalLinks,
+    staleTime: 60_000,
+  })
+
+  // Rewrite `WIP_Journey_DayNN.md` hrefs to the resolved KB doc; unresolved days
+  // (not yet in the KB) render as muted, non-navigating text rather than a dead
+  // link. Everything else renders as a normal anchor.
+  const mdComponents: Components = useMemo(
+    () => ({
+      a({ href, children }) {
+        // Journal source filenames: `WIP_Journey_DayNN.md` for day ≥ 2, and the
+        // bare `WIP_Journey.md` for Day 1 (predates the _DayNN convention).
+        const m = typeof href === 'string' ? href.match(/^WIP_Journey(?:_Day(\d+(?:\.\d+)?))?\.md$/) : null
+        if (m) {
+          const day = m[1] ?? '1'
+          const uuid = journalDayMap?.[day]
+          if (uuid) {
+            return (
+              <Link to={`/doc/${uuid}`} className="text-primary underline-offset-2 hover:underline">
+                {children}
+              </Link>
+            )
+          }
+          return (
+            <span className="cursor-default text-text-muted" title="This day-journal isn't in the KB yet">
+              {children}
+            </span>
+          )
+        }
+        return (
+          <a href={href} className="text-primary underline-offset-2 hover:underline">
+            {children}
+          </a>
+        )
+      },
+    }),
+    [journalDayMap],
+  )
+
   if (!id) return null
   if (docLoading) return <p className="text-text-muted">Loading…</p>
   if (docError) return <p className="text-danger">Failed to load doc: {(docError as Error).message}</p>
@@ -424,7 +499,7 @@ export default function DocPage() {
 
         {body && (
           <div className="prose prose-gray prose-sm max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkFrontmatter]}>{body}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkFrontmatter]} components={mdComponents}>{body}</ReactMarkdown>
           </div>
         )}
 
