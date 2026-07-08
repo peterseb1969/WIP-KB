@@ -128,10 +128,15 @@ export async function setAnthropicKey(
 const QUERY_TOOL_POLICY = `TOOL-USE POLICY — keep results small (context window is 200k tokens):
 - To find / list / count / filter documents (e.g. "all cases about X"), use run_report_query
   with an EXPLICIT, NARROW column list, e.g.:
-    SELECT case_number, title, status, component FROM doc_case_record
+    SELECT case_number, title, data_status, component FROM doc_case_record
     WHERE body ILIKE '%synonym%' ORDER BY case_number LIMIT 100
   NEVER "SELECT *", and NEVER select large free-text columns (body, content, snippet).
-  Call list_report_tables first if you need the column names.
+  Reporting tables live in one PostgreSQL schema PER NAMESPACE (CASE-628): pass
+  \`namespace\` on the run_report_query call and unqualified doc_* names resolve inside
+  that namespace. Only a cross-namespace JOIN needs schema-qualified tables instead
+  (e.g. "kb".doc_case_record JOIN "library".doc_library_doc — qualified names work
+  regardless of the call's namespace scope).
+  Call list_report_tables first if you need the column names (it reports each table's namespace).
 - To find passages or rank by relevance, use search (FTS) — it returns short ranked
   snippets, not whole documents.
 - Use get_document / query_by_template / list_documents ONLY to fetch ONE specific
