@@ -67,6 +67,33 @@ fm, _ = pf("---\ntags:\n  - one\nafter: done\n---\n")
 check("listthenscalar.tags", fm.get("tags"), ["one"])
 check("listthenscalar.after", fm.get("after"), "done")
 
+# 7. CASE-631 repro — quoted scalars store WITHOUT the surrounding quotes.
+#    `@`-leading values are not valid bare YAML, so a spec-correct generator
+#    MUST quote them; the stored value must still be the unquoted string.
+fm, _ = pf('---\ntitle: "@wip/client"\n---\n')
+check("quoted.at_double", fm.get("title"), "@wip/client")
+fm, _ = pf("---\ntitle: '@wip/client'\n---\n")
+check("quoted.at_single", fm.get("title"), "@wip/client")
+fm, _ = pf('---\ntitle: "Routing & Ingress (/api + /mcp)"\n---\n')
+check("quoted.spaces", fm.get("title"), "Routing & Ingress (/api + /mcp)")
+
+# 8. Quoting short-circuits coercion — a quoted scalar is always a STRING.
+fm, _ = pf('---\ncount: "42"\nflag: "true"\nempty: ""\nnote: "~"\n---\n')
+check("quoted.int_stays_str", fm.get("count"), "42")
+check("quoted.bool_stays_str", fm.get("flag"), "true")
+check("quoted.empty_is_str", fm.get("empty"), "")
+check("quoted.null_stays_str", fm.get("note"), "~")
+
+# 9. Mismatched / unpaired quotes are left untouched; a lone quote char too.
+fm, _ = pf("---\na: \"unbalanced\nb: it's fine\nc: \"\n---\n")
+check("quoted.unbalanced", fm.get("a"), '"unbalanced')
+check("quoted.inner_apostrophe", fm.get("b"), "it's fine")
+check("quoted.lone_quote", fm.get("c"), '"')
+
+# 10. Quoted items inside a single-line bracket list get the same treatment.
+fm, _ = pf('---\ntags: ["a", b, "42"]\n---\n')
+check("quoted.list_items", fm.get("tags"), ["a", "b", "42"])
+
 if _fails:
     print("FAIL:")
     for f in _fails:

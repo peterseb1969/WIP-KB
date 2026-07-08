@@ -40,9 +40,18 @@ from kb_client_core import DEV_ROOT, gw_get, gw_post
 
 
 def _coerce(v: str) -> object:
-    """Light scalar coercion for frontmatter / --field values: true|false ->
-    bool, ints/floats -> number, [a, b] -> list, else the raw string."""
+    """Light scalar coercion for frontmatter / --field values: quoted scalar ->
+    string with the quotes stripped, true|false -> bool, ints/floats -> number,
+    [a, b] -> list, else the raw string."""
     s = v.strip()
+    # A quoted scalar is always a STRING (YAML semantics): strip one matching
+    # pair of surrounding quotes and short-circuit every other coercion, so
+    # `"@wip/client"` stores @wip/client while `"42"` / `"true"` / `""` stay
+    # the strings 42 / true / empty (CASE-631). Escape sequences inside the
+    # quotes stay literal — this is not a YAML parser and the flat doc types
+    # don't need them.
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
+        return s[1:-1]
     low = s.lower()
     if low in ("true", "false"):
         return low == "true"
