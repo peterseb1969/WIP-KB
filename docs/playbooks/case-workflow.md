@@ -204,3 +204,33 @@ proposed fix, tell Peter to `/wip-case respond` first and stop.
    ```
 
 Terminal. Tell Peter what was applied and that the case is implemented.
+
+---
+
+## Edges — attach and inspect cross-links (CASE-630)
+
+Cross-links live in the graph, not in prose. A response that concerns another
+case gets a REFERENCES edge (CASE_RESPONSE is an allowed source since CASE-630).
+
+**Attach an edge between two EXISTING docs** — the sanctioned retry for a
+failed edge intent; never re-post the document:
+
+```bash
+$KBC kb-write.py EDGE REFERENCES CASE-629#1 CASE-627
+# handles = Registry synonyms (CASE-<n>, CASE-<n>#<seq>, session ids) or document_ids
+# idempotent: KB edge types are versioned:false, identity [source_ref, target_ref]
+```
+
+**Inspect a doc's edges** (both directions, far end labeled with its doc type):
+
+```bash
+$KBC case-fetch.py edges CASE-626
+$KBC case-fetch.py edges CASE-626#1
+```
+
+**Failed edge intents on a doc write no longer abort the request.** The write
+returns the doc result plus per-edge status (`linked` / `target_not_found` /
+`error`); `kb-write.py` exits **3** when the doc persisted but an edge intent
+was rejected — retry ONLY the edge with the EDGE verb above. Exit 2 remains
+transport failure; a `target_not_found` intent stays exit 0 (the loaders'
+converge-on-rewrite semantics).

@@ -319,13 +319,23 @@ async function writeEdge(edgeType: string, sourceId: string, targetId: string, n
 // { type, target_type, target_key }; the source is always the written doc
 // (source -> target). Unresolved targets are reported, not fatal (mirrors the
 // loaders' "prior not present yet -> skipped; converges on re-write").
+// Edge-write REJECTIONS are per-edge too (CASE-630): the source doc and any
+// earlier edges have already persisted, so aborting the request as a 5xx made
+// the caller misread a validation rejection as transport failure and retry
+// with a duplicating re-post. The write returns 200 with per-edge status —
+// the platform's own bulk-first convention — and a failed intent is retried
+// via POST /edges, not by re-creating the document.
 async function applyEdges(sourceId: string, edges: AnyObj[], ns: string, key: string): Promise<AnyObj[]> {
   const out: AnyObj[] = []
   for (const e of edges) {
     const targetId = await resolveRef(String(e.target_type), e.target_key, ns, key)
     if (!targetId) { out.push({ type: e.type, target_key: e.target_key, status: 'target_not_found' }); continue }
-    await writeEdge(String(e.type), sourceId, targetId, ns, key)
-    out.push({ type: e.type, target_key: e.target_key, status: 'linked' })
+    try {
+      await writeEdge(String(e.type), sourceId, targetId, ns, key)
+      out.push({ type: e.type, target_key: e.target_key, status: 'linked' })
+    } catch (err) {
+      out.push({ type: e.type, target_key: e.target_key, status: 'error', error: (err as Error).message })
+    }
   }
   return out
 }
@@ -416,6 +426,70 @@ router.post('/write/:type', async (req, res) => {
     const w = await genericWrite(type, data, { metadata: b.metadata, ns, key })
     const edgeResults = edges.length ? await applyEdges(w.document_id, edges, ns, key) : []
     res.json({ type, ...w, ...(edges.length ? { edges: edgeResults } : {}) })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Edge surface (CASE-630): attach/inspect edges on EXISTING docs — the
+// sanctioned recovery for a failed edge intent from /write/:type (before this,
+// the only "retry" was a duplicating document re-post).
+
+// Resolve a doc handle to a document_id: a raw id passes through; anything
+// else resolves as a Registry synonym (the CASE-425 pattern) — CASE-627,
+// the scoped CASE-629#1, APP-KB-… session ids, LESSON-12, etc.
+async function resolveHandle(handle: string, ns: string, key: string): Promise<string | null> {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(handle)) return handle
+  const d = await wipReq('POST', '/api/registry/entries/lookup/by-key', key, [{
+    namespace: ns, entity_type: 'documents',
+    composite_key: { value: handle }, search_synonyms: true,
+  }])
+  const r = (d.results || [])[0] || {}
+  return r.status === 'found' ? r.entry_id : null
+}
+
+// POST /edges  { type, source, target } — source/target are document_ids or
+// Registry synonyms. Naturally idempotent: the KB edge types are
+// versioned:false with identity [source_ref, target_ref], so re-adding an
+// existing edge overwrites in place (status 'linked' either way).
+router.post('/edges', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const b: AnyObj = req.body || {}
+  const type = String(b.type || '').trim()
+  const source = String(b.source || '').trim()
+  const target = String(b.target || '').trim()
+  if (!type || !source || !target) {
+    return res.status(422).json({ error: 'type, source and target are required' })
+  }
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  try {
+    const sourceId = await resolveHandle(source, ns, key)
+    if (!sourceId) return res.status(404).json({ error: `source ${source} not found in ${ns}` })
+    const targetId = await resolveHandle(target, ns, key)
+    if (!targetId) return res.status(404).json({ error: `target ${target} not found in ${ns}` })
+    await writeEdge(type, sourceId, targetId, ns, key)
+    res.json({ type, source, target, source_id: sourceId, target_id: targetId, status: 'linked' })
+  } catch (e) {
+    // writeEdge failures are platform VALIDATION rejections (e.g. endpoint
+    // family), not transport — 422, with the platform's message passed through.
+    const msg = (e as Error).message
+    res.status(e instanceof WipError ? 422 : 500).json({ error: msg })
+  }
+})
+
+// GET /edges/:handle — every edge touching the doc (either direction), so a
+// failed/forgotten intent is diagnosable without a raw document-store read.
+router.get('/edges/:handle', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  try {
+    const id = await resolveHandle(String(req.params.handle), ns, key)
+    if (!id) return res.status(404).json({ error: `${req.params.handle} not found in ${ns}` })
+    const d = await wipReq('GET', `/api/document-store/documents/${id}/relationships?namespace=${ns}`, key)
+    res.json({ handle: req.params.handle, document_id: id, relationships: d })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }

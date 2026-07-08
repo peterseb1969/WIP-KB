@@ -458,6 +458,16 @@ def _post_write(type_: str, data: dict, edges: list, metadata: dict | None, fmt:
         eg = result.get("edges") or []
         egtxt = "  edges: " + ", ".join(f"{e['type']}→{e['target_key']}={e['status']}" for e in eg) if eg else ""
         sys.stdout.write(f"{result.get('result', '?')}{tag} ({result.get('document_id', '')}){egtxt}\n")
+    # CASE-630: the doc write succeeded, but a failed edge intent must not look
+    # like success (exit 0) or transport failure (exit 2). Exit 3 = "doc written,
+    # >=1 edge rejected — retry the edge via: kb-write.py EDGE <TYPE> <src> <tgt>".
+    # (target_not_found stays exit 0: the loaders' converge-on-rewrite semantics.)
+    failed = [e for e in (result.get("edges") or []) if e.get("status") == "error"]
+    if failed:
+        for e in failed:
+            print(f"WARNING: edge {e.get('type')}→{e.get('target_key')} rejected: {e.get('error')}", file=sys.stderr)
+        print("Doc persisted; retry ONLY the edge: kb-write.py EDGE <TYPE> <source> <target>", file=sys.stderr)
+        return 3
     return 0
 
 
@@ -609,10 +619,31 @@ def cmd_patch(type_: str, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_edge(args: argparse.Namespace) -> int:
+    """Attach one edge between two EXISTING docs (CASE-630) — the sanctioned
+    retry for a failed edge intent from a doc write. Idempotent: KB edge types
+    are versioned:false with identity [source_ref, target_ref], so re-adding
+    overwrites in place. Handles are Registry synonyms (CASE-627, CASE-629#1,
+    APP-KB-…) or raw document_ids."""
+    if not (args.file and args.source and args.target):
+        print("ERROR: usage: kb-write.py EDGE <EDGE_TYPE> <source> <target>", file=sys.stderr)
+        return 2
+    path = "/edges" + (f"?namespace={args.namespace}" if args.namespace else "")
+    result = gw_post(path, {"type": args.file, "source": args.source, "target": args.target})
+    if args.format == "json":
+        sys.stdout.write(json.dumps(result, indent=2) + "\n")
+    else:
+        sys.stdout.write(f"{result.get('status', '?')}: {args.file} {args.source} → {args.target}\n")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="KB write client (gateway-only).")
-    ap.add_argument("type", nargs="?", help="doc type (e.g. DESIGN_DECISION); omit with --list")
-    ap.add_argument("file", nargs="?", help="markdown file with frontmatter, or '-' for stdin")
+    ap.add_argument("type", nargs="?", help="doc type (e.g. DESIGN_DECISION), or EDGE; omit with --list")
+    ap.add_argument("file", nargs="?", help="markdown file with frontmatter, or '-' for stdin; EDGE: the edge type")
+    ap.add_argument("source", nargs="?", help="EDGE only: source handle (synonym or document_id)")
+    ap.add_argument("target", nargs="?", help="EDGE only: target handle (synonym or document_id)")
+    ap.add_argument("--namespace", help="EDGE only: namespace override (default: gateway corpus)")
     ap.add_argument("--list", action="store_true", help="list writable doc types (GET /types)")
     ap.add_argument("--json", help="raw JSON data object instead of a file")
     ap.add_argument("--field", action="append", help="add/override a data field k=v (repeatable)")
@@ -635,6 +666,8 @@ def main() -> int:
             return cmd_gitstats(args)
         if not args.type:
             ap.error("a doc TYPE is required (or use --list)")
+        if args.type == "EDGE":
+            return cmd_edge(args)
         if args.type == "YAC_MEMORY" and args.json is None and not args.patch:
             return cmd_memory(args)  # dir/file → one record per memory (CASE-507)
         if args.patch:

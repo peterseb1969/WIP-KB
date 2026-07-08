@@ -285,6 +285,11 @@ def main() -> None:
     library_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
     library_sp.add_argument("--format", choices=["table", "json"], default="table")
 
+    edges_sp = sub.add_parser("edges", help="every edge touching a doc (CASE-630)")
+    edges_sp.add_argument("handle", help="Registry synonym (CASE-627, CASE-629#1, …) or document_id")
+    edges_sp.add_argument("--namespace", help="namespace override (default: gateway corpus)")
+    edges_sp.add_argument("--format", choices=["text", "json"], default="text")
+
     args = ap.parse_args()
 
     try:
@@ -341,6 +346,37 @@ def main() -> None:
                     sys.exit(2)
                 _emit_body(fetch_library_doc(args.target, args.release),
                            f"library doc {args.target!r} (release {args.release})")
+
+        elif args.mode == "edges":
+            q = f"/edges/{urllib.parse.quote(args.handle, safe='')}"
+            if args.namespace:
+                q += f"?namespace={args.namespace}"
+            payload = gw_get(q)
+            if payload is None:
+                print(f"{args.handle} not found in kb", file=sys.stderr)
+                sys.exit(1)
+            if args.format == "json":
+                sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+            else:
+                rels = payload.get("relationships")
+                items = rels.get("items") or rels.get("relationships") if isinstance(rels, dict) else rels
+                items = items if isinstance(items, list) else ([rels] if rels else [])
+                doc_id = payload.get("document_id", "")
+                sys.stdout.write(f"{args.handle} ({doc_id}) — {len(items)} edge(s)\n")
+                for r in items:
+                    if not isinstance(r, dict):
+                        sys.stdout.write(f"  {json.dumps(r)}\n")
+                        continue
+                    et = r.get("template_value") or r.get("edge_kind") or "?"
+                    src = (r.get("data") or {}).get("source_ref") or r.get("source_ref") or "?"
+                    tgt = (r.get("data") or {}).get("target_ref") or r.get("target_ref") or "?"
+                    # label the far end with its resolved doc type when present
+                    other = tgt if src == doc_id else src
+                    kind = next((x.get("resolved", {}).get("template_value")
+                                 for x in (r.get("references") or [])
+                                 if x.get("resolved", {}).get("document_id") == other), "")
+                    marker = "->" if src == doc_id else "<-"
+                    sys.stdout.write(f"  {et} {marker} {kind + ' ' if kind else ''}{other}\n")
     except RuntimeError as e:
         print(f"ERROR: transport failure: {e}", file=sys.stderr)
         sys.exit(2)
