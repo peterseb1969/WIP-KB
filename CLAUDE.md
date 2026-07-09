@@ -16,6 +16,10 @@ The distinctive v1 feature is **flag-for-YAC**: any doc can become a prompt for 
 
 WIP is the backend. This app is a frontend that maps the knowledgebase domain onto WIP's primitives (terminologies, templates, documents, edge types). If WIP doesn't expose what you need, **file a CASE for BE-YAC** — do not work around it.
 
+**Verify before asserting any factual claim.** Any factual claim a cheap check could falsify — a file's contents, a function's location, a date, a count, a previous case's content — must be checked, not asserted from memory. "I'm pretty sure" is fabrication if you haven't run the check. The pattern has been observed across BE-YAC and FRanC; it is agent-agnostic.
+
+**Case numbers in code comments are provenance, never substance.** A comment must state the constraint or invariant in full prose; a `CASE-NNN` token may prefix it as history, but the comment must survive the deletion test: remove the token — does it still explain the code? "See CASE-NNN" as the whole explanation is a dead link to every reader without KB access, and case-pointer comments rot because the pointer never gets re-verified against the code around it. Anything user-facing or generated (UI copy, served API descriptions, docs your app publishes) carries no case tokens at all — those readers have no KB.
+
 ---
 
 ## First Session — Read This Order
@@ -35,7 +39,7 @@ Don't shortcut. Each layer informs the next.
    - `wip://development-guide` — full 4-phase workflow
 8. **The scaffold** — `src/`, `server/`, `templates/bootstrap/*.template`, `package.json`. Understand what `--preset query` gave you.
 
-Then run `mcp__wip__list_namespaces` to confirm connectivity. You should see `wip`, `testfts`, and `dev-kb`. The `kb` namespace must **not** exist yet — it's created by the app's BootstrapGate at runtime.
+Then run `mcp__wip__list_namespaces` to confirm connectivity. Canonical carries `wip`, `kb`, and `library` — the KB has been in production since 2026-06 (the "kb must not exist yet" phase is history; BootstrapGate created it).
 
 The spec is authoritative. If FRanC's papers and this CLAUDE.md disagree on anything, follow the spec.
 
@@ -51,7 +55,7 @@ This app talks to the **`kb` instance** on the Pi cluster, not local-dev. Concre
   - **`wip-local`** → dev sandbox **localhost:8443** (prod restore; key `~/.wip-deploy/wip-local/secrets/api-key`). Tools surface as `mcp__wip-local__<tool>`.
   - **Discipline:** schema/data iteration and any destructive op (delete/create namespace, template churn) go through **`wip-local`**; `wip` is read-mostly against canonical. Never run a namespace/template mutation without confirming which server you're on — a wrong-target `delete_namespace` against `wip` hits production. (This app once used a `wip-kb`-named server; ignore that — it's `wip` + `wip-local` now.)
 - **`.mcp.json`** uses `WIP_API_KEY_FILE` pointing at `~/.wip-deploy/kb/secrets/api-key` (privileged admin key). Key rotation is one file write; do not paste literal keys into `.mcp.json`.
-- **`.env`** carries the runtime key scoped to `dev-kb` (already provisioned during spawn — see `.env` for the value, on disk at `~/.wip-deploy/kb/secrets/`).
+- **`.env`** carries `WIP_API_KEY_FILE` pointing at the live wip-deploy secrets file (currently `~/.wip-deploy/wip-local/secrets/api-key` — the dev sandbox's admin key; no plaintext key is baked in). Resolve the key from the file at startup (the `@wip/proxy` `apiKeyFile` option does this), so a key rotation or target-redeploy is picked up on restart instead of stranding a stale `.env`. This deploy key spans all namespaces — pass `namespace` explicitly on calls that need scoping. A least-privilege single-namespace key (which gets automatic namespace derivation) is an optional opt-in via `POST /api/registry/api-keys` with `namespaces` + `grant_permission`.
 
 ### TLS gotcha for the Node server
 
@@ -63,14 +67,14 @@ This app talks to the **`kb` instance** on the Pi cluster, not local-dev. Concre
 
 | Namespace | Purpose | Scope of work |
 |---|---|---|
-| `dev-kb` | APP-KB-YAC's iteration sandbox | Templates, edge types, test docs during Phases 2–3. Already created; runtime key in `.env` is scoped here. |
+| `dev-kb` / `dev-*` | APP-KB-YAC's iteration sandbox namespaces | Schema/data iteration on **wip-local**. Created on demand when needed — **a missing dev namespace is never a setup failure**; its absence at session start is expected and non-blocking. |
 | `kb` | The live Knowledge Base | **Created by the app's offer-on-empty BootstrapGate at runtime, not by you.** Production templates land here once Peter approves them. |
 
 **Never bootstrap `kb` from your dev workflow.** That's BootstrapGate's job. `kb` exists only when a user (Peter) confirms the bootstrap offer in the running app.
 
 **To clean up `dev-kb` during iteration:** use the namespace management API (`mcp__wip__delete_namespace` with `deletion_mode: retain` semantics, then re-`create_namespace`). Do **not** invoke `tools/dev-delete.py` — it bypasses the API and points at MongoDB directly. Proper NS management is via API.
 
-**MCP key derivation note.** The privileged MCP admin key is unrestricted across namespaces, so always pass `namespace="dev-kb"` explicitly on MCP tool calls. The app's runtime key in `.env` is namespace-scoped, so the python client derives the namespace automatically — but only for runtime calls, not for `mcp__wip__*` tool calls in this Claude session.
+**MCP key derivation note.** The privileged MCP admin key is unrestricted across namespaces, so always pass `namespace` explicitly on MCP tool calls. The runtime key in `.env` is the deploy admin key and spans all namespaces too — WIP cannot derive one for you; pass `namespace` on API calls that need scoping (or set `defaultNamespace` on `@wip/proxy`). Only a single-namespace least-privilege key gets automatic derivation.
 
 ---
 
@@ -119,6 +123,8 @@ Per spec §5 and §6, you create these as templates and edge-type definitions du
 
 - **Identity hash ≠ canonical ID.** Identity hash = uniqueness key for upsert *within a specific template* — same field values under two different templates are two different documents. Canonical ID / synonyms = deterministic identification of exactly one entity across the entire system (Registry-resolved). When calling `createDocumentsBulk`, the identity hash is scoped to the template you pass — never assume it is unique across templates.
 - **The Registry is the identity authority.** All identity resolution goes through the Registry. Do not implement app-side identity resolution by hash lookups — use the `document_id` returned by the API.
+- **WIP's primitives are your only data model — `metadata.*` is a throwaway scratchpad, never a model.** Namespaces, terminologies, terms, templates, documents, files, relationships are the toolkit; if a value needs structure or meaning, it has a home among them. `metadata.custom.<field>` is caller-attached context (loader hints, source-system tags, audit traces) the platform makes no commitments about — NOT a home for anything the platform commits to a meaning for (identity, sortable axes, FTS-indexed text, dedup keys), and NOT a place to persist app state your code reads back. The moment your code branches on metadata, sorts by it, queries it as identity, or treats its shape as a schema, you have built a **sidecar model** — the failure this discipline exists to stop. Logic-driving fields live in `data.<field>` declared on the template's schema; config that matters is a config *document* (create the config template first); a controlled vocabulary is **terms**. If a field your app needs has no home in `data`, that is a design event — update the template (you own the kb-namespace schemas) or file a case; do not stash it in `metadata.custom` as a workaround. The platform hard-rejects `metadata.*` in declarative slots but deliberately leaves the free-form query path open — the discipline is the guard. Enforced as a checkpoint in `/wip-implement` Step 0 and `/wip-improve` Rule 6.
+- **Empty `identity_fields` is a first-class append-only mode**, not a degenerate config. Empty list = "every doc is its own logical entity, version-by-document_id-only" — use deliberately for event logs and audit traces. Don't use it to skip thinking about identity: if records have a stable atomic identifier (case_number, slug), declare it in `data` and reference it in `identity_fields`. **PATCH on an identity-less template fails with `append_only`** — create a new document instead. Relatedly, `versioned: false` templates (edge types included) must declare `identity_fields` explicitly (e.g. `[source_ref, target_ref]`) — there is no implicit default.
 
 Re-read `wip://ponifs` and `papers/relationships-glossary.md` §"Property graph vs RDF" before you decide identity-field shapes for the v1 templates. When in doubt, escalate.
 
@@ -151,7 +157,7 @@ Read each template's header comment, fill in the TODOs (namespace = `kb`, app ti
 
 ## MCP
 
-WIP is accessed exclusively via MCP tools (88 tools, 5 resources) under the **`wip`** server (canonical kb.internal) or **`wip-local`** server (dev localhost:8443) — see "Backend Target" for the toggle/discipline. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
+WIP is accessed exclusively via MCP tools (94 tools, 5 resources) under the **`wip`** server (canonical kb.internal) or **`wip-local`** server (dev localhost:8443) — see "Backend Target" for the toggle/discipline. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
 
 Required reads before writing any code:
 - `wip://conventions` — bulk-first API, identity hashing, versioning
@@ -160,6 +166,10 @@ Required reads before writing any code:
 
 `wip://development-guide` is the full 4-phase workflow reference.
 `wip://query-assistant-prompt` is the system prompt for the askBar's NL query agent (used by the `--preset query` scaffold).
+
+### askBar — runtime Anthropic key
+
+The askBar agent resolves its Anthropic key in priority order: a key set at runtime via the admin config endpoint (`POST /server-api/config/anthropic-key`) → `ANTHROPIC_API_KEY_FILE` (0600, survives restart) → `ANTHROPIC_API_KEY` (frozen at process start). A UI/endpoint-set key **persists only if `ANTHROPIC_API_KEY_FILE` points at a writable, persistent mount** — otherwise it lives in process memory and a server restart (even a tsx hot-reload) silently drops it. Deploy requirement: declare `ANTHROPIC_API_KEY_FILE` in `apps/kb/wip-app.yaml` on a persistent mount. The key is a secret: never in a WIP document; the server returns only configured/source/last-4.
 
 ---
 
@@ -178,6 +188,19 @@ npm install ./libs/wip-client-*.tgz ./libs/wip-react-*.tgz ./libs/wip-proxy-*.tg
 Two gotchas:
 - **`@wip/client` baseUrl in browser apps behind a Vite proxy:** use `baseUrl: '/wip'` (resolved to `window.location.origin + '/wip'`). Do NOT use a bare relative path without the client resolving it — `new URL('/wip/...')` throws without a protocol.
 - **`@wip/react` providers:** hooks require BOTH `QueryClientProvider` (from `@tanstack/react-query`) AND `WipProvider` (from `@wip/react`). Missing either causes silent failure — hooks mount but never fetch, no errors.
+
+---
+
+## The wip-deployable app contract
+
+**Read `docs/wip-deployable-app-contract.md` before touching scaffold-level code.** Four-line summary:
+
+1. **Source repo** needs `Dockerfile.dev` + correct `vite.config.ts` (`server.host: '0.0.0.0'`, dev proxy targets *this app's* Express port). Client fetches use `import.meta.env.BASE_URL`, never bare paths.
+2. **WIP repo `apps/kb/wip-app.yaml`** declares both http and dev ports, `WIP_BASE_URL` via `from_component: router`, `APP_BASE_PATH` literal, and a healthcheck that doesn't depend on WIP being reachable.
+3. **Verify** with `wip-deploy install --target dev --app kb --app-source kb=~/Development/WIP-KB` — SPA must load at `https://localhost:8443/apps/kb/` on the first try, container healthy, no manual env patching.
+4. **If something breaks**, find the failure signature in the paper's "What breaks when you skip step N" annex.
+
+Companion canonical docs for UI/stack decisions: `docs/technology-stack.md` (v1 stack + forbidden choices) and `docs/ui-guidance.md` (palette tokens, typography, component shapes) — read before any architecture or visual call.
 
 ---
 
@@ -213,14 +236,22 @@ wip-toolkit --host kb.internal --proxy export kb /tmp/kb-backup.zip
 
 Standard 4-phase development:
 
-1. `/explore` — Discover existing data model, understand the domain *(skip in session 1; the spec replaces this — see "First Session" above)*
-2. `/design-model` — Map the domain to WIP primitives. Peter must approve before proceeding.
-3. `/implement` — Create terminologies, templates, edge types in `dev-kb`; verify with test documents.
-4. `/build-app` — Scaffold and build the React/TypeScript application.
+1. `/wip-explore` — Discover existing data model, understand the domain *(skip in session 1; the spec replaces this — see "First Session" above)*
+2. `/wip-design-model` — Map the domain to WIP primitives. Peter must approve before proceeding.
+3. `/wip-implement` — Create terminologies, templates, edge types in a dev namespace; verify with test documents.
+4. `/wip-build-app` — Scaffold and build the React/TypeScript application.
 
-After Phase 4: `/improve`, `/document`.
+After Phase 4: `/wip-improve`, `/wip-document`.
 
-Available at any time: `/wip-status`, `/export-model`, `/bootstrap`, `/resume`, `/report`.
+**Available at any time:**
+- `/wip-status` — Check WIP service health and data state
+- `/wip-export-model` — Save data model to git as seed files
+- `/wip-bootstrap` — Recreate data model from seed files
+- `/wip-setup` — Fresh-session mint + environment check + mandatory context loading
+- `/wip-wake` — Recover context after compaction or `/clear` (continues the prior session's lineage)
+- `/wip-report` — Capture fireside chat, running-log update, or session summary
+- `/wip-deploy redeploy|verify` — Redeploy this YAC's own source to the running dev install (or smoke-only). Install is BE-YAC's territory.
+- `/wip-case file|list|read|respond|comment|close|implement` — Cross-agent case management. **All KB reads/writes go through the served client — never a raw gateway curl:** `kbc kb-write.py <TYPE> …` (writes) / `kbc case-fetch.py …` (reads); the served playbook (`~/.cache/wip-kb-client/case-workflow.md`) is the version-matched source of truth for each verb. The gateway mints the `CASE-<n>` number + synonym and persists edges, but status-transition validity is enforced caller-side and a respond/close/implement is two writes (response doc + `CASE_RECORD --patch status=…`). Cases live in the KB, not on disk — never `Write` a case file with a hand-picked number; never reason about "the next number".
 
 ---
 
@@ -243,7 +274,7 @@ Plus anything new you discover. **FRanC owns the design package.** If you find a
 
 You will be replaced. This session ends when context fills or the task completes. The next agent starts from scratch.
 
-**Consequence:** anything worth knowing must be encoded into a durable artifact before this session ends. If Peter corrects your approach, write it down — `/lesson`, a session-report "Dead Ends" section, or a CLAUDE.md update if Peter agrees it's universal. Do not say "got it, won't happen again" unless the lesson is on disk.
+**Consequence:** anything worth knowing must be encoded into a durable artifact before this session ends. If Peter corrects your approach, write it down — `/wip-lesson`, a session-report "Dead Ends" section, or a CLAUDE.md update if Peter agrees it's universal. Do not say "got it, won't happen again" unless the lesson is on disk.
 
 ---
 
@@ -261,7 +292,7 @@ You will be replaced. This session ends when context fills or the task completes
 
 ## YAC Reporting
 
-You report your work to the Field Reporter (FRanC) by writing files to a shared directory. These reports are also useful for the *next* APP-KB-YAC — your session reports are input for future agents resuming your work.
+You report your work by writing files to `reports/<session-id>/` in this repo. These reports feed the Field Reporter (FRanC) *and* the next APP-KB-YAC — your session reports are input for future agents resuming your work.
 
 **Getting the current time:** always use `date '+%Y-%m-%d %H:%M'`. Do not guess.
 
@@ -269,48 +300,23 @@ You report your work to the Field Reporter (FRanC) by writing files to a shared 
 
 ### Session identity
 
-At session start, run `date '+%Y%m%d-%H%M'` and assign yourself a session ID:
+Your session ID is minted by `/wip-setup` (fresh start) or `/wip-wake` (continuation after `/clear` or compaction) and stored in `.claude/.session-id`. **Read it; never hand-mint or rotate it** — `cat "$CLAUDE_PROJECT_DIR/.claude/.session-id"`. Those commands also create `reports/<session-id>/`, write the initial `session.md`, and (for `/wip-wake`) auto-close the prior session with `continues_from` linkage.
 
-```
-APP-KB-YYYYMMDD-HHMM
-```
+Your role prefix is read from `.claude/.session-role` (`APP-KB`), written at scaffold time. **Do not** run `date`-based ID assignment yourself.
 
-Example: `APP-KB-20260502-0915`.
+The `session.md` these commands create carries the **local-first identity contract** (`.claude/.session-id` + this frontmatter are authoritative; the kb SESSION record is a derived mirror that catches up on the next reachable write):
 
-### Report directory
-
-```bash
-mkdir -p /Users/peter/Development/FR-YAC/reports/APP-KB-YYYYMMDD-HHMM/
-```
-
-### Resuming — check previous sessions
-
-At session start (and on `/resume`), look for prior APP-KB sessions:
-
-```bash
-ls -d /Users/peter/Development/FR-YAC/reports/APP-KB-* 2>/dev/null | tail -1
-```
-
-If a prior session exists, read its `session.md` to recover context. Faster and richer than reconstructing from git alone. If continuing that work after compaction, add to your `session.md` frontmatter:
-
-```
-continues: APP-KB-YYYYMMDD-HHMM
-```
-
-### Session start — write session.md immediately
-
-```markdown
+```yaml
 ---
-session: APP-KB-YYYYMMDD-HHMM
-type: app
-app: KB
-repo: WIP-KB
-started: YYYY-MM-DD HH:MM
-phase: <explore | design-model | implement | build-app | improve | other>
-tasks:
-  - <initial task from user>
+session_id: APP-KB-YYYYMMDD-HHMMSS
+role: APP-KB
+started_at: YYYY-MM-DDTHH:MM:SS
+status: active                      # flipped to `closed` by /wip-report session-end or /wip-wake
+continues_from: <prior-session-id>  # present only on a /wip-wake continuation
 ---
 ```
+
+Seconds precision (`HHMMSS`) eliminates the same-minute collision class. Record the app, phase, and task list in the `session.md` body as work begins; don't add a hand-written `continues:` field — `/wip-wake` writes `continues_from` as part of the rollover.
 
 ### After every commit
 
@@ -329,7 +335,7 @@ Read `commits.md` first; if the commit hash is already listed, skip it (prevents
 
 ### Session summary
 
-Write to `session.md` when Peter runs `/report session-end`, when context approaches 70–80%, or when the session is naturally ending. Overwrite — don't append multiple summaries.
+Write to `session.md` when Peter runs `/wip-report session-end`, when context approaches 70–80%, or when the session is naturally ending. Overwrite — don't append multiple summaries.
 
 ```markdown
 ## Session Summary
@@ -345,4 +351,18 @@ Write to `session.md` when Peter runs `/report session-end`, when context approa
 
 ### Fireside chats
 
-When Peter initiates a design discussion, architecture debate, or scope conversation, use `/report` to capture it. These are the high-value narrative moments — not just what was decided, but why, what alternatives were considered, what Peter said.
+When Peter initiates a design discussion, architecture debate, or scope conversation, use `/wip-report` to capture it. These are the high-value narrative moments — not just what was decided, but why, what alternatives were considered, what Peter said.
+
+### Running log
+
+For session-meaningful work that is **neither a change, an end-state, nor a fireside-grade decision**, append to `session-updates.md` via `/wip-report update-session [terse note]`. Three trigger categories:
+
+1. **Discoveries without a commit anchor** — e.g., "scaffold imports `./wip-api.js` which doesn't exist anywhere."
+2. **Scope-trim decisions mid-session** — why you're doing less than originally pitched, when the rationale matters for reading the resulting commit but isn't architectural enough for a fireside.
+3. **Block/unblock state and pre-`/compact` snapshots** — written when context is filling so the post-compaction self has more than the last commit message and a stale session.md.
+
+**`/compact` vs `/clear`:** before `/compact` (same agent continues) write a running-log entry. Before `/clear` or end-of-day (next agent starts cold) run `/wip-report session-end`. Similar-looking events, different recovery semantics.
+
+Append-only — distinct from `session.md` (overwritten at end) and `report-<slug>.md` (per-decision). Each entry is **timestamp + short headline + one paragraph**. Discipline test before writing: *"Would future-me, after a compaction, want to know this in 6 hours?"* If yes, write; if "just thinking out loud," don't.
+
+The four files together — `session.md` + `commits.md` + `session-updates.md` + any `report-*.md` — are what `/wip-wake` reads to rebuild context.
