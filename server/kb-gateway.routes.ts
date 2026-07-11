@@ -449,7 +449,13 @@ router.post('/write/:type', async (req, res) => {
 
 // Resolve a doc handle to a document_id: a raw id passes through; anything
 // else resolves as a Registry synonym (the CASE-425 pattern) — CASE-627,
-// the scoped CASE-629#1, APP-KB-… session ids, LESSON-12, etc.
+// the scoped CASE-629#1, LESSON-12, etc. Session ids are NOT synonyms:
+// SESSION mirrors are upserted by their natural identity (data.session_id)
+// and never claim a Registry entry, so a session-id-shaped handle that
+// misses the synonym lookup falls back to the same identity-field query the
+// write path's edge intents use (CASE-669 — the read path previously
+// covered only synonyms, making session ids unresolvable despite being
+// documented handles).
 async function resolveHandle(handle: string, ns: string, key: string): Promise<string | null> {
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(handle)) return handle
   const d = await wipReq('POST', '/api/registry/entries/lookup/by-key', key, [{
@@ -457,7 +463,12 @@ async function resolveHandle(handle: string, ns: string, key: string): Promise<s
     composite_key: { value: handle }, search_synonyms: true,
   }])
   const r = (d.results || [])[0] || {}
-  return r.status === 'found' ? r.entry_id : null
+  if (r.status === 'found') return r.entry_id
+  // <ROLE>-<YYYYMMDD>-<HHMMSS> (legacy sessions used minute precision).
+  if (/^[a-z][a-z0-9-]*-\d{8}-\d{4,6}$/i.test(handle)) {
+    return resolveRef('SESSION', handle, ns, key)
+  }
+  return null
 }
 
 // POST /edges  { type, source, target } — source/target are document_ids or
