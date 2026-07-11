@@ -234,3 +234,30 @@ returns the doc result plus per-edge status (`linked` / `target_not_found` /
 was rejected — retry ONLY the edge with the EDGE verb above. Exit 2 remains
 transport failure; a `target_not_found` intent stays exit 0 (the loaders'
 converge-on-rewrite semantics).
+
+---
+
+## Flags — the deterministic dispatch queue (flag-for-YAC)
+
+Peter flags a doc in the UI → a FLAG_RECORD (target_yac, flag_type) plus a
+FLAGGED_FROM edge. A deterministic poller turns pending flags into sub-agent
+dispatches:
+
+```bash
+$KBC case-fetch.py flags --target-yac FRanC --target-type CASE_RECORD --format json
+# rows carry flag_id + target.case_number — everything a dispatcher needs
+```
+
+**Lifecycle contract:** `doc_status: published` = pending dispatch (the
+default filter). After dispatching, mark the flag consumed so the poller
+never re-triggers it:
+
+```bash
+$KBC kb-write.py FLAG_RECORD --patch doc_status=dispatched --match document_id=<flag_id>
+```
+
+(`document_id` match is the escape hatch for composite-identity types —
+FLAG_RECORD's identity is `[flag_type, flagged_document]`.) Re-flagging the
+same doc in the UI upserts that identity back to `published`, which re-arms
+the trigger after a failed run. `--doc-status dispatched` / `all` list
+consumed / every flag.

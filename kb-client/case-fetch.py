@@ -290,6 +290,14 @@ def main() -> None:
     edges_sp.add_argument("--namespace", help="namespace override (default: gateway corpus)")
     edges_sp.add_argument("--format", choices=["text", "json"], default="text")
 
+    flags_sp = sub.add_parser("flags", help="flag-for-YAC queue: FLAG_RECORDs joined to their target")
+    flags_sp.add_argument("--target-yac", dest="target_yac", help="only flags aimed at this YAC")
+    flags_sp.add_argument("--doc-status", dest="doc_status", default="published",
+                          help="published (default = pending dispatch) | dispatched | all | …")
+    flags_sp.add_argument("--target-type", dest="target_type", help="filter by target doc type, e.g. CASE_RECORD")
+    flags_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
+    flags_sp.add_argument("--format", choices=["table", "json"], default="table")
+
     args = ap.parse_args()
 
     try:
@@ -377,6 +385,26 @@ def main() -> None:
                                  if x.get("resolved", {}).get("document_id") == other), "")
                     marker = "->" if src == doc_id else "<-"
                     sys.stdout.write(f"  {et} {marker} {kind + ' ' if kind else ''}{other}\n")
+
+        elif args.mode == "flags":
+            params = {"page_size": min(max(args.limit, 1), 100), "doc_status": args.doc_status}
+            if args.target_yac:
+                params["target_yac"] = args.target_yac
+            if args.target_type:
+                params["target_type"] = args.target_type
+            payload = gw_get("/flags?" + urllib.parse.urlencode(params)) or {}
+            rows = payload.get("items") or []
+            if args.format == "json":
+                sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+            else:
+                out = ["| Flag id | Type | Target YAC | Status | Target | Title |", "|---|---|---|---|---|---|"]
+                for r in rows:
+                    t = r.get("target") or {}
+                    tgt = f"CASE-{t['case_number']}" if t.get("case_number") else \
+                          f"{t.get('template_value') or '?'} {str(t.get('document_id') or '')[:13]}…"
+                    out.append(f"| {r.get('flag_id')} | {r.get('flag_type') or ''} | {r.get('target_yac') or ''} "
+                               f"| {r.get('doc_status') or ''} | {tgt} | {r.get('title') or ''} |")
+                sys.stdout.write("\n".join(out) + "\n")
     except RuntimeError as e:
         print(f"ERROR: transport failure: {e}", file=sys.stderr)
         sys.exit(2)

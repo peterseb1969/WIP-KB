@@ -7,6 +7,7 @@
     { "value": "draft",      "label": "Draft",      "sort_order": 10, "description": "Newly captured; not yet reviewed." },
     { "value": "reviewed",   "label": "Reviewed",   "sort_order": 20, "description": "Reviewed by a human or YAC; ready for publication or use." },
     { "value": "published",  "label": "Published",  "sort_order": 30, "description": "Visible as canonical KB content. FLAG_RECORD and BOOTSTRAP_RECORD default here." },
+    { "value": "dispatched", "label": "Dispatched", "sort_order": 35, "description": "FLAG_RECORD only: the flag was picked up by the deterministic dispatcher and a sub-agent was triggered. published = pending dispatch; re-flagging after a failed run re-publishes." },
     { "value": "deprecated", "label": "Deprecated", "sort_order": 40, "description": "Superseded but still resolvable; kept for historical reference." },
     { "value": "archived",   "label": "Archived",   "sort_order": 50, "description": "Hidden from default views; remains in storage." }
   ]

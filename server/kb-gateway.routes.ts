@@ -387,9 +387,20 @@ router.post('/write/:type', async (req, res) => {
     }
     try {
       for (let attempt = 0; attempt < PATCH_MAX_RETRIES; attempt++) {
-        const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
-          { template_id: type, filters: [{ field: `data.${mf}`, operator: 'eq', value: match[mf] }], page: 1, page_size: 1 })
-        const doc = (q.items || [])[0]
+        // match on document_id fetches directly — the escape hatch for types
+        // whose identity is composite (FLAG_RECORD: [flag_type, flagged_document]),
+        // where no single data field locates the doc. The flags dispatcher
+        // consumes a flag by the id the /flags projection returned.
+        let doc: AnyObj | undefined
+        if (mf === 'document_id') {
+          try {
+            doc = await wipReq('GET', `/api/document-store/documents/${match[mf]}?namespace=${ns}`, key)
+          } catch { /* not found → 404 below */ }
+        } else {
+          const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+            { template_id: type, filters: [{ field: `data.${mf}`, operator: 'eq', value: match[mf] }], page: 1, page_size: 1 })
+          doc = (q.items || [])[0]
+        }
         if (!doc) {
           res.status(404).json({ error: `${type} where ${mf}=${match[mf]} not found in ${ns}` })
           return
@@ -539,6 +550,56 @@ router.get('/cases', async (req, res) => {
     const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
       { template_id: 'CASE_RECORD', filters, page, page_size: pageSize })
     res.json({ total: d.total, page: d.page, pages: d.pages, items: (d.items || []).map(caseProjection) })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
+// GET /flags?target_yac=&doc_status=&target_type=&page=&page_size=
+// The flag-for-YAC read surface for the deterministic dispatcher: FLAG_RECORD
+// projections joined to their flagged target, so a poller gets actionable rows
+// (case_number included when the target is a case) in one call.
+// Lifecycle contract: doc_status 'published' = pending dispatch (the default
+// filter); the dispatcher marks a flag consumed by patching it to 'dispatched'
+// via /write/FLAG_RECORD with match: {document_id: <flag_id>}. Re-flagging in
+// the UI upserts the same identity back to published (re-arms the trigger).
+// doc_status=all disables the status filter. target_type filters on the
+// RESOLVED target's template value post-query, so `total` reflects the status/
+// yac filters only — fine at flag volumes, revisit if flags ever number 100s.
+router.get('/flags', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const { page, pageSize } = pageParams(req)
+  const filters: AnyObj[] = []
+  const status = String(req.query.doc_status || 'published')
+  if (status !== 'all') filters.push({ field: 'data.doc_status', operator: 'eq', value: status })
+  if (req.query.target_yac)
+    filters.push({ field: 'data.target_yac', operator: 'eq', value: String(req.query.target_yac) })
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'FLAG_RECORD', filters, page, page_size: pageSize })
+    const items: AnyObj[] = []
+    for (const it of (d.items || []) as AnyObj[]) {
+      const f = it.data || {}
+      let target: AnyObj = { document_id: f.flagged_document }
+      try {
+        const t = await wipReq('GET', `/api/document-store/documents/${f.flagged_document}?namespace=${ns}`, key)
+        target = {
+          document_id: f.flagged_document,
+          template_value: t.template_value || '',
+          case_number: t.data?.case_number,
+          title: t.data?.title || t.data?.slug || '',
+        }
+      } catch { /* target unresolvable — surface the raw id so the row is still actionable */ }
+      if (req.query.target_type && target.template_value !== String(req.query.target_type)) continue
+      items.push({
+        flag_id: it.document_id, flag_type: f.flag_type, target_yac: f.target_yac,
+        doc_status: f.doc_status, title: f.title, authored_by: f.authored_by,
+        created_at: it.created_at, updated_at: it.updated_at, target,
+      })
+    }
+    res.json({ total: d.total, page: d.page, pages: d.pages, items })
   } catch (e) {
     res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
   }
