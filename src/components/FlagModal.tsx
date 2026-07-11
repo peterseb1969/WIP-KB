@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { wipFetchJson, assertBulkSuccess } from '../lib/wipBulk'
-import { DEFAULT_INTENT } from '../lib/promptTemplates'
+import { FLAG_INTENTS, DEFAULT_FLAG_INTENT, type FlagIntent } from '../lib/promptTemplates'
 import { CORPUS_NS } from '../lib/namespaces'
 
 interface Props {
@@ -47,10 +47,15 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
   const NAMESPACE = CORPUS_NS
   const qc = useQueryClient()
   const [targetYac, setTargetYac] = useState('')
+  const [flagType, setFlagType] = useState<FlagIntent['id']>(DEFAULT_FLAG_INTENT.id)
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [created, setCreated] = useState<{ flagId: string; flagTitle: string } | null>(null)
+  const [created, setCreated] = useState<{
+    flagId: string
+    flagTitle: string
+    intent: FlagIntent
+  } | null>(null)
 
   const { data: yacs, isLoading: yacsLoading } = useQuery<Term[]>({
     queryKey: ['target-yacs'],
@@ -84,6 +89,10 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
       const reasonHead = reason.trim().slice(0, 60)
       const flagTitle = `Flag → ${targetYac}: ${reasonHead}${reason.trim().length > 60 ? '…' : ''}`
 
+      // v3 identity is [flag_type, flagged_document]: re-flagging the same intent
+      // on the same doc upserts (re-arms the dispatch queue), never duplicates.
+      // doc_status must be sent explicitly — the platform does not apply the
+      // template's default_value on create; 'published' means pending dispatch.
       const flagRes = await wipFetchJson<BulkResponse>('/api/document-store/documents', {
         method: 'POST',
         body: JSON.stringify([
@@ -92,9 +101,12 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
             template_version: flagTmpl.version,
             namespace: NAMESPACE,
             data: {
+              flag_type: flagType,
+              flagged_document: sourceDocId,
               title: flagTitle,
               body: reason.trim(),
               authored_by: 'user',
+              doc_status: 'published',
               target_yac: targetYac,
             },
           },
@@ -121,7 +133,8 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
       assertBulkSuccess(edgeRes, 'FLAGGED_FROM')
 
       qc.invalidateQueries({ queryKey: ['relationships', sourceDocId] })
-      setCreated({ flagId, flagTitle })
+      const intent = FLAG_INTENTS.find((i) => i.id === flagType) ?? DEFAULT_FLAG_INTENT
+      setCreated({ flagId, flagTitle, intent })
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -131,7 +144,7 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
 
   const handleCopyPrompt = async () => {
     if (!created) return
-    const prompt = DEFAULT_INTENT.generate(created.flagId, created.flagTitle)
+    const prompt = created.intent.generate(created.flagId, created.flagTitle)
     try {
       await navigator.clipboard.writeText(prompt)
     } catch {
@@ -167,6 +180,21 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
                 {yacs?.map((y) => (
                   <option key={y.term_id} value={y.value}>
                     {y.label || y.value}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="mb-3 block">
+              <span className="mb-1 block text-sm font-medium text-text">Intent</span>
+              <select
+                value={flagType}
+                onChange={(e) => setFlagType(e.target.value as FlagIntent['id'])}
+                className="w-full rounded-md border border-gray-300 bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+              >
+                {FLAG_INTENTS.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.label}
                   </option>
                 ))}
               </select>
@@ -212,7 +240,7 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
               FLAGGED_FROM edge to the source doc. Prompt to dispatch:
             </p>
             <pre className="mb-3 overflow-x-auto rounded bg-background p-3 text-xs text-text">
-              {DEFAULT_INTENT.generate(created.flagId, created.flagTitle)}
+              {created.intent.generate(created.flagId, created.flagTitle)}
             </pre>
             <div className="flex justify-end gap-2">
               <button
