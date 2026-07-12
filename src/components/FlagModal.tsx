@@ -33,6 +33,121 @@ interface BulkResponse {
 
 const TARGET_YAC_TERMINOLOGY = 'KB_TARGET_YAC'
 
+// The one write pair the UI performs: FLAG_RECORD + FLAGGED_FROM edge.
+// v3 identity is [flag_type, flagged_document]: re-flagging the same intent
+// on the same doc upserts (re-arms the dispatch queue), never duplicates.
+// doc_status must be sent explicitly — the platform does not apply the
+// template's default_value on create; 'published' means pending dispatch.
+async function createFlagWithEdge(opts: {
+  namespace: string
+  sourceDocId: string
+  flagType: FlagIntent['id']
+  targetYac: string
+  title: string
+  body: string
+}): Promise<string> {
+  const { namespace, sourceDocId, flagType, targetYac, title, body } = opts
+  const flagTmpl = await wipFetchJson<TemplateInfo>(
+    `/api/template-store/templates/by-value/FLAG_RECORD?namespace=${namespace}`,
+  )
+  const edgeTmpl = await wipFetchJson<TemplateInfo>(
+    `/api/template-store/templates/by-value/FLAGGED_FROM?namespace=${namespace}`,
+  )
+  const flagRes = await wipFetchJson<BulkResponse>('/api/document-store/documents', {
+    method: 'POST',
+    body: JSON.stringify([
+      {
+        template_id: flagTmpl.template_id,
+        template_version: flagTmpl.version,
+        namespace,
+        data: {
+          flag_type: flagType,
+          flagged_document: sourceDocId,
+          title,
+          body,
+          authored_by: 'user',
+          doc_status: 'published',
+          target_yac: targetYac,
+        },
+      },
+    ]),
+  })
+  const [flagItem] = assertBulkSuccess(flagRes, 'FLAG_RECORD')
+  const flagId = flagItem?.id
+  if (!flagId) throw new Error('FLAG_RECORD created but no id returned')
+
+  const edgeRes = await wipFetchJson<BulkResponse>('/api/document-store/documents', {
+    method: 'POST',
+    body: JSON.stringify([
+      {
+        template_id: edgeTmpl.template_id,
+        template_version: edgeTmpl.version,
+        namespace,
+        data: {
+          source_ref: flagId,
+          target_ref: sourceDocId,
+        },
+      },
+    ]),
+  })
+  assertBulkSuccess(edgeRes, 'FLAGGED_FROM')
+  return flagId
+}
+
+/**
+ * One-click flag for the common case: respond → BE-YAC, no note. Deliberately
+ * minimal while dispatch experience accrues — more targets/intents (and a
+ * pass-through instruction) come later; the dialog stays for anything custom.
+ * Idempotent by flag identity: clicking again re-arms a consumed flag.
+ * @param sourceDocId/sourceDocTitle - the doc being flagged.
+ */
+export function QuickFlagButton({
+  sourceDocId,
+  sourceDocTitle,
+}: {
+  sourceDocId: string
+  sourceDocTitle: string
+}) {
+  const NAMESPACE = CORPUS_NS
+  const qc = useQueryClient()
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
+
+  const handleClick = async () => {
+    setState('busy')
+    try {
+      const head = sourceDocTitle.slice(0, 60)
+      await createFlagWithEdge({
+        namespace: NAMESPACE,
+        sourceDocId,
+        flagType: 'respond',
+        targetYac: 'BE-YAC',
+        title: `Flag → BE-YAC: ${head}${sourceDocTitle.length > 60 ? '…' : ''}`,
+        body: 'One-click respond flag from the doc page.',
+      })
+      qc.invalidateQueries({ queryKey: ['relationships', sourceDocId] })
+      setState('done')
+      setTimeout(() => setState('idle'), 2500)
+    } catch {
+      setState('error')
+      setTimeout(() => setState('idle'), 4000)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={state === 'busy'}
+      className="rounded-md border border-accent/20 bg-accent/5 px-3 py-1 text-xs font-medium text-accent hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:cursor-wait disabled:opacity-60"
+    >
+      {state === 'idle' && 'Flag: respond → BE-YAC'}
+      {state === 'busy' && 'Flagging…'}
+      {state === 'done' && 'Flagged ✓ pending'}
+      {state === 'error' && 'Flag failed — retry'}
+    </button>
+  )
+}
+
 /**
  * The flag-for-YAC modal — the one write the UI performs. Creates a FLAG_RECORD
  * with a FLAGGED_FROM edge to the source doc.
@@ -79,58 +194,16 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
     setSubmitting(true)
     setError(null)
     try {
-      const flagTmpl = await wipFetchJson<TemplateInfo>(
-        `/api/template-store/templates/by-value/FLAG_RECORD?namespace=${NAMESPACE}`,
-      )
-      const edgeTmpl = await wipFetchJson<TemplateInfo>(
-        `/api/template-store/templates/by-value/FLAGGED_FROM?namespace=${NAMESPACE}`,
-      )
-
       const reasonHead = reason.trim().slice(0, 60)
       const flagTitle = `Flag → ${targetYac}: ${reasonHead}${reason.trim().length > 60 ? '…' : ''}`
-
-      // v3 identity is [flag_type, flagged_document]: re-flagging the same intent
-      // on the same doc upserts (re-arms the dispatch queue), never duplicates.
-      // doc_status must be sent explicitly — the platform does not apply the
-      // template's default_value on create; 'published' means pending dispatch.
-      const flagRes = await wipFetchJson<BulkResponse>('/api/document-store/documents', {
-        method: 'POST',
-        body: JSON.stringify([
-          {
-            template_id: flagTmpl.template_id,
-            template_version: flagTmpl.version,
-            namespace: NAMESPACE,
-            data: {
-              flag_type: flagType,
-              flagged_document: sourceDocId,
-              title: flagTitle,
-              body: reason.trim(),
-              authored_by: 'user',
-              doc_status: 'published',
-              target_yac: targetYac,
-            },
-          },
-        ]),
+      const flagId = await createFlagWithEdge({
+        namespace: NAMESPACE,
+        sourceDocId,
+        flagType,
+        targetYac,
+        title: flagTitle,
+        body: reason.trim(),
       })
-      const [flagItem] = assertBulkSuccess(flagRes, 'FLAG_RECORD')
-      const flagId = flagItem?.id
-      if (!flagId) throw new Error('FLAG_RECORD created but no id returned')
-
-      const edgeRes = await wipFetchJson<BulkResponse>('/api/document-store/documents', {
-        method: 'POST',
-        body: JSON.stringify([
-          {
-            template_id: edgeTmpl.template_id,
-            template_version: edgeTmpl.version,
-            namespace: NAMESPACE,
-            data: {
-              source_ref: flagId,
-              target_ref: sourceDocId,
-            },
-          },
-        ]),
-      })
-      assertBulkSuccess(edgeRes, 'FLAGGED_FROM')
 
       qc.invalidateQueries({ queryKey: ['relationships', sourceDocId] })
       const intent = FLAG_INTENTS.find((i) => i.id === flagType) ?? DEFAULT_FLAG_INTENT

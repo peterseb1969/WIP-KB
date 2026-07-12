@@ -6,8 +6,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkFrontmatter from 'remark-frontmatter'
 import { ArrowLeft } from 'lucide-react'
-import { PrepareButtons } from '../components/PrepareButtons'
-import { FlagModal } from '../components/FlagModal'
+import { FlagModal, QuickFlagButton } from '../components/FlagModal'
 import { RelationshipGraph } from '../components/RelationshipGraph'
 import { CaseThread, type ResponseDoc } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
@@ -59,7 +58,7 @@ interface RefDocMeta {
 /**
  * `/doc/:id` route — a single KB document: rendered markdown body, structured
  * fields, the RelationshipGraph, the inline CaseThread (CASE_RESPONSE replies),
- * the FlagModal (flag-for-YAC — the one UI write), and the PrepareButtons.
+ * the FlagModal and QuickFlagButton (flag-for-YAC — the one UI write).
  */
 export default function DocPage() {
   const { id = '' } = useParams<{ id: string }>()
@@ -537,8 +536,8 @@ export default function DocPage() {
           </div>
         )}
 
-        <div className="mb-8 flex flex-wrap items-center gap-2 border-y border-gray-100 py-2">
-          {canFlag && (
+        {canFlag && (
+          <div className="mb-8 flex flex-wrap items-center gap-2 border-y border-gray-100 py-2">
             <button
               type="button"
               onClick={() => setFlagOpen(true)}
@@ -546,9 +545,9 @@ export default function DocPage() {
             >
               Flag for YAC
             </button>
-          )}
-          <PrepareButtons docId={id} docTitle={docLabel(data, id)} />
-        </div>
+            <QuickFlagButton sourceDocId={id} sourceDocTitle={docLabel(data, id)} />
+          </div>
+        )}
 
         {(structured.length > 0 || metaEntries.length > 0) && (
           <dl className="mb-8 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
