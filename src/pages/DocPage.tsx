@@ -24,7 +24,7 @@ interface PeerProjection {
   namespace: string
   template_value: string
   status?: string
-  data?: { title?: string; doc_status?: string; status?: string; case_number?: number; session_id?: string; path?: string }
+  data?: { title?: string; doc_status?: string; status?: string; case_number?: number; session_id?: string; path?: string; flag_type?: string; target_yac?: string }
 }
 interface RelationshipItem {
   document_id: string
@@ -141,7 +141,16 @@ export default function DocPage() {
   const isResponseEdge = (r: RelationshipItem) =>
     r.template_value === 'RESPONDS_TO' && r.peer?.template_value === 'CASE_RESPONSE'
   const responseEdges = incoming.filter(isResponseEdge)
-  const incomingEdges = incoming.filter((r) => !isResponseEdge(r))
+
+  // Flags are workflow events, not knowledge relationships: FLAGGED_FROM edges
+  // leave the generic sets (graph + aside) and render as a dedicated Flags
+  // line whose lifecycle state comes from the flag doc itself (published =
+  // pending dispatch, dispatched = consumed — the edge alone can't tell).
+  const isFlagEdge = (r: RelationshipItem) =>
+    r.template_value === 'FLAGGED_FROM' && r.peer?.template_value === 'FLAG_RECORD'
+  const flagEdges = incoming.filter(isFlagEdge)
+
+  const incomingEdges = incoming.filter((r) => !isResponseEdge(r) && !isFlagEdge(r))
 
   // CASE-350: incoming SUPERSEDES = something newer replaces this doc.
   // Edge direction is newer→older, so source = replacing doc, target = this.
@@ -156,6 +165,8 @@ export default function DocPage() {
   const peerIds = useMemo(() => {
     const ids = new Set<string>()
     for (const e of rels?.items ?? []) {
+      // Flag peers never render in the graph — skip their degree round-trip.
+      if (isFlagEdge(e)) continue
       if (e.peer?.document_id) ids.add(e.peer.document_id)
     }
     return Array.from(ids).sort()
@@ -179,6 +190,36 @@ export default function DocPage() {
       return result
     },
     enabled: peerIds.length > 0,
+    staleTime: 30_000,
+  })
+
+  // The include=peers projection carries a fixed field subset for flag peers
+  // (doc_status/flag_type/title — no target_yac), so the Flags line fetches
+  // each flag doc for its routing target. Reads are by global UUID.
+  const flagIds = useMemo(
+    () =>
+      (rels?.items ?? [])
+        .filter((r) => isFlagEdge(r) && !!r.peer?.document_id)
+        .map((r) => r.peer!.document_id)
+        .sort(),
+    [rels],
+  )
+  const { data: flagTargets } = useQuery<Record<string, string>>({
+    queryKey: ['flag-targets', flagIds],
+    queryFn: async () => {
+      const base = import.meta.env.BASE_URL
+      const out: Record<string, string> = {}
+      await Promise.all(
+        flagIds.map(async (fid) => {
+          const res = await fetch(`${base}wip/api/document-store/documents/${fid}`)
+          if (!res.ok) return
+          const d = await res.json()
+          if (typeof d.data?.target_yac === 'string') out[fid] = d.data.target_yac
+        }),
+      )
+      return out
+    },
+    enabled: flagIds.length > 0,
     staleTime: 30_000,
   })
 
@@ -458,6 +499,43 @@ export default function DocPage() {
             </div>
           )}
         </header>
+
+        {flagEdges.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+              Flags
+            </span>
+            {[...flagEdges]
+              .sort((a, b) =>
+                (a.peer?.data?.doc_status === 'dispatched' ? 1 : 0) -
+                (b.peer?.data?.doc_status === 'dispatched' ? 1 : 0),
+              )
+              .map((r) => {
+                const flag = r.peer
+                if (!flag) return null
+                const pending = flag.data?.doc_status !== 'dispatched'
+                const targetYac = flag.data?.target_yac ?? flagTargets?.[flag.document_id]
+                return (
+                  <Link
+                    key={r.document_id}
+                    to={`/doc/${flag.document_id}`}
+                    title={flag.data?.title || flag.document_id}
+                    className={
+                      pending
+                        ? 'rounded-full border border-accent/30 bg-accent/10 px-2.5 py-0.5 font-medium text-accent hover:bg-accent/20'
+                        : 'rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-text-muted opacity-70 hover:opacity-100'
+                    }
+                  >
+                    {flag.data?.flag_type || 'flag'}
+                    {targetYac ? ` → ${targetYac}` : ''}
+                    <span className={pending ? '' : 'font-normal'}>
+                      {pending ? ' · pending' : ' · dispatched'}
+                    </span>
+                  </Link>
+                )
+              })}
+          </div>
+        )}
 
         <div className="mb-8 flex flex-wrap items-center gap-2 border-y border-gray-100 py-2">
           {canFlag && (
