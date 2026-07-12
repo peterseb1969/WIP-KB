@@ -31,8 +31,11 @@ const CLIENT_DIR = path.resolve(__dirname, '..', 'kb-client')
 const DOC_FILES = ['README.md', 'kb-client.sh', 'install.sh']
 // The cross-YAC case playbook is served with the client (CASE-440: it is
 // "how to use the client", so it is version-matched and digest-covered).
-// Single source: docs/playbooks/case-workflow.md (synced from the gene-pool
-// master) — NOT a second copy under kb-client/.
+// Single source: docs/playbooks/case-workflow.md, OWNED HERE — it documents
+// this app's gateway surface and ships version-matched in this app's bundle,
+// so it cannot be mastered elsewhere. Gene-pool copies (World-in-a-Pie) are
+// downstream distribution syncs of this file, not the other way around.
+// NOT a second copy under kb-client/.
 const PLAYBOOK_NAME = 'case-workflow.md'
 const PLAYBOOK_PATH = path.resolve(__dirname, '..', 'docs', 'playbooks', PLAYBOOK_NAME)
 

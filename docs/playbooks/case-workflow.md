@@ -32,17 +32,19 @@ curl -fsSk -H "X-API-Key: $(cat "$(python3 -c 'import json;print(json.load(open(
   "$(python3 -c 'import json;print(json.load(open(".claude/kb.json"))["kb_app_url"])')/apps/kb/server-api/kb-client/install" | sh
 ```
 
-That materializes the bundle into `~/.cache/wip-kb-client/`. Run everything through
-the runner, which self-refreshes when the instance's bundle digest changes:
+That materializes the bundle into `~/.cache/wip-kb-client/` and writes the stable
+`kbc` shim to `~/.local/bin/kbc`. Everything below runs through `kbc`; the runner
+behind it self-refreshes when the instance's bundle digest changes and restores a
+missing shim on every invocation:
 
 ```bash
-KBC="bash ~/.cache/wip-kb-client/kb-client.sh"
-$KBC case-fetch.py …    # reads
-$KBC kb-write.py …      # writes
+kbc case-fetch.py …    # reads
+kbc kb-write.py …      # writes
 ```
 
-If `~/.cache/wip-kb-client/kb-client.sh` is missing, re-run the install one-liner —
-that is the whole recovery.
+If `kbc` does not resolve, re-run the install one-liner — that is the whole
+recovery. (The bootstrap curl stays long-form deliberately: it runs before `kbc`
+can exist.)
 
 **One write surface.** All writes are `kb-write.py <TYPE> …` → the gateway's single
 `POST /write/:type`. The gateway allocates the `case_number` + claims the `CASE-<n>`
@@ -93,7 +95,7 @@ Legal transitions: `open → {responded, closed, implemented}`,
    related cases as REFERENCES edges):
 
    ```bash
-   $KBC kb-write.py CASE_RECORD case.md --edge REFERENCES:CASE_RECORD:12 --edge REFERENCES:CASE_RECORD:340
+   kbc kb-write.py CASE_RECORD case.md --edge REFERENCES:CASE_RECORD:12 --edge REFERENCES:CASE_RECORD:340
    # -> created CASE-<n> (<document_id>)  edges: REFERENCES→12=linked, …
    ```
 
@@ -104,7 +106,7 @@ Legal transitions: `open → {responded, closed, implemented}`,
 ## `/wip-case list`
 
 ```bash
-$KBC case-fetch.py list --status open,responded
+kbc case-fetch.py list --status open,responded
 # facets: --status (comma list) --filed-by --severity --type --component --app  --format table|json
 ```
 
@@ -116,12 +118,12 @@ BE-YACs: list all. If none, say "No cases" and stop.
 ## `/wip-case read <n>`
 
 ```bash
-$KBC case-fetch.py case <n>                    # body + full response thread (default: view=both)
-$KBC case-fetch.py case <n> --view case        # case body only
-$KBC case-fetch.py case <n> --view responses   # the response thread only
-$KBC case-fetch.py case <n> --response latest  # just the latest response
-$KBC case-fetch.py case <n> --response <seq>   # a specific response (404 if absent)
-$KBC case-fetch.py case <n> --format json      # raw gateway payload
+kbc case-fetch.py case <n>                    # body + full response thread (default: view=both)
+kbc case-fetch.py case <n> --view case        # case body only
+kbc case-fetch.py case <n> --view responses   # the response thread only
+kbc case-fetch.py case <n> --response latest  # just the latest response
+kbc case-fetch.py case <n> --response <seq>   # a specific response (404 if absent)
+kbc case-fetch.py case <n> --format json      # raw gateway payload
 ```
 
 Prints the case body followed by its responses (CASE_RESPONSE docs, seq-ordered,
@@ -146,11 +148,11 @@ Then, two writes — the response doc + the status transition:
 ```bash
 # 1) the response (compose response.md: body markdown; frontmatter sets the fields)
 #    response.md frontmatter: case_number: <n> / response_kind: respond / author: <id> / doc_status: published
-$KBC kb-write.py CASE_RESPONSE response.md --edge RESPONDS_TO:CASE_RECORD:<n>
+kbc kb-write.py CASE_RESPONSE response.md --edge RESPONDS_TO:CASE_RECORD:<n>
 # -> created CASE-<n>#<seq>  edges: RESPONDS_TO→<n>=linked
 
 # 2) drive open → responded (only if currently open)
-$KBC kb-write.py CASE_RECORD --patch status=responded --match case_number=<n>
+kbc kb-write.py CASE_RECORD --patch status=responded --match case_number=<n>
 ```
 
 Confirm the case number + new status to Peter.
@@ -163,7 +165,7 @@ A comment is a CASE_RESPONSE with `response_kind: comment` and **no** status cha
 (legal in any state, including terminal):
 
 ```bash
-$KBC kb-write.py CASE_RESPONSE comment.md --edge RESPONDS_TO:CASE_RECORD:<n>
+kbc kb-write.py CASE_RESPONSE comment.md --edge RESPONDS_TO:CASE_RECORD:<n>
 # comment.md frontmatter: case_number: <n> / response_kind: comment / author: <id> / doc_status: published
 ```
 
@@ -175,9 +177,9 @@ Close without implementing (won't-fix / not-an-issue / deferred / handled manual
 Compose the resolution rationale, then response + transition:
 
 ```bash
-$KBC kb-write.py CASE_RESPONSE close.md --edge RESPONDS_TO:CASE_RECORD:<n>
+kbc kb-write.py CASE_RESPONSE close.md --edge RESPONDS_TO:CASE_RECORD:<n>
 #   close.md frontmatter: case_number: <n> / response_kind: close / author: <id> / doc_status: published
-$KBC kb-write.py CASE_RECORD --patch status=closed --match case_number=<n>
+kbc kb-write.py CASE_RECORD --patch status=closed --match case_number=<n>
 ```
 
 Terminal. Tell Peter it's closed and why.
@@ -198,9 +200,9 @@ proposed fix, tell Peter to `/wip-case respond` first and stop.
 4. **Record + close:**
 
    ```bash
-   $KBC kb-write.py CASE_RESPONSE implement.md --edge RESPONDS_TO:CASE_RECORD:<n>
+   kbc kb-write.py CASE_RESPONSE implement.md --edge RESPONDS_TO:CASE_RECORD:<n>
    #   implement.md frontmatter: case_number: <n> / response_kind: implement / author: <id> / doc_status: published
-   $KBC kb-write.py CASE_RECORD --patch status=implemented --match case_number=<n>
+   kbc kb-write.py CASE_RECORD --patch status=implemented --match case_number=<n>
    ```
 
 Terminal. Tell Peter what was applied and that the case is implemented.
@@ -216,7 +218,7 @@ case gets a REFERENCES edge (CASE_RESPONSE is an allowed source since CASE-630).
 failed edge intent; never re-post the document:
 
 ```bash
-$KBC kb-write.py EDGE REFERENCES CASE-629#1 CASE-627
+kbc kb-write.py EDGE REFERENCES CASE-629#1 CASE-627
 # handles = Registry synonyms (CASE-<n>, CASE-<n>#<seq>, session ids) or document_ids
 # idempotent: KB edge types are versioned:false, identity [source_ref, target_ref]
 ```
@@ -224,8 +226,8 @@ $KBC kb-write.py EDGE REFERENCES CASE-629#1 CASE-627
 **Inspect a doc's edges** (both directions, far end labeled with its doc type):
 
 ```bash
-$KBC case-fetch.py edges CASE-626
-$KBC case-fetch.py edges CASE-626#1
+kbc case-fetch.py edges CASE-626
+kbc case-fetch.py edges CASE-626#1
 ```
 
 **Failed edge intents on a doc write no longer abort the request.** The write
@@ -244,7 +246,7 @@ FLAGGED_FROM edge. A deterministic poller turns pending flags into sub-agent
 dispatches:
 
 ```bash
-$KBC case-fetch.py flags --target-yac FRanC --target-type CASE_RECORD --format json
+kbc case-fetch.py flags --target-yac FRanC --target-type CASE_RECORD --format json
 # rows carry flag_id + target.case_number — everything a dispatcher needs
 ```
 
@@ -253,7 +255,7 @@ default filter). After dispatching, mark the flag consumed so the poller
 never re-triggers it:
 
 ```bash
-$KBC kb-write.py FLAG_RECORD --patch doc_status=dispatched --match document_id=<flag_id>
+kbc kb-write.py FLAG_RECORD --patch doc_status=dispatched --match document_id=<flag_id>
 ```
 
 (`document_id` match is the escape hatch for composite-identity types —
