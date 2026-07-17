@@ -131,8 +131,19 @@ export default function DocPage() {
     staleTime: 30_000,
   })
 
+  // A CASE_RESPONSE is a thread reply, never a first-class knowledge peer — no
+  // matter which edge type points at it. isResponseEdge (below) only catches
+  // RESPONDS_TO; once responses became allowed REFERENCES sources, a
+  // REFERENCES-from-response edge slipped through and rendered as a titleless
+  // peer box (a response's identity is case_number + seq, so its peer projection
+  // has no title). Guard on the peer type, not the edge type, on both sides.
+  const isResponsePeer = (r: RelationshipItem) =>
+    r.peer?.template_value === 'CASE_RESPONSE'
+
   const incoming = (rels?.items ?? []).filter((r) => r.data.target_ref === id)
-  const outgoing = (rels?.items ?? []).filter((r) => r.data.source_ref === id)
+  const outgoing = (rels?.items ?? []).filter(
+    (r) => r.data.source_ref === id && !isResponsePeer(r),
+  )
 
   // CASE-506: a case's responses arrive as incoming RESPONDS_TO edges. Split them
   // out — they get dots in the graph + an inline collapsible thread, not generic
@@ -149,7 +160,9 @@ export default function DocPage() {
     r.template_value === 'FLAGGED_FROM' && r.peer?.template_value === 'FLAG_RECORD'
   const flagEdges = incoming.filter(isFlagEdge)
 
-  const incomingEdges = incoming.filter((r) => !isResponseEdge(r) && !isFlagEdge(r))
+  const incomingEdges = incoming.filter(
+    (r) => !isResponseEdge(r) && !isFlagEdge(r) && !isResponsePeer(r),
+  )
 
   // CASE-350: incoming SUPERSEDES = something newer replaces this doc.
   // Edge direction is newer→older, so source = replacing doc, target = this.
