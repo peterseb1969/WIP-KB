@@ -294,7 +294,7 @@ def _read_local(rel: str) -> str | None:
 
 
 def _memory_record(fm: dict, body: str, filename: str, owner: str,
-                   session_id: str | None, repo: str | None) -> dict:
+                   repo: str | None) -> dict:
     """Map one memory/*.md to a YAC_MEMORY record. parse_frontmatter flattens the
     nested `metadata:` block, so metadata.type / metadata.originSessionId surface
     as top-level `type` / `originSessionId` — normalizing the two known shapes."""
@@ -314,8 +314,12 @@ def _memory_record(fm: dict, body: str, filename: str, owner: str,
     origin = fm.get("originSessionId")
     if origin:
         data["origin_session"] = _unquote(origin)
-    if session_id:
-        data["session_id"] = str(session_id)
+    # The mirroring session id is deliberately NOT stored in `data`. `data` is
+    # content: any change to it versions the document, and the session id
+    # changes every session, so stamping it here created a new version of every
+    # memory on every rollover even when the body was byte-identical. Authorship
+    # lives in `origin_session` above, which is stable across mirrors. "Which
+    # session last mirrored" is caller-context with no content meaning. (CASE-682)
     if repo:
         data["repo"] = str(repo)
     return data
@@ -324,16 +328,16 @@ def _memory_record(fm: dict, body: str, filename: str, owner: str,
 def cmd_memory(args: argparse.Namespace) -> int:
     """kb-write.py YAC_MEMORY <dir|file.md> — upsert each memory file as its own
     YAC_MEMORY doc (CASE-507). owner resolves from --field owner= or the repo's
-    .claude/.session-role; session_id from --field or .claude/.session-id. Skips
-    MEMORY.md and editor backups. Idempotent: natural-upsert by (owner, mem_key),
-    so re-pushing the whole dir is delta-only (unchanged files → 'unchanged')."""
+    .claude/.session-role. Skips MEMORY.md and editor backups. Idempotent:
+    natural-upsert by (owner, mem_key), and the record carries no mirror-time
+    session id, so re-pushing an unchanged file is a true no-op (→ 'unchanged'),
+    not a fresh version."""
     fields = _parse_fields(args.field)
     owner = str(fields.get("owner") or _read_local(".claude/.session-role") or "").strip()
     if not owner:
         print("ERROR: YAC_MEMORY owner unresolved — pass --field owner=<ROLE> or run "
               "from a repo with .claude/.session-role", file=sys.stderr)
         return 2
-    session_id = fields.get("session_id") or _read_local(".claude/.session-id")
     repo = fields.get("repo")
     src = args.file
     if not src or src == "-":
@@ -362,7 +366,7 @@ def cmd_memory(args: argparse.Namespace) -> int:
             continue
         fm, body = parse_frontmatter(open(p, encoding="utf-8").read())
         try:
-            data = _memory_record(fm, body, fn, owner, session_id, repo)
+            data = _memory_record(fm, body, fn, owner, repo)
         except ValueError as e:
             print(f"ERROR: skipped {fn} — {e}", file=sys.stderr)
             counts["error"] = counts.get("error", 0) + 1
