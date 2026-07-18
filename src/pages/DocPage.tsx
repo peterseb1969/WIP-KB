@@ -10,7 +10,8 @@ import { FlagModal, QuickFlagButton } from '../components/FlagModal'
 import { RelationshipGraph } from '../components/RelationshipGraph'
 import { CaseThread, type ResponseDoc } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
-import { CORPUS_NS } from '../lib/namespaces'
+import { fetchDocTitlesByIds, fetchFlagTargets, fetchPeerDegrees } from '../lib/reporting'
+import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 
 const COMMON_FIELDS = new Set(['title', 'authored_by', 'doc_status', 'tags', 'root', 'body'])
 
@@ -85,23 +86,21 @@ export default function DocPage() {
     return Array.from(ids).sort()
   }, [template, doc])
 
+  // CASE-687 Tier 2: one reporting title-by-id query (header only) instead of a
+  // full-document fetch per reference.
   const { data: refDocs } = useQuery<Record<string, RefDocMeta>>({
     queryKey: ['kb-refs', refIds],
     queryFn: async () => {
-      const base = import.meta.env.BASE_URL
+      const titles = await fetchDocTitlesByIds(NAMESPACES, refIds)
       const out: Record<string, RefDocMeta> = {}
-      await Promise.all(
-        refIds.map(async (rid) => {
-          const res = await fetch(`${base}wip/api/document-store/documents/${rid}`)
-          if (!res.ok) return
-          const d = await res.json()
-          out[rid] = {
-            title: d.data?.title ?? rid,
-            template_value: d.template_value ?? '',
-            namespace: d.namespace ?? '',
-          }
-        }),
-      )
+      for (const rid of refIds) {
+        const t = titles.get(rid)
+        out[rid] = {
+          title: t?.title || rid,
+          template_value: t?.templateValue ?? '',
+          namespace: t?.namespace ?? '',
+        }
+      }
       return out
     },
     enabled: refIds.length > 0,
@@ -168,37 +167,26 @@ export default function DocPage() {
   // Edge direction is newer→older, so source = replacing doc, target = this.
   const supersededBy = incoming.filter((r) => r.template_value === 'SUPERSEDES')
 
-  // Per-peer degree fetch for the "more-neighbors" badge in the neighborhood
-  // graph. Case-status now rides along in peer.data.status (CASE-408 migrated
-  // CASE_RECORD's header_fields from `metadata.custom.case_status` to top-level
-  // `status` after CASE-404 populated the field). Degree still needs a per-peer
-  // round-trip because the peer projection doesn't carry relationship counts —
-  // that'd be a separate platform request.
+  // "More-neighbors" badge in the neighborhood graph: does each peer have edges
+  // beyond the one to this doc? Peer status rides along in peer.data.status
+  // (CASE-408). CASE-687 Tier 2: a single reporting edge-count query over the
+  // namespace's edge tables replaces the former per-peer /relationships round-trip.
   const peerIds = useMemo(() => {
     const ids = new Set<string>()
     for (const e of rels?.items ?? []) {
-      // Flag peers never render in the graph — skip their degree round-trip.
+      // Flag peers never render in the graph — skip them.
       if (isFlagEdge(e)) continue
       if (e.peer?.document_id) ids.add(e.peer.document_id)
     }
     return Array.from(ids).sort()
   }, [rels])
+  const peerNs = doc?.namespace ?? CORPUS_NS
   const { data: peerEnrichment } = useQuery<Record<string, { hasMoreNeighbors: boolean }>>({
-    queryKey: ['peer-degree', peerIds],
+    queryKey: ['peer-degree', peerNs, peerIds],
     queryFn: async () => {
+      const degrees = await fetchPeerDegrees(peerNs, peerIds)
       const result: Record<string, { hasMoreNeighbors: boolean }> = {}
-      const base = import.meta.env.BASE_URL
-      await Promise.all(
-        peerIds.map(async (peerId) => {
-          const relsRes = await fetch(`${base}wip/api/document-store/documents/${peerId}/relationships`)
-          let degree = 0
-          if (relsRes.ok) {
-            const peerRels = await relsRes.json()
-            degree = Array.isArray(peerRels?.items) ? peerRels.items.length : 0
-          }
-          result[peerId] = { hasMoreNeighbors: degree > 1 }
-        }),
-      )
+      for (const peerId of peerIds) result[peerId] = { hasMoreNeighbors: (degrees.get(peerId) ?? 0) > 1 }
       return result
     },
     enabled: peerIds.length > 0,
@@ -216,20 +204,13 @@ export default function DocPage() {
         .sort(),
     [rels],
   )
+  // CASE-687 Tier 2: one reporting query for all flags' target_yac (a header column)
+  // instead of a full-document fetch per flag. Flags live in this doc's namespace.
   const { data: flagTargets } = useQuery<Record<string, string>>({
-    queryKey: ['flag-targets', flagIds],
+    queryKey: ['flag-targets', peerNs, flagIds],
     queryFn: async () => {
-      const base = import.meta.env.BASE_URL
-      const out: Record<string, string> = {}
-      await Promise.all(
-        flagIds.map(async (fid) => {
-          const res = await fetch(`${base}wip/api/document-store/documents/${fid}`)
-          if (!res.ok) return
-          const d = await res.json()
-          if (typeof d.data?.target_yac === 'string') out[fid] = d.data.target_yac
-        }),
-      )
-      return out
+      const targets = await fetchFlagTargets(peerNs, flagIds)
+      return Object.fromEntries(targets)
     },
     enabled: flagIds.length > 0,
     staleTime: 30_000,

@@ -311,3 +311,107 @@ export async function fetchCorpusHeaders(
   )
   return perNs.flat()
 }
+
+// ── Per-document-view lookups (CASE-687 Tier 2) ──────────────────────────────
+// DocPage used to fire one request PER related item (per peer, per reference, per
+// flag). These fold each fan-out into a single reporting query keyed by id.
+
+// document_ids are Registry UUIDs; guard before inlining into SQL.
+const ID_RE = /^[0-9a-f][0-9a-f-]{15,}$/i
+
+const quoteIds = (ids: string[]): string | null => {
+  const clean = [...new Set(ids.filter((id) => ID_RE.test(id)))]
+  return clean.length ? clean.map((id) => `'${id}'`).join(',') : null
+}
+
+export interface RefTitle {
+  title: string
+  templateValue: string
+  namespace: string
+}
+
+// Titles for a set of document ids (any entity type) across namespaces — one query
+// per namespace, replacing DocPage's per-reference full-document fetches.
+export async function fetchDocTitlesByIds(
+  namespaces: string[],
+  ids: string[],
+): Promise<Map<string, RefTitle>> {
+  const idList = quoteIds(ids)
+  const out = new Map<string, RefTitle>()
+  if (!idList) return out
+  await Promise.all(
+    namespaces.map(async (ns) => {
+      if (!NS_RE.test(ns)) return
+      const tables = entityTables(await fetchTableColumns(ns), new Set())
+      if (tables.length === 0) return
+      const sql = tables
+        .map(
+          ([stem, present]) =>
+            `SELECT document_id, ${present.has('title') ? 'title' : 'NULL::text AS title'}, ` +
+            `'${stem.toUpperCase()}' AS template_value FROM "${ns}"."doc_${stem}" ` +
+            `WHERE document_id IN (${idList})`,
+        )
+        .join(' UNION ALL ')
+      const { rows } = await reportingQuery<{
+        document_id: string
+        title: string | null
+        template_value: string
+      }>(ns, sql)
+      for (const r of rows)
+        out.set(r.document_id, {
+          title: r.title ?? '',
+          templateValue: r.template_value,
+          namespace: ns,
+        })
+    }),
+  )
+  return out
+}
+
+// target_yac for a set of FLAG_RECORD ids — one query replacing DocPage's per-flag
+// full-document fetches. Flags live in the flagged document's namespace.
+export async function fetchFlagTargets(
+  namespace: string,
+  ids: string[],
+): Promise<Map<string, string>> {
+  if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
+  const idList = quoteIds(ids)
+  const out = new Map<string, string>()
+  if (!idList) return out
+  const { rows } = await reportingQuery<{ document_id: string; target_yac: string | null }>(
+    namespace,
+    `SELECT document_id, target_yac FROM "${namespace}"."doc_flag_record" WHERE document_id IN (${idList})`,
+  )
+  for (const r of rows) if (r.target_yac) out.set(r.document_id, r.target_yac)
+  return out
+}
+
+// Relationship degree (edges touching each id, both directions, all edge types) for
+// a set of peer documents — one query across the namespace's edge tables, replacing
+// DocPage's per-peer /relationships round-trip for the "more-neighbors" badge.
+export async function fetchPeerDegrees(
+  namespace: string,
+  ids: string[],
+): Promise<Map<string, number>> {
+  if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
+  const idList = quoteIds(ids)
+  if (!idList) return new Map()
+  const { rows: edgeTables } = await reportingQuery<{ table_name: string }>(
+    namespace,
+    `SELECT table_name FROM information_schema.columns ` +
+      `WHERE table_schema = '${namespace}' AND table_name LIKE 'doc_%' AND column_name = 'source_ref'`,
+  )
+  if (edgeTables.length === 0) return new Map()
+  const union = edgeTables
+    .flatMap((t) => [
+      `SELECT source_ref AS ref FROM "${namespace}"."${t.table_name}"`,
+      `SELECT target_ref AS ref FROM "${namespace}"."${t.table_name}"`,
+    ])
+    .join(' UNION ALL ')
+  const { rows } = await reportingQuery<{ ref: string; c: number }>(
+    namespace,
+    `SELECT ref, count(*)::int AS c FROM (${union}) e WHERE ref IN (${idList}) GROUP BY ref`,
+    10000,
+  )
+  return new Map(rows.map((r) => [r.ref, r.c]))
+}
