@@ -1,0 +1,20 @@
+name: Tests
+# Runs the repo's offline test suites on the cluster's gitea Actions runner.
+# Both suites are stdlib-only Python — no network, no DB, no backend reachable —
+# so they gate every push without depending on kb.internal being up:
+#   - test_parse_frontmatter.py : kb-write.py frontmatter parsing (CASE-565/631)
+#   - test_verb_parity.py       : case-fetch verbs vs the curated rosters (CASE-692)
+# The test command lives in package.json (`npm test`) so CI and local stay one source.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Offline test suites (parse-frontmatter + verb-parity)
+        run: npm test
