@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { wipFetchJson } from '../lib/wipBulk'
+import { fetchSummary, type HeaderDoc, type SummaryGroup, type KbSummary } from '../lib/reporting'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
 import { CaseStats } from '../components/CaseStats'
@@ -14,52 +14,12 @@ import { NAMESPACES } from '../lib/namespaces'
 // screen space, so it's hidden here too (CASE-533).
 const HIDDEN_TYPES = new Set(['BOOTSTRAP_RECORD', 'WRITE_POLICY', 'CASE_RESPONSE'])
 
-interface DocItem {
-  document_id: string
-  namespace: string
-  template_value: string
-  data: {
-    title?: string
-    authored_by?: string
-    doc_status?: string
-    case_number?: number
-    status?: string
-    [k: string]: unknown
-  }
-  metadata?: {
-    custom?: {
-      case_status?: string
-      [k: string]: unknown
-    }
-  }
-  created_at: string
-  updated_at: string
-}
+// The start page renders header fields only (title/case/status/dates), so a
+// document here is the reporting-sourced HeaderDoc — no body is ever fetched.
+type DocItem = HeaderDoc
 
 function workflowStatus(doc: DocItem): string | undefined {
   return doc.data?.status
-}
-
-interface ListResponse {
-  items: DocItem[]
-  total: number
-  page: number
-  page_size: number
-  pages: number
-}
-
-interface TemplateInfo {
-  value: string
-  usage?: string
-}
-interface TemplateListResponse {
-  items: TemplateInfo[]
-}
-
-interface Group {
-  templateValue: string
-  items: DocItem[]
-  newest: string
 }
 
 type SortKey =
@@ -83,73 +43,6 @@ function compareCaseNumber(a: DocItem, b: DocItem, dir: 'asc' | 'desc'): number 
 
 type PageSize = 5 | 10 | 25 | -1
 
-function groupAndSort(items: DocItem[]): Group[] {
-  const map = new Map<string, DocItem[]>()
-  for (const d of items) {
-    const arr = map.get(d.template_value) ?? []
-    arr.push(d)
-    map.set(d.template_value, arr)
-  }
-  const groups: Group[] = []
-  for (const [templateValue, arr] of map) {
-    arr.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    groups.push({ templateValue, items: arr, newest: arr[0]!.updated_at })
-  }
-  groups.sort((a, b) => b.newest.localeCompare(a.newest))
-  return groups
-}
-
-async function fetchNamespaceDocs(namespace: string): Promise<DocItem[]> {
-  // Fetch page 1 to learn the page count, then fetch the rest CONCURRENTLY
-  // (CASE-501): the old serial loop paid per-request RTT N times — the dominant
-  // cost on kb.internal (Pi). Wall-clock is now ~2×RTT instead of N×RTT.
-  const pageSize = 100
-  const url = (page: number) =>
-    `/api/document-store/documents?namespace=${namespace}&page_size=${pageSize}&latest_only=true&page=${page}`
-  const first = await wipFetchJson<ListResponse>(url(1))
-  const pages = first.pages || 1
-  const items =
-    pages <= 1
-      ? first.items
-      : [
-          ...first.items,
-          ...(
-            await Promise.all(
-              Array.from({ length: pages - 1 }, (_, i) =>
-                wipFetchJson<ListResponse>(url(i + 2)),
-              ),
-            )
-          ).flatMap((r) => r.items),
-        ]
-  // Tag each doc with its source namespace — the unified view spans two
-  // namespaces (CASE-518), and DocItem.namespace drives per-namespace edge-type
-  // filtering and (later) namespace-aware doc links.
-  return items.map((d) => ({ ...d, namespace }))
-}
-
-// Unified fetch across all configured namespaces (corpus + library), merged.
-async function fetchAllDocs(namespaces: string[]): Promise<DocItem[]> {
-  const perNs = await Promise.all(namespaces.map(fetchNamespaceDocs))
-  return perNs.flat()
-}
-
-// Edge-type templates, per namespace. Relationship docs must be filtered out of
-// the start page; edge-type sets differ per namespace, so we key the filter on
-// `${namespace}:${template_value}`.
-async function fetchEdgeTypeKeys(namespaces: string[]): Promise<Set<string>> {
-  const perNs = await Promise.all(
-    namespaces.map(async (ns) => {
-      const r = await wipFetchJson<TemplateListResponse>(
-        `/api/template-store/templates?namespace=${ns}&latest_only=true&page_size=100`,
-      )
-      return r.items
-        .filter((t) => t.usage === 'relationship')
-        .map((t) => `${ns}:${t.value}`)
-    }),
-  )
-  return new Set(perNs.flat())
-}
-
 // Windowed pager: 1, …, p-1, p, p+1, …, last (caps button count)
 function pageWindow(current: number, total: number): (number | 'el')[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
@@ -163,7 +56,7 @@ function pageWindow(current: number, total: number): (number | 'el')[] {
   return out
 }
 
-function DocGroupBox({ group }: { group: Group }) {
+function DocGroupBox({ group }: { group: SummaryGroup }) {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<SortKey>('updated_desc')
   const [pageSize, setPageSize] = useState<PageSize>(5)
@@ -227,10 +120,18 @@ function DocGroupBox({ group }: { group: Group }) {
         <span className="text-text-muted transition group-open:rotate-90">▸</span>
         <span className="font-semibold tracking-tight text-text">{group.templateValue}</span>
         <span className="text-xs text-text-muted">
-          {group.items.length} doc{group.items.length === 1 ? '' : 's'}
+          {group.count} doc{group.count === 1 ? '' : 's'}
         </span>
+        {group.truncated && (
+          <span
+            className="text-xs text-text-muted"
+            title={`Only the latest ${group.items.length} are loaded here — use Search to reach the rest`}
+          >
+            · latest {group.items.length} shown
+          </span>
+        )}
         <span className="ml-auto text-xs text-text-muted">
-          latest {new Date(group.newest).toLocaleDateString()}
+          latest {group.newest ? new Date(group.newest).toLocaleDateString() : '—'}
         </span>
       </summary>
 
@@ -367,37 +268,27 @@ function DocGroupBox({ group }: { group: Group }) {
 }
 
 /**
- * `/` route — the start page. Sweeps all docs (paged concurrently), groups them by
- * template_value newest-first, and renders a collapsible box per type with
- * per-group search/sort. HIDDEN_TYPES excludes structural/config types and
- * CASE_RESPONSE.
+ * `/` route — the start page. Pulls header fields (no bodies) for every entity doc
+ * from the reporting layer, groups them by template_value newest-first, and renders
+ * a collapsible box per type with per-group search/sort. Edge (relationship) types
+ * and HIDDEN_TYPES are excluded at the SQL source (CASE-687 — replaces the former
+ * whole-corpus, full-body document sweep that pulled ~12 MB over VPN).
  */
 export default function HomePage() {
   const nsKey = NAMESPACES.join(',')
-  const { data, isLoading, error } = useQuery<DocItem[]>({
-    queryKey: ['kb-docs-all', nsKey],
-    queryFn: () => fetchAllDocs(NAMESPACES),
+  const { data, isLoading, error } = useQuery<KbSummary>({
+    queryKey: ['kb-summary', nsKey],
+    queryFn: () => fetchSummary(NAMESPACES, HIDDEN_TYPES, 200),
     staleTime: 30_000,
-  })
-
-  const { data: edgeTypeKeys } = useQuery<Set<string>>({
-    queryKey: ['edge-type-keys', nsKey],
-    queryFn: () => fetchEdgeTypeKeys(NAMESPACES),
-    staleTime: 5 * 60_000,
   })
 
   if (isLoading) return <p className="text-sm text-text-muted">Loading…</p>
   if (error) return <p className="text-sm text-danger">Failed to load: {(error as Error).message}</p>
 
-  const edgeKeys = edgeTypeKeys ?? new Set<string>()
-  const allItems = data ?? []
-  const items = allItems.filter(
-    (d) =>
-      !edgeKeys.has(`${d.namespace}:${d.template_value}`) &&
-      !HIDDEN_TYPES.has(d.template_value),
-  )
+  const groups = data?.groups ?? []
+  const caseStats = data?.caseStats ?? { open: 0, responded: 0 }
 
-  if (items.length === 0) {
+  if (groups.length === 0) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <p className="max-w-md text-center text-text-muted">
@@ -407,16 +298,16 @@ export default function HomePage() {
     )
   }
 
-  const groups = groupAndSort(items)
+  const totalDocs = groups.reduce((n, g) => n + g.count, 0)
 
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-text-muted">
-          {items.length} doc{items.length === 1 ? '' : 's'} across {groups.length} type
+          {totalDocs} doc{totalDocs === 1 ? '' : 's'} across {groups.length} type
           {groups.length === 1 ? '' : 's'}.
         </p>
-        <CaseStats docs={allItems} />
+        <CaseStats open={caseStats.open} responded={caseStats.responded} />
       </div>
 
       <div className="space-y-3">

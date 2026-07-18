@@ -7,24 +7,30 @@ interface CaseStatDoc {
 
 // Three clickable case-status stats — open, responded, and both — each linking to
 // the CASE_RECORD search pre-filtered to that status (open → s=open, responded →
-// s=responded, both → s=open,responded). Counts come from the docs already in
-// scope (HomePage and SearchPage both fetch the full corpus), so this adds no
-// request. `open` and `responded` are disjoint statuses, so the combined count is
-// their sum. Hidden entirely when there are no open or responded cases — nothing
-// actionable to link to.
+// s=responded, both → s=open,responded). `open` and `responded` are disjoint
+// statuses, so the combined count is their sum. Hidden entirely when there are no
+// open or responded cases — nothing actionable to link to.
+//
+// Counts are supplied directly (HomePage sources them from a reporting aggregation
+// over ALL cases — CASE-687) or derived from an in-scope `docs` set (SearchPage,
+// which still holds the corpus). Explicit counts win when provided.
 const LINK =
   'rounded-md border border-gray-200 px-2.5 py-1 transition hover:border-primary/40 hover:bg-background'
 
 export function CaseStats({
   docs,
+  open: openProp,
+  responded: respondedProp,
   className = '',
 }: {
-  docs: CaseStatDoc[]
+  docs?: CaseStatDoc[]
+  open?: number
+  responded?: number
   className?: string
 }) {
-  const cases = docs.filter((d) => d.template_value === 'CASE_RECORD')
-  const open = cases.filter((d) => d.data.status === 'open').length
-  const responded = cases.filter((d) => d.data.status === 'responded').length
+  const cases = (docs ?? []).filter((d) => d.template_value === 'CASE_RECORD')
+  const open = openProp ?? cases.filter((d) => d.data.status === 'open').length
+  const responded = respondedProp ?? cases.filter((d) => d.data.status === 'responded').length
   if (open === 0 && responded === 0) return null
 
   const base = '/search?t=CASE_RECORD'
