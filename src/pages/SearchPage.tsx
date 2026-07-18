@@ -3,46 +3,16 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
+import { fetchCorpusHeaders, type HeaderDoc } from '../lib/reporting'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
 import { CaseStats } from '../components/CaseStats'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 
-interface DocItem {
-  document_id: string
-  namespace: string
-  template_value: string
-  data: {
-    title?: string
-    session_id?: string
-    path?: string
-    authored_by?: string
-    doc_status?: string
-    case_number?: number
-    kind?: string
-    severity?: string
-    app?: string
-    status?: string
-    release?: string
-    [k: string]: unknown
-  }
-  metadata?: {
-    custom?: {
-      case_status?: string
-      filed_at?: string
-      responded_at?: string
-      implemented_at?: string
-      closed_at?: string
-      [k: string]: unknown
-    }
-  }
-  // Resolved term references (CASE-422): term fields (e.g. app → KB_APP) carry
-  // the canonical term_id here, resolved at write — data.app keeps the raw input.
-  term_references?: Array<{ field_path: string; term_id: string }>
-  created_at: string
-  updated_at: string
-}
+// Search renders header fields only (title/case/status/facets/snippet), so a doc
+// here is the reporting-sourced HeaderDoc — no body is ever fetched (CASE-687).
+type DocItem = HeaderDoc
 
 // `data.app` canonicalization is now PLATFORM-owned (CASE-422): app is a
 // term-ref field → KB_APP terminology, whose terms carry the operator spellings
@@ -53,9 +23,10 @@ interface DocItem {
 // and surfaces here with zero code change. Falls back to raw data.app on docs
 // that have no term_ref (pre-(A) data / unset app).
 const EMPTY_APP_TERMS = new Map<string, string>()
-// Stable empty edge-key set so the filterableDocs memo dep doesn't churn before
-// the edge-type query resolves.
-const EMPTY_EDGE_KEYS = new Set<string>()
+
+// Structural types kept out of search. CASE_RESPONSE is NOT here — search
+// surfaces it on demand via the type facet (CASE-533).
+const SEARCH_HIDDEN = new Set(['BOOTSTRAP_RECORD', 'WRITE_POLICY'])
 
 async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
   try {
@@ -73,17 +44,12 @@ async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
   }
 }
 
-// "Filed" sort uses metadata.custom.filed_at — the case-frontmatter timestamp
-// the operator wrote when filing. Durable, never updated by re-mirror.
-// Gateway-filed cases (CASE-464) carry no filed_at; for those the doc was CREATED
-// in kb at file time, so created_at IS the filing moment — fall back to it. Scoped
-// to cases (case_number present) so non-case docs stay null and sort to the end.
+// "Filed" sort: the doc was CREATED in kb when it was filed, so created_at IS the
+// filing moment. Scoped to cases (case_number present) so non-case docs stay null
+// and sort to the end. (Header docs come from reporting, which does not carry the
+// legacy metadata.custom.filed_at; created_at is the filing moment for every
+// gateway-filed case anyway — CASE-464/CASE-687.)
 function filedAt(doc: DocItem): Date | null {
-  const s = doc.metadata?.custom?.filed_at
-  if (typeof s === 'string' && s) {
-    const d = new Date(s)
-    if (!isNaN(d.getTime())) return d
-  }
   if (typeof doc.data.case_number === 'number') {
     const d = new Date(doc.created_at)
     if (!isNaN(d.getTime())) return d
@@ -91,20 +57,16 @@ function filedAt(doc: DocItem): Date | null {
   return null
 }
 
-// "Modified" sort uses the latest status-transition timestamp: max of
-// filed_at, responded_at, implemented_at, closed_at. Reflects when the
-// case actually moved, not when add-to-kb.py re-mirrored it (which is
-// what `updated_at` records). Cases without any transitions return null
-// and sort to the end (compareDate handles the null pushdown).
+// "Modified" sort: when the case last moved. A gateway status transition PATCHes
+// the case doc, so updated_at tracks the last transition. (Reporting does not carry
+// the legacy per-transition metadata.custom stamps, which are empty on gateway-era
+// cases regardless — CASE-687.)
 function statusModifiedAt(doc: DocItem): Date | null {
-  const c = doc.metadata?.custom ?? {}
-  const stamps: number[] = []
-  for (const s of [c.filed_at, c.responded_at, c.implemented_at, c.closed_at]) {
-    if (typeof s !== 'string' || !s) continue
-    const d = new Date(s)
-    if (!isNaN(d.getTime())) stamps.push(d.getTime())
+  if (typeof doc.data.case_number === 'number') {
+    const d = new Date(doc.updated_at)
+    if (!isNaN(d.getTime())) return d
   }
-  return stamps.length > 0 ? new Date(Math.max(...stamps)) : null
+  return null
 }
 
 // Sort docs without a timestamp to the end regardless of direction.
@@ -122,22 +84,6 @@ function compareDate(a: Date | null, b: Date | null, dir: 'asc' | 'desc'): numbe
 // for cases) — not what the user means by "status".
 function workflowStatus(doc: DocItem): string | undefined {
   return doc.data?.status
-}
-
-interface ListResponse {
-  items: DocItem[]
-  total: number
-  page: number
-  page_size: number
-  pages: number
-}
-
-interface TemplateInfo {
-  value: string
-  usage?: string
-}
-interface TemplateListResponse {
-  items: TemplateInfo[]
 }
 
 interface FtsHit {
@@ -191,53 +137,6 @@ function compareCaseNumber(a: DocItem, b: DocItem, dir: 'asc' | 'desc'): number 
 
 const PAGE_SIZE = 25
 
-async function fetchNamespaceDocs(namespace: string): Promise<DocItem[]> {
-  // Fetch page 1 to learn the page count, then fetch the rest CONCURRENTLY
-  // (CASE-501): the old serial loop paid per-request RTT N times — the dominant
-  // cost on kb.internal (Pi). Wall-clock is now ~2×RTT instead of N×RTT.
-  // NB: this list also hydrates FTS hits (docsById) + the facet rails, so it is
-  // still fetched when a query is present — skipping it would empty both. The
-  // durable fix (a server-side summary endpoint) is CASE-501 tier 2.
-  const pageSize = 100
-  const url = (page: number) =>
-    `/api/document-store/documents?namespace=${namespace}&page_size=${pageSize}&latest_only=true&page=${page}`
-  const first = await wipFetchJson<ListResponse>(url(1))
-  const pages = first.pages || 1
-  const items =
-    pages <= 1
-      ? first.items
-      : [
-          ...first.items,
-          ...(
-            await Promise.all(
-              Array.from({ length: pages - 1 }, (_, i) =>
-                wipFetchJson<ListResponse>(url(i + 2)),
-              ),
-            )
-          ).flatMap((r) => r.items),
-        ]
-  return items.map((d) => ({ ...d, namespace }))
-}
-
-// Unified browse set across all configured namespaces (corpus + library).
-async function fetchAllDocs(namespaces: string[]): Promise<DocItem[]> {
-  const perNs = await Promise.all(namespaces.map(fetchNamespaceDocs))
-  return perNs.flat()
-}
-
-// Edge-type templates keyed `${namespace}:${value}` — edge-type sets differ per
-// namespace, and a relationship doc is filtered out of the candidate set by this key.
-async function fetchEdgeTypeKeys(namespaces: string[]): Promise<Set<string>> {
-  const perNs = await Promise.all(
-    namespaces.map(async (ns) => {
-      const r = await wipFetchJson<TemplateListResponse>(
-        `/api/template-store/templates?namespace=${ns}&latest_only=true&page_size=100`,
-      )
-      return r.items.filter((t) => t.usage === 'relationship').map((t) => `${ns}:${t.value}`)
-    }),
-  )
-  return new Set(perNs.flat())
-}
 
 // Unified FTS: fan out to each namespace's reporting-sync search and merge the
 // per-type buckets. Hits carry global-UUID ids, so they join docsById (which
@@ -356,15 +255,9 @@ export default function SearchPage() {
 
   const nsKey = NAMESPACES.join(',')
   const allDocsQ = useQuery<DocItem[]>({
-    queryKey: ['kb-docs-all', nsKey],
-    queryFn: () => fetchAllDocs(NAMESPACES),
+    queryKey: ['kb-corpus-headers', nsKey],
+    queryFn: () => fetchCorpusHeaders(NAMESPACES, SEARCH_HIDDEN),
     staleTime: 30_000,
-  })
-
-  const edgeKeysQ = useQuery<Set<string>>({
-    queryKey: ['edge-type-keys', nsKey],
-    queryFn: () => fetchEdgeTypeKeys(NAMESPACES),
-    staleTime: 5 * 60_000,
   })
 
   const searchQ = useQuery<FtsResponse>({
@@ -385,14 +278,13 @@ export default function SearchPage() {
   const appTermMap = appTermsQ.data ?? EMPTY_APP_TERMS
   const appOf = useCallback(
     (doc: DocItem): string | undefined => {
-      const ref = doc.term_references?.find((r) => r.field_path === 'app')
-      const canon = ref ? appTermMap.get(ref.term_id) : undefined
+      // CASE-422 canonical app: resolve the reporting `app_term_id` (the resolved
+      // KB_APP term) through the term map; fall back to the raw data.app.
+      const canon = doc.data.app_term_id ? appTermMap.get(doc.data.app_term_id) : undefined
       return canon ?? doc.data.app
     },
     [appTermMap],
   )
-
-  const edgeKeys = edgeKeysQ.data ?? EMPTY_EDGE_KEYS
 
   const docsById = useMemo(() => {
     const m = new Map<string, DocItem>()
@@ -400,15 +292,9 @@ export default function SearchPage() {
     return m
   }, [allDocsQ.data])
 
-  const filterableDocs = useMemo(
-    () =>
-      (allDocsQ.data ?? []).filter(
-        (d) =>
-          !edgeKeys.has(`${d.namespace}:${d.template_value}`) &&
-          d.template_value !== 'BOOTSTRAP_RECORD',
-      ),
-    [allDocsQ.data, edgeKeys],
-  )
+  // Edge (relationship) and structural types are already excluded at the reporting
+  // source (fetchCorpusHeaders), so the corpus is the browse/facet set as-is.
+  const filterableDocs = useMemo(() => allDocsQ.data ?? [], [allDocsQ.data])
 
   const allTemplates = useMemo(
     () => Array.from(new Set(filterableDocs.map((d) => d.template_value))).sort(),
@@ -517,14 +403,13 @@ export default function SearchPage() {
         if (seen.has(h.id)) continue
         seen.add(h.id)
         const doc = docsById.get(h.id)
-        if (!doc) continue
-        if (edgeKeys.has(`${doc.namespace}:${doc.template_value}`) || doc.template_value === 'BOOTSTRAP_RECORD') continue
+        if (!doc) continue // docsById holds only entity docs (edges/structural excluded at source)
         result.push({ doc, score: h.score, snippet: h.snippet })
       }
       return result
     }
     return filterableDocs.map((d) => ({ doc: d, score: null, snippet: null }))
-  }, [query, searchQ.data, docsById, edgeKeys, filterableDocs])
+  }, [query, searchQ.data, docsById, filterableDocs])
 
   const filtered = useMemo(
     () =>
@@ -665,8 +550,8 @@ export default function SearchPage() {
   const activeFilterCount =
     tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size + pFilter.size + rFilter.size
   const isLoading =
-    allDocsQ.isLoading || edgeKeysQ.isLoading || (query.trim() && searchQ.isLoading)
-  const error = allDocsQ.error ?? edgeKeysQ.error ?? searchQ.error
+    allDocsQ.isLoading || (query.trim() && searchQ.isLoading)
+  const error = allDocsQ.error ?? searchQ.error
 
   return (
     <div className="flex gap-6">

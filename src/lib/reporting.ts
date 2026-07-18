@@ -44,6 +44,17 @@ export interface HeaderDoc {
     path?: string
     status?: string // workflow status (data.status) — the reporting `data_status` column
     doc_status?: string
+    owner?: string // YAC_MEMORY carries its author here, not in authored_by (CASE-603)
+    // Facet fields the search rail reads (present only on the templates that
+    // declare them: kind→DOCUMENT, severity/app/app_term_id/component→CASE_RECORD,
+    // release→LIBRARY_DOC). app_term_id resolves the canonical KB_APP term (CASE-422)
+    // in place of the document's term_references, which reporting does not carry.
+    kind?: string
+    severity?: string
+    app?: string
+    app_term_id?: string
+    release?: string
+    component?: string
   }
 }
 
@@ -79,6 +90,13 @@ const HEADER_COLS: Record<string, string> = {
   path: 'text',
   data_status: 'text',
   doc_status: 'text',
+  owner: 'text',
+  kind: 'text',
+  severity: 'text',
+  app: 'text',
+  app_term_id: 'text',
+  release: 'text',
+  component: 'text',
 }
 
 interface RawHeaderRow {
@@ -93,6 +111,13 @@ interface RawHeaderRow {
   path: string | null
   data_status: string | null
   doc_status: string | null
+  owner: string | null
+  kind: string | null
+  severity: string | null
+  app: string | null
+  app_term_id: string | null
+  release: string | null
+  component: string | null
 }
 
 // Per namespace: which doc_<stem> tables exist and which header columns each has.
@@ -131,6 +156,13 @@ function toHeaderDoc(r: RawHeaderRow, namespace: string): HeaderDoc {
   if (r.path != null) data.path = r.path
   if (r.data_status != null) data.status = r.data_status
   if (r.doc_status != null) data.doc_status = r.doc_status
+  if (r.owner != null) data.owner = r.owner
+  if (r.kind != null) data.kind = r.kind
+  if (r.severity != null) data.severity = r.severity
+  if (r.app != null) data.app = r.app
+  if (r.app_term_id != null) data.app_term_id = r.app_term_id
+  if (r.release != null) data.release = r.release
+  if (r.component != null) data.component = r.component
   return {
     document_id: r.document_id,
     namespace,
@@ -249,4 +281,33 @@ export async function fetchSummary(
   groups.sort((a, b) => b.newest.localeCompare(a.newest))
 
   return { groups, caseStats }
+}
+
+// Every entity document across the given namespaces, header fields only (no body),
+// for the search page's browse set + facet rails + FTS-hit hydration. One schema
+// probe + one UNION-of-all-entity-tables query per namespace, bounded by max_rows
+// (well above the current corpus; header rows are tiny). Replaces the whole-corpus
+// full-body fetch (CASE-687 Phase 2). `hidden` omits structural types but KEEPS
+// CASE_RESPONSE, which search surfaces on demand.
+export async function fetchCorpusHeaders(
+  namespaces: string[],
+  hidden: Set<string>,
+): Promise<HeaderDoc[]> {
+  const perNs = await Promise.all(
+    namespaces.map(async (ns) => {
+      if (!NS_RE.test(ns)) throw new Error(`invalid namespace: ${ns}`)
+      const tables = entityTables(await fetchTableColumns(ns), hidden)
+      if (tables.length === 0) return []
+      const sql = tables
+        .map(
+          ([stem, present]) =>
+            `SELECT document_id, created_at, updated_at, ${headerProjection(present)}, ` +
+            `'${stem.toUpperCase()}' AS template_value FROM "${ns}"."doc_${stem}"`,
+        )
+        .join('\nUNION ALL\n')
+      const { rows } = await reportingQuery<RawHeaderRow>(ns, sql, 50000)
+      return rows.map((r) => toHeaderDoc(r, ns))
+    }),
+  )
+  return perNs.flat()
 }
