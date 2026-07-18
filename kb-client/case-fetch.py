@@ -287,6 +287,40 @@ def _emit_rows(rows: list[dict], fmt: str, table: str) -> None:
     sys.exit(0)
 
 
+def read_type(type_: str, filters: list[str], namespace: str | None,
+              page: int, page_size: int) -> dict | None:
+    """GET /read/:type — the generic typed read, symmetric to kb-write.py's
+    /write/:type (CASE-683). Every `--filter k=v` becomes an eq-match on data.k, so
+    a type's identity fields filter for free. Returns the gateway payload, or None
+    if the type/route is absent."""
+    params: dict[str, str] = {"page": str(page), "page_size": str(min(page_size, 100))}
+    if namespace:
+        params["namespace"] = namespace
+    for f in filters or []:
+        if "=" not in f:
+            print(f"ERROR: --filter must be key=value (got: {f!r})", file=sys.stderr)
+            sys.exit(2)
+        k, v = f.split("=", 1)
+        params[k.strip()] = v
+    return gw_get(f"/read/{urllib.parse.quote(type_, safe='')}?" + urllib.parse.urlencode(params))
+
+
+def _format_read_table(payload: dict) -> str:
+    items = payload.get("items") or []
+    head = (f"{payload.get('type')} — {payload.get('total', len(items))} doc(s) "
+            f"[{payload.get('namespace')}] · page {payload.get('page')}/{payload.get('pages')}\n")
+    # Salient identity-ish fields first; fall back to a compact data dump.
+    salient = ("title", "name", "owner", "mem_key", "slug", "snapshot_date", "repo",
+               "day_number", "authored_by", "doc_status")
+    lines = [head]
+    for it in items:
+        d = it.get("data") or {}
+        keys = [k for k in salient if k in d]
+        summ = " · ".join(f"{k}={d[k]}" for k in keys) if keys else json.dumps(d)[:100]
+        lines.append(f"  {it.get('document_id')}  {summ}")
+    return "\n".join(lines) + "\n"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="KB read client (gateway-only).")
     sub = ap.add_subparsers(dest="mode", required=True)
@@ -344,6 +378,19 @@ def main() -> None:
     flags_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
     flags_sp.add_argument("--format", choices=["table", "json"], default="table")
 
+    read_sp = sub.add_parser("read", help="generic typed read (CASE-683) — every type "
+                                          "kb-write.py can write is readable here, via GET /read/:type")
+    read_sp.add_argument("type_", metavar="TYPE",
+                         help="doc type value, e.g. YAC_MEMORY, LESSON, DESIGN_DECISION, DOCUMENT")
+    read_sp.add_argument("--filter", action="append", metavar="KEY=VALUE",
+                         help="eq-filter on data.KEY, repeatable — identity fields work for free "
+                              "(e.g. --filter owner=FRanC, --filter snapshot_date=2026-07-18 --filter repo=WIP-KB)")
+    read_sp.add_argument("--namespace", help="namespace override (default: the type's home namespace)")
+    read_sp.add_argument("--page", type=int, default=1, help="page number (default 1)")
+    read_sp.add_argument("--page-size", dest="page_size", type=int, default=50,
+                         help="rows per page (default 50, cap 100)")
+    read_sp.add_argument("--format", choices=["table", "json"], default="table")
+
     args = ap.parse_args()
 
     try:
@@ -365,6 +412,17 @@ def main() -> None:
                 sys.stdout.write(json.dumps(payload, indent=2) + "\n")
             else:
                 sys.stdout.write(render_case(payload, view))
+            sys.exit(0)
+
+        elif args.mode == "read":
+            payload = read_type(args.type_, args.filter, args.namespace, args.page, args.page_size)
+            if payload is None:
+                print(f"type {args.type_!r} not readable in kb (unknown type or no route)", file=sys.stderr)
+                sys.exit(1)
+            if args.format == "json":
+                sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+            else:
+                sys.stdout.write(_format_read_table(payload))
             sys.exit(0)
 
         elif args.mode == "journey":

@@ -442,6 +442,59 @@ router.post('/write/:type', async (req, res) => {
   }
 })
 
+// GET /read/:type — the generic typed-READ surface, symmetric to POST /write/:type
+// (CASE-683). Read/write parity as an invariant: every type the client can WRITE it
+// can READ, by construction — no bespoke per-type endpoint, so a new type is readable
+// the day it becomes writable. The purpose-built read verbs (/cases, /journeys/:day,
+// /firesides, /library-docs, /sessions, /flags) keep their earned projections; this is
+// the long-tail floor, deliberately shapeless. Every non-reserved query param becomes
+// an eq-filter on data.<param>, so a type's identity fields filter for free
+// (/read/YAC_MEMORY?owner=FRanC, /read/GIT_STATS_SNAPSHOT?snapshot_date=…&repo=…) with
+// zero per-type code. Namespace routing reuses the write side's resolver (CASE-518),
+// so DOCUMENT (papers) and Library-owned types land in the right namespace. Rows are
+// returned raw — no shaping. Default read-allowed for every real type; a per-type read
+// policy is a knob to add THEN if a type ever needs restricted reads, not now.
+const READ_RESERVED = new Set(['namespace', 'page', 'page_size'])
+router.get('/read/:type', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const type = req.params.type
+  const reqNs = req.query.namespace ? String(req.query.namespace) : undefined
+  let ns: string
+  try {
+    ns = await resolveWriteNs(type, reqNs, key)
+  } catch (e) {
+    return res.status((e as WipError).status || 502).json({ error: (e as Error).message })
+  }
+  // Validate the type resolves to a real template → a clean 404 for unknown types,
+  // rather than an opaque store error on template_id.
+  try {
+    await templateId(type, ns, key)
+  } catch {
+    return res.status(404).json({ error: `unknown type '${type}' in namespace ${ns}` })
+  }
+  const { page, pageSize } = pageParams(req)
+  const filters: AnyObj[] = []
+  for (const [k, v] of Object.entries(req.query)) {
+    if (READ_RESERVED.has(k) || v == null) continue
+    filters.push({ field: `data.${k}`, operator: 'eq', value: String(v) })
+  }
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: type, filters, page, page_size: pageSize })
+    res.json({
+      type, namespace: ns, total: d.total, page: d.page, pages: d.pages,
+      items: (d.items || []).map((it: AnyObj) => ({
+        document_id: it.document_id, version: it.version,
+        data: it.data || {}, metadata: it.metadata || {},
+        created_at: it.created_at, updated_at: it.updated_at,
+      })),
+    })
+  } catch (e) {
+    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+  }
+})
+
 // ---------------------------------------------------------------------------
 // Edge surface (CASE-630): attach/inspect edges on EXISTING docs — the
 // sanctioned recovery for a failed edge intent from /write/:type (before this,
