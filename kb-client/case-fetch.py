@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-case-fetch.py — read-side commands for the KB client (cases, journeys, list, firesides, library).
+case-fetch.py — read-side commands for the KB client (cases, journeys, list, firesides, library,
+and the generic typed read for any writable type).
 
 Every read goes through the KB **gateway** API (`{BASE_PATH}/server-api/kb/…`) via
 kb_client_core — the app-specific layer that owns projection, namespace discipline,
@@ -8,7 +9,8 @@ and identity. Clients never reach past it into the document-store backend (CASE-
 the "straight to MongoDB" anti-pattern). Transport, target config, and local→remote
 failover all live in the core; this file is thin command handlers + output shaping.
 
-(The filename is historical — it now serves journeys, list, firesides, and library too.)
+(The filename is historical — it now serves journeys, list, firesides, library, and a
+generic `read <TYPE>` too.)
 
 Exit codes:
     0 = success (body / table printed to stdout)
@@ -24,6 +26,7 @@ Usage:
     case-fetch.py fireside <document_id>
     case-fetch.py library list [--release …] [--category …] [--audience …] [--limit N] [--format …]
     case-fetch.py library <slug> --release <release>
+    case-fetch.py read <TYPE> [--filter KEY=VALUE …] [--namespace …] [--page N] [--page-size N] [--format …]
 
 Env: see kb_client_core (KB_BASE_URL / KB_API_KEY_FILE / KB_PREFER_LOCAL / …).
 """

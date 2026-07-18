@@ -209,6 +209,33 @@ Terminal. Tell Peter what was applied and that the case is implemented.
 
 ---
 
+## Reading any KB type — generic typed read (CASE-683)
+
+Read/write parity: every doc type `kb-write.py` can write is readable through one
+generic verb, symmetric to the single `POST /write/:type` write surface. Backed by
+`GET /read/:type`. Use this for the writable types that have no bespoke read verb
+(`YAC_MEMORY`, `LESSON`, `DESIGN_DECISION`, `GIT_STATS_SNAPSHOT`,
+`BOOTSTRAP_RECORD`, `DOCUMENT`, …); the dedicated verbs above (`case`, `list`,
+`fireside`, `library`, `journey`) are richer where they exist.
+
+```bash
+kbc case-fetch.py read <TYPE> [--filter KEY=VALUE …]
+#   TYPE        — the doc type value, e.g. YAC_MEMORY, LESSON, DESIGN_DECISION, DOCUMENT
+#   --filter    — repeatable; each KEY=VALUE is an eq-match on data.KEY, so a type's
+#                 identity fields filter for free
+#   --namespace — override the type's home namespace (default: its home)
+#   --page / --page-size — paginate (default page 1, 50 rows/page, cap 100)
+#   --format table|json  — default table
+
+kbc case-fetch.py read LESSON --filter owner=FRanC
+kbc case-fetch.py read GIT_STATS_SNAPSHOT --filter repo=WIP-KB --filter snapshot_date=2026-07-18
+kbc case-fetch.py read YAC_MEMORY --format json
+```
+
+Exit 1 if the type is unknown or has no read route; exit 2 on transport failure.
+
+---
+
 ## Edges — attach and inspect cross-links (CASE-630)
 
 Cross-links live in the graph, not in prose. A response that concerns another
