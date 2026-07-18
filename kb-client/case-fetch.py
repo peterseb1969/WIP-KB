@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import urllib.parse
 
@@ -50,11 +51,42 @@ def fetch_case_payload(case_num: int, view: str = "both", response: str | None =
     return gw_get(q)
 
 
+def _overlay_status(body: str, live: str | None) -> str:
+    """Make the rendered case body reflect the LIVE structured status (CASE-690).
+
+    A CASE_RECORD stores status twice: the structured `data.status` (what --patch
+    updates and `list` filters on) and the filed markdown body. Older case bodies
+    open with a frontmatter block whose `status:` line is frozen at filing time, so
+    the default rendered view showed a stale value (e.g. `open`) for any case that
+    had since been responded/closed/implemented. Overlay the live value at RENDER
+    time only — the stored body stays the immutable filed artifact:
+      - body with a frontmatter `status:` line → rewrite it, annotating a
+        divergence (`status: implemented (live; filed as open)`);
+      - body without one (gateway-filed, no frontmatter) → prepend a live-status
+        line so every rendered case shows its current status.
+    """
+    if not live:
+        return body
+    fm = re.match(r"---\n.*?\n---\n", body, re.S)
+    if fm:
+        def _sub(m: re.Match) -> str:
+            filed = m.group(2).strip()
+            repl = live if filed == live else f"{live} (live; filed as {filed})"
+            return f"{m.group(1)}{repl}"
+        new_block, n = re.subn(
+            r"^(status:[ \t]*)(.+?)[ \t]*$", _sub, fm.group(0), count=1, flags=re.M
+        )
+        if n:
+            return new_block + body[fm.end():]
+    return f"> **status:** {live}\n\n{body}"
+
+
 def render_case(payload: dict, view: str) -> str:
     """Render the gateway payload to markdown: body, the response thread, or both."""
     parts: list[str] = []
     if view in ("case", "both"):
-        parts.append((payload.get("body") or "").rstrip("\n"))
+        body = _overlay_status(payload.get("body") or "", payload.get("status"))
+        parts.append(body.rstrip("\n"))
     if view in ("responses", "both"):
         responses = payload.get("responses") or []
         if responses:
