@@ -93,8 +93,16 @@ _LIST_FACETS = ("status", "filed_by", "severity", "type", "component", "app")
 
 def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
     """GET /cases?<facets>. Returns the gateway's projected rows, re-shaped for
-    the table (case_number + a slug derived from the title)."""
-    params: dict[str, str] = {"page_size": str(min(limit, 100))}
+    the table (case_number + a slug derived from the title).
+
+    `target_yac` is filtered CLIENT-SIDE: the gateway returns it per item but does
+    not facet on it, so we fetch the other facets server-side and narrow here. When
+    a target filter is set we fetch the full page (cap 100) so matches aren't lost
+    below the pre-filter --limit; comma-separated values are OR-ed (e.g.
+    `--target-yac APP-KB,any` for "mine + unassigned")."""
+    targets = {t.strip() for t in (args.target_yac or "").split(",") if t.strip()}
+    page_size = 100 if targets else min(limit, 100)
+    params: dict[str, str] = {"page_size": str(page_size)}
     if args.status:
         params["status"] = args.status            # comma list ok — gateway splits
     if args.filed_by:
@@ -110,6 +118,8 @@ def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
     payload = gw_get("/cases?" + urllib.parse.urlencode(params)) or {}
     rows = []
     for it in payload.get("items") or []:
+        if targets and (it.get("target_yac") or "") not in targets:
+            continue
         title = it.get("title") or ""
         slug = title.split(":", 1)[1].strip() if ":" in title else title
         rows.append({
@@ -119,6 +129,7 @@ def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
             "type": it.get("type") or "",
             "component": it.get("component") or "",
             "filed_by": it.get("filed_by") or "",
+            "target_yac": it.get("target_yac") or "",
             "app": it.get("app") or "",
             "slug": slug,
         })
@@ -127,8 +138,8 @@ def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
 
 def _format_case_table(rows: list[dict]) -> str:
     header = (
-        "| # | Status | Severity | Type | Component | Filed by | Slug |\n"
-        "|---|---|---|---|---|---|---|"
+        "| # | Status | Severity | Type | Component | Target | Filed by | Slug |\n"
+        "|---|---|---|---|---|---|---|---|"
     )
     if not rows:
         return f"{header}\n_(no matches)_\n"
@@ -139,7 +150,7 @@ def _format_case_table(rows: list[dict]) -> str:
         out.append(
             f"| {cn_str} | {r['status'] or ''} | {r['severity'] or ''} | "
             f"{r['type'] or ''} | {r['component'] or ''} | "
-            f"{r['filed_by'] or ''} | {r['slug'] or ''} |"
+            f"{r.get('target_yac') or ''} | {r['filed_by'] or ''} | {r['slug'] or ''} |"
         )
     return "\n".join(out) + "\n"
 
@@ -267,6 +278,9 @@ def main() -> None:
     list_sp.add_argument("--type", dest="type_", help="case type")
     list_sp.add_argument("--component", help="component label (e.g. scaffold)")
     list_sp.add_argument("--app", help="filter by app (e.g. backend, cross-agent)")
+    list_sp.add_argument("--target-yac", dest="target_yac",
+                         help="filter by assigned YAC, comma-separated (e.g. APP-KB or APP-KB,any). "
+                              "Client-side: the gateway returns target_yac but does not facet on it.")
     list_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
     list_sp.add_argument("--format", choices=["table", "json"], default="table")
 
