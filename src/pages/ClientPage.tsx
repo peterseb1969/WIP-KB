@@ -31,7 +31,7 @@ const FILE_ROLES: Record<string, Role> = {
   'kb-client.sh': { role: 'Runner — fetches/refreshes the bundle; run scripts via it', extra: true },
   'install.sh': { role: 'Bootstrap — `curl | sh` materializes the bundle', extra: true },
   'kb_client_core.py': { role: 'Shared core — kb.json/API-key resolution + gateway transport (gw_get/gw_post, failover)' },
-  'case-fetch.py': { role: 'Read — case (body + response thread) / journey / list / fireside, all via the gateway' },
+  'case-fetch.py': { role: 'Read — case (body + response thread) / journey / list / fireside / library / edges / flags / read <TYPE> (generic typed read), all via the gateway' },
   'kb-write.py': { role: 'The write client — any doc type via POST /write/:type (file/dir/json sources, edges, patch, and git-stats via --git-repo)' },
   'case-workflow.md': { role: 'Playbook — authoritative case how-to (rendered below)', extra: true },
   'README.md': { role: 'Bundle readme', extra: true },
