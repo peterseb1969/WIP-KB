@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 
 from kb_client_core import DEV_ROOT, gw_get, gw_post
 
@@ -575,8 +576,12 @@ def cmd_gitstats(args: argparse.Namespace) -> int:
     return 0 if failures == 0 else 2
 
 
-def cmd_list(fmt: str) -> int:
-    payload = gw_get("/types") or {}
+def cmd_list(fmt: str, namespace: str | None = None) -> int:
+    # Unscoped, /types spans every namespace (corpus + library). An explicit
+    # --namespace narrows it deliberately; the transport no longer narrows it by
+    # accident (CASE-701).
+    path = f"/types?namespace={urllib.parse.quote(namespace)}" if namespace else "/types"
+    payload = gw_get(path) or {}
     types = payload.get("types") or []
     if fmt == "json":
         sys.stdout.write(json.dumps(types, indent=2) + "\n")
@@ -647,8 +652,11 @@ def main() -> int:
     ap.add_argument("file", nargs="?", help="markdown file with frontmatter, or '-' for stdin; EDGE: the edge type")
     ap.add_argument("source", nargs="?", help="EDGE only: source handle (synonym or document_id)")
     ap.add_argument("target", nargs="?", help="EDGE only: target handle (synonym or document_id)")
-    ap.add_argument("--namespace", help="EDGE only: namespace override (default: gateway corpus)")
-    ap.add_argument("--list", action="store_true", help="list writable doc types (GET /types)")
+    ap.add_argument("--namespace",
+                    help="namespace override — EDGE (default: gateway corpus) and --list "
+                         "(default: every namespace)")
+    ap.add_argument("--list", action="store_true",
+                    help="list writable doc types across all namespaces (GET /types)")
     ap.add_argument("--json", help="raw JSON data object instead of a file")
     ap.add_argument("--field", action="append", help="add/override a data field k=v (repeatable)")
     ap.add_argument("--edge", action="append", help="edge intent TYPE:target_type:target_key (repeatable)")
@@ -665,7 +673,7 @@ def main() -> int:
 
     try:
         if args.list:
-            return cmd_list(args.format)
+            return cmd_list(args.format, args.namespace)
         if args.git_list_repos or args.git_repo or args.git_backfill:
             return cmd_gitstats(args)
         if not args.type:

@@ -102,6 +102,9 @@ LOCAL_URL = os.environ.get("KB_LOCAL_URL", LOCAL_BASE_URL)
 LOCAL_KEY = resolve_key_file(LOCAL_URL, LOCAL_BASE_URL, "wip-local",
                              "KB_LOCAL_KEY_FILE")
 NAMESPACE = os.environ.get("KB_NAMESPACE", "kb")
+# Whether the caller CHOSE that namespace, as opposed to inheriting the default.
+# The distinction matters only for cross-namespace endpoints — see _gw_url.
+NAMESPACE_EXPLICIT = "KB_NAMESPACE" in os.environ
 GW_BASE_PATH = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")  # KB gateway mount
 PREFER_LOCAL = os.environ.get("KB_PREFER_LOCAL") == "1"
 VERIFY_TLS = os.environ.get("KB_VERIFY_TLS", "false").lower() == "true"
@@ -130,13 +133,32 @@ def targets() -> list[tuple[str, str, Path]]:
     return out
 
 
+# Endpoints whose UNSCOPED behaviour spans every namespace. For these, sending
+# `?namespace=kb` is NOT the no-op it is everywhere else — it narrows the answer.
+# /types is the discovery manifest: with no param the gateway enumerates the corpus
+# AND the library namespace; pinned to kb it silently drops LIBRARY_DOC, so the tool
+# that writes a type denies the type exists (CASE-701).
+_CROSS_NS_PATHS = frozenset({"/types"})
+
+
 def _gw_url(base_url: str, path: str) -> str:
-    # Pin every call to the configured namespace. In prod KB_NAMESPACE is 'kb'
-    # (== the gateway default, so a no-op); set it to a dev namespace (e.g.
-    # kb-redesign) to point the whole client there. The gateway treats
-    # ?namespace as the explicit override.
-    sep = "&" if "?" in path else "?"
-    path = f"{path}{sep}namespace={urllib.parse.quote(NAMESPACE)}"
+    # Pin every call to the configured namespace: set KB_NAMESPACE to a dev
+    # namespace (e.g. kb-redesign) to point the whole client there. The gateway
+    # treats ?namespace as the explicit override.
+    #
+    # Two exceptions, so the pin can't narrow an answer the caller didn't ask to
+    # narrow:
+    #   1. The caller already supplied a namespace in the path — theirs wins, and
+    #      appending would send the parameter twice.
+    #   2. A cross-namespace endpoint AND KB_NAMESPACE was merely inherited, not
+    #      chosen. An explicit KB_NAMESPACE still scopes these (the dev-namespace
+    #      workflow keeps working); the bare default no longer does.
+    endpoint = path.split("?", 1)[0]
+    already_scoped = "namespace=" in path
+    inherit_only = endpoint in _CROSS_NS_PATHS and not NAMESPACE_EXPLICIT
+    if not already_scoped and not inherit_only:
+        sep = "&" if "?" in path else "?"
+        path = f"{path}{sep}namespace={urllib.parse.quote(NAMESPACE)}"
     return f"{base_url}{GW_BASE_PATH}/server-api/kb{path}"
 
 
