@@ -121,9 +121,9 @@ wip-deploy install \
 What changes:
 
 - Let's Encrypt issues a real cert via Caddy. You need port 443 reachable from the public internet for the ACME HTTP-01 challenge, and a hostname that resolves on the public internet.
-- HSTS and standard hardening headers are added by default.
+- HSTS and standard hardening headers (nosniff, X-Frame-Options, Referrer-Policy) are included in the rendered Caddy config for letsencrypt installs — `wip-deploy verify --security` confirms them.
 - For testing the ACME flow without burning rate limits, use `--tls letsencrypt --acme-staging` (staging cert is *not* trusted by browsers).
-- Walk the §7 *Security Hardening* checklist before exposing the host (the v1 `production-check.sh` validator is retired — CASE-383; a v2-native check is tracked in CASE-445).
+- Run `wip-deploy verify --security` and walk the §7 *Security Hardening* checklist before exposing the host.
 
 ### Tier 3: Enterprise
 
@@ -236,11 +236,50 @@ WIP supports two kinds of API keys; both authenticate identically.
 | Aspect | Config keys | Runtime keys |
 |---|---|---|
 | Defined in | `config/api-keys.json` | MongoDB, via REST API |
-| Created by | Editing the file + recreating services | `POST /api/registry/api-keys` |
+| Created by | Declared in the deployment spec (`--api-key`, below) or by editing the file + recreating services | `POST /api/registry/api-keys` |
 | Modifiable via API | No (read-only) | Yes |
 | Deletable via API | No | Yes |
-| Use case | Bootstrap keys (admin, service accounts) | App keys, temporary keys, automated provisioning |
+| Survives a MongoDB wipe/restore | **Yes** — material lives in the spec + secret backend | **No** — key and grants are Mongo rows; the plaintext is unrecoverable |
+| Use case | Bootstrap keys, service accounts, agent keys that must survive redeploys | App keys, temporary keys, UI-created keys |
 | `source` field on the key | `"config"` | `"runtime"` |
+
+**Spec-declared keys (recommended for standing agent/service keys).**
+Declare keys on the deployment and wip-deploy provisions everything:
+
+```bash
+wip-deploy install --target dev \
+  --api-key '{"name": "web-yac", "namespaces": ["library", "kb"], "grants": {"kb": "write"}}'
+```
+
+For each declared key the deployer generates a random plaintext into the
+install's secret backend (`~/.wip-deploy/<name>/secrets/<key>-api-key`,
+stable across re-applies), renders `config/auth/api-keys.json` (mode
+0600), and mounts it into every backend service. `namespaces` is the
+key's read scope; `grants` gives per-namespace `read`/`write`/`admin`
+and must stay within `namespaces`. Crucially, a spec-declared key's
+grants resolve **locally in wip-auth** — not via Registry grants in
+MongoDB — so the key keeps working, at full declared scope, after any
+Mongo rebuild (redeploy with a fresh volume, `nuke --remove-data`, or
+the wipe-and-restore remediation ritual). Runtime keys die in exactly
+those events, and backups do not cover them. The declaration persists
+in the install's state: plain `redeploy`/`rebuild` keep it.
+
+Several keys are more comfortably declared in a file than in repeated
+`--api-key` JSON — reviewable and diffable deployer input:
+
+```bash
+wip-deploy install --api-keys-file keys.yaml
+# keys.yaml: a list under a top-level `keys:` (or a bare list) —
+# each entry {name, namespaces, grants, owner?, groups?}.
+# File entries merge with any --api-key values.
+```
+
+Rotate a declared key in place with `wip-deploy rotate-key <name>`: the
+key's secret is regenerated, the spec re-applied, and the fresh
+plaintext printed exactly once. No grace window — the old plaintext
+stops working at apply; services reading a mounted `*_API_KEY_FILE`
+pick up the new value automatically, external holders must be re-handed
+it. (Runtime keys can't rotate in place — revoke + create.)
 
 ### 4.4 Runtime API keys: CRUD endpoints
 
@@ -692,20 +731,18 @@ Rotation cadences worth defaulting to:
 
 ### 7.3 Validate before exposing
 
-The v1 `production-check.sh` validator was retired with the v1 deployment
-shape it checked (CASE-383); a v2-native automated check is tracked in
-CASE-445. Until it lands, verify manually on the install:
+Run the automated pre-exposure checklist against the install:
 
 ```bash
-# Secret backend permissions: dir 700, files 600
-ls -ld ~/.wip-deploy/<name>/secrets && ls -l ~/.wip-deploy/<name>/secrets
-
-# API key is the generated random one, not the documented dev default
-grep -c "dev_master_key_for_testing" ~/.wip-deploy/<name>/.env   # expect 0
-
-# TLS mode matches the exposure (letsencrypt for public hostnames)
-grep -m1 -A2 "tls" ~/.wip-deploy/<name>/config/caddy/Caddyfile
+wip-deploy verify --security --name <name>
 ```
+
+Read-only. It checks secret file permissions (dir 700, files 600), API-key
+strength (not the documented dev default, not trivially short), TLS mode vs
+hostname sanity, variant vs exposure (a public-shaped install must run
+`--variant prod` so the in-service startup guards are armed), published host
+ports (no datastore/admin ports bypassing Caddy), and security headers on
+public installs. Exit 0 = safe to expose; each failure prints a fix hint.
 
 ### 7.4 Ongoing health monitoring
 
