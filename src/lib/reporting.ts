@@ -137,13 +137,48 @@ interface RawHeaderRow {
 }
 
 // Per namespace: which doc_<stem> tables exist and which header columns each has.
+// The reporting API's own view of which relation is an entity's query surface
+// (CASE-715). Post-split, ONE template owns three relations that all return the
+// same rows — the physical `doc_<v>__vN` table, the `doc_<v>__entities` view, and
+// the bare `doc_<v>` view. A `LIKE 'doc_%'` sweep keeps all three and counts every
+// document three times (localhost read "4926 docs across 34 types" against a
+// ground truth of 3,410).
+interface TablesResponse {
+  tables?: Array<{ name?: string }>
+  entities?: Array<{ default_view?: string; default_view_present?: boolean; entities_view?: string }>
+}
+
+const REL_RE = /^doc_[a-z0-9_]+$/
+
+// Ask the API which relations to query rather than parsing names. A suffix
+// heuristic works today and breaks on the first template that reaches v2 (a new
+// `__v2` to chase) — the `entities` grouping exists to retire exactly that.
+async function fetchCanonicalRelations(namespace: string): Promise<string[]> {
+  const d = await wipFetchJson<TablesResponse>(
+    `/api/reporting-sync/tables?namespace=${encodeURIComponent(namespace)}`,
+  )
+  // Post-split: `entities` names the default view per entity. Pre-split (what
+  // kb.internal still runs): no grouping, and the flat list is already one table
+  // per entity — the bare name is deliberately identical in both worlds, so the
+  // rest of this module needs no branch.
+  const names = d.entities?.length
+    ? d.entities.map((e) => (e.default_view_present === false ? e.entities_view : e.default_view))
+    : (d.tables ?? []).map((t) => t.name)
+  // Names are interpolated into SQL identifiers below; the API is trusted but the
+  // guard is cheap and keeps that assumption from becoming load-bearing.
+  return [...new Set(names.filter((n): n is string => !!n && REL_RE.test(n)))]
+}
+
 async function fetchTableColumns(namespace: string): Promise<Map<string, Set<string>>> {
+  const relations = await fetchCanonicalRelations(namespace)
+  if (relations.length === 0) return new Map()
   const cols = Object.keys(HEADER_COLS)
     .map((c) => `'${c}'`)
     .join(',')
   const sql =
     `SELECT table_name, column_name FROM information_schema.columns ` +
-    `WHERE table_schema = '${namespace}' AND table_name LIKE 'doc_%' ` +
+    `WHERE table_schema = '${namespace}' ` +
+    `AND table_name IN (${relations.map((r) => `'${r}'`).join(',')}) ` +
     `AND column_name IN (${cols})`
   const { rows } = await reportingQuery<{ table_name: string; column_name: string }>(namespace, sql)
   const map = new Map<string, Set<string>>()
