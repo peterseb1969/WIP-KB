@@ -1,4 +1,5 @@
 import { wipFetchJson } from './wipBulk'
+import { wipClient } from './wipClient'
 
 // Read-only SQL against the reporting-sync PostgreSQL layer. Tables are per
 // template — "<namespace>"."doc_<template_value>", one row per latest document
@@ -136,27 +137,23 @@ interface RawHeaderRow {
   component: string | null
 }
 
-// Per namespace: which doc_<stem> tables exist and which header columns each has.
 // The reporting API's own view of which relation is an entity's query surface
 // (CASE-715). Post-split, ONE template owns three relations that all return the
 // same rows — the physical `doc_<v>__vN` table, the `doc_<v>__entities` view, and
 // the bare `doc_<v>` view. A `LIKE 'doc_%'` sweep keeps all three and counts every
 // document three times (localhost read "4926 docs across 34 types" against a
 // ground truth of 3,410).
-interface TablesResponse {
-  tables?: Array<{ name?: string }>
-  entities?: Array<{ default_view?: string; default_view_present?: boolean; entities_view?: string }>
-}
-
 const REL_RE = /^doc_[a-z0-9_]+$/
 
 // Ask the API which relations to query rather than parsing names. A suffix
 // heuristic works today and breaks on the first template that reaches v2 (a new
 // `__v2` to chase) — the `entities` grouping exists to retire exactly that.
+// Uses the client's typed reporting service (@wip/client >= 0.36.0), so the
+// response shape is version-tracked with the platform instead of hand-declared
+// here: ReportEntity documents that `row_count` is the entity's document count
+// under latest_only, which is the invariant this whole path depends on.
 async function fetchCanonicalRelations(namespace: string): Promise<string[]> {
-  const d = await wipFetchJson<TablesResponse>(
-    `/api/reporting-sync/tables?namespace=${encodeURIComponent(namespace)}`,
-  )
+  const d = await wipClient.reporting.listTables(undefined, namespace)
   // Post-split: `entities` names the default view per entity. Pre-split (what
   // kb.internal still runs): no grouping, and the flat list is already one table
   // per entity — the bare name is deliberately identical in both worlds, so the
@@ -169,6 +166,8 @@ async function fetchCanonicalRelations(namespace: string): Promise<string[]> {
   return [...new Set(names.filter((n): n is string => !!n && REL_RE.test(n)))]
 }
 
+// Per namespace: which canonical doc_<stem> relations exist and which header
+// columns each has.
 async function fetchTableColumns(namespace: string): Promise<Map<string, Set<string>>> {
   const relations = await fetchCanonicalRelations(namespace)
   if (relations.length === 0) return new Map()
