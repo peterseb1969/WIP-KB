@@ -23,7 +23,7 @@ Usage:
     case-fetch.py list [--status …] [--filed-by …] [--severity …] [--type …]
                        [--component …] [--app …] [--limit N] [--format table|json]
     case-fetch.py fireside list [--topic …] [--author …] [--limit N] [--format …]
-    case-fetch.py fireside <document_id>
+    case-fetch.py fireside <n>           # 12 or FIRESIDE-12, or a document_id
     case-fetch.py library list [--release …] [--category …] [--audience …] [--limit N] [--format …]
     case-fetch.py library <slug> --release <release>
     case-fetch.py read <TYPE> [--filter KEY=VALUE …] [--namespace …] [--page N] [--page-size N] [--format …]
@@ -210,16 +210,19 @@ def fetch_fireside(doc_id: str) -> str | None:
 
 
 def _format_fireside_table(rows: list[dict]) -> str:
+    # `#` is the fireside_number — the handle `fireside <n>` takes. Without it in the
+    # listing there is no way to discover N short of --format json.
     header = (
-        "| Chat date | Topic | Authored by | Title | Document ID |\n"
-        "|---|---|---|---|---|"
+        "| # | Chat date | Topic | Authored by | Title | Document ID |\n"
+        "|---|---|---|---|---|---|"
     )
     if not rows:
         return f"{header}\n_(no matches)_\n"
     out = [header]
     for r in rows:
+        n = r.get("fireside_number")
         out.append(
-            f"| {r.get('chat_date') or ''} | {r.get('topic') or ''} | "
+            f"| {'' if n is None else n} | {r.get('chat_date') or ''} | {r.get('topic') or ''} | "
             f"{r.get('authored_by') or ''} | {r.get('title') or ''} | "
             f"{r.get('document_id') or ''} |"
         )
@@ -354,7 +357,8 @@ def main() -> None:
     list_sp.add_argument("--format", choices=["table", "json"], default="table")
 
     fireside_sp = sub.add_parser("fireside", help="list firesides, or fetch one by document_id")
-    fireside_sp.add_argument("target", help="'list', or a fireside document_id")
+    fireside_sp.add_argument("target",
+                             help="'list', a fireside number (12 or FIRESIDE-12), or a document_id")
     fireside_sp.add_argument("--topic", help="filter list by exact topic (data.topic)")
     fireside_sp.add_argument("--author", help="filter list by exact author (data.authored_by)")
     fireside_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")

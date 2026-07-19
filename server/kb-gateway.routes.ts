@@ -125,15 +125,19 @@ async function resolveWriteNs(type: string, reqNs: string | undefined, key: stri
   return reqNs || NS_DEFAULT
 }
 
-// CASE-<n> Registry synonym -> document_id (the v2 resolution handle, CASE-425)
-async function resolveCase(n: number, ns: string, key: string): Promise<string | null> {
+// Registry synonym -> document_id (the v2 resolution handle, CASE-425). Every minted
+// handle resolves through this one lookup — CASE-<n>, FIRESIDE-<n>, LESSON-<n>,
+// DECISION-<n>, PAPER-<n> — so a read route accepts any valid handle for a document
+// exactly as it accepts the canonical id (Vision.md, "References Must Resolve").
+async function resolveSynonym(value: string, ns: string, key: string): Promise<string | null> {
   const d = await wipReq('POST', '/api/registry/entries/lookup/by-key', key, [{
     namespace: ns, entity_type: 'documents',
-    composite_key: { value: `CASE-${n}` }, search_synonyms: true,
+    composite_key: { value }, search_synonyms: true,
   }])
   const r = (d.results || [])[0] || {}
   return r.status === 'found' ? r.entry_id : null
 }
+const resolveCase = (n: number, ns: string, key: string) => resolveSynonym(`CASE-${n}`, ns, key)
 
 async function getDoc(id: string, ns: string, key: string): Promise<AnyObj> {
   return wipReq('GET', `/api/document-store/documents/${id}?namespace=${ns}`, key)
@@ -477,7 +481,18 @@ router.get('/read/:type', async (req, res) => {
   const filters: AnyObj[] = []
   for (const [k, v] of Object.entries(req.query)) {
     if (READ_RESERVED.has(k) || v == null) continue
-    filters.push({ field: `data.${k}`, operator: 'eq', value: String(v) })
+    const s = String(v).trim()
+    // Query params always arrive as strings, but a mint type's <type>_number identity
+    // field is stored as a JSON number — an eq against the string form can never match,
+    // which silently made every numeric identity field unfilterable. Match BOTH
+    // representations via `in` so a genuinely-string field that happens to hold digits
+    // keeps matching too. The round-trip check (String(n) === s) keeps non-canonical
+    // forms ("007", "1e3") on the string path, where they belong.
+    const n = Number(s)
+    if (s !== '' && Number.isFinite(n) && String(n) === s)
+      filters.push({ field: `data.${k}`, operator: 'in', value: [s, n] })
+    else
+      filters.push({ field: `data.${k}`, operator: 'eq', value: String(v) })
   }
   try {
     const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
@@ -820,6 +835,9 @@ router.get('/journeys/:day', async (req, res) => {
 function firesideProjection(it: AnyObj): AnyObj {
   const d = it.data || {}
   return {
+    // fireside_number is the human handle (FIRESIDE-<n>); without it in the projection
+    // a consumer can't discover N from a listing and can't fetch by number.
+    fireside_number: d.fireside_number ?? null,
     title: d.title, topic: d.topic || '', authored_by: d.authored_by || '',
     chat_date: d.chat_date || null, doc_status: d.doc_status || '',
     tags: d.tags || [], root: d.root || false,
@@ -846,14 +864,26 @@ router.get('/firesides', async (req, res) => {
   }
 })
 
-// GET /firesides/:id — full fireside incl. body, by document_id (identity is title;
-// no number/synonym). Discover ids via GET /firesides, then fetch here.
+// GET /firesides/:id — full fireside incl. body. FIRESIDE is a mint type
+// (synonym_prefix FIRESIDE, number_field fireside_number), so :id accepts a
+// FIRESIDE-<n> synonym, a bare <n>, or a document_id — any valid handle resolves like
+// the canonical id. Discover numbers/ids via GET /firesides.
 router.get('/firesides/:id', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
   const ns = String(req.query.namespace || NS_DEFAULT)
   try {
-    const doc = await getDoc(req.params.id, ns, key)
+    let id = req.params.id
+    const num = /^(?:FIRESIDE-)?(\d+)$/i.exec(id)
+    if (num) {
+      const resolved = await resolveSynonym(`FIRESIDE-${num[1]}`, ns, key)
+      if (!resolved) {
+        res.status(404).json({ error: `fireside ${req.params.id} not found in ${ns}` })
+        return
+      }
+      id = resolved
+    }
+    const doc = await getDoc(id, ns, key)
     res.json({ ...firesideProjection(doc), body: doc.data?.body || '' })
   } catch (e) {
     if (e instanceof WipError && e.status === 404) {
