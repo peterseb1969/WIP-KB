@@ -209,6 +209,34 @@ Terminal. Tell Peter what was applied and that the case is implemented.
 
 ---
 
+## Full-text search — find by content (CASE-707)
+
+Every verb above filters on values you already know. This is the "which docs mention
+X" surface, across the **whole corpus** — `kb` and `library` are searched as one and
+merged. Backed by `GET /search`, which fronts the platform's reporting-sync FTS
+(Postgres tsvector, ranked, with snippets).
+
+```bash
+kbc case-fetch.py search "reporting-sync"
+kbc case-fetch.py search "flag dispatch" --type CASE_RECORD
+kbc case-fetch.py search "restore" --mode substring --limit 50
+#   --type   restrict to one doc type (CASE_RECORD, FIRESIDE, LESSON, DOCUMENT, …)
+#   --mode   auto (default) | fts | substring — auto falls back to substring when
+#            FTS finds nothing
+#   --limit  max hits (default 25, cap 100); output flags when it truncated
+#   --format table|json
+```
+
+Results carry type, relevance score, title, a snippet, and the document_id — follow up
+with `case <n>` / `fireside <n>` / `read <TYPE>` to pull the full doc. Exit 1 when
+nothing matched.
+
+**Use this instead of dropping to reporting SQL.** Raw SQL bypasses the gateway (and
+targets whichever instance your env points at); this stays on the same gateway as every
+other verb.
+
+---
+
 ## Reading any KB type — generic typed read (CASE-683)
 
 Read/write parity: every doc type `kb-write.py` can write is readable through one

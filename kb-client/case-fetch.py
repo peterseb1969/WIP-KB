@@ -26,6 +26,7 @@ Usage:
     case-fetch.py fireside <n>           # 12 or FIRESIDE-12, or a document_id
     case-fetch.py library list [--release …] [--category …] [--audience …] [--limit N] [--format …]
     case-fetch.py library <slug> --release <release>
+    case-fetch.py search "<terms>" [--type TYPE] [--mode auto|fts|substring] [--limit N] [--format …]
     case-fetch.py read <TYPE> [--filter KEY=VALUE …] [--namespace …] [--page N] [--page-size N] [--format …]
 
 Env: see kb_client_core (KB_BASE_URL / KB_API_KEY_FILE / KB_PREFER_LOCAL / …).
@@ -311,6 +312,46 @@ def read_type(type_: str, filters: list[str], namespace: str | None,
     return gw_get(f"/read/{urllib.parse.quote(type_, safe='')}?" + urllib.parse.urlencode(params))
 
 
+def search_docs(q: str, type_: str | None, mode: str, limit: int) -> dict | None:
+    """GET /search — full-text search across the whole corpus (kb + library), the
+    content-search counterpart to the structured verbs (CASE-707)."""
+    params = {"q": q, "mode": mode, "limit": str(limit)}
+    if type_:
+        params["type"] = type_
+    return gw_get("/search?" + urllib.parse.urlencode(params))
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _clean_snippet(s: str | None, width: int = 100) -> str:
+    """Snippets arrive with the platform's <b> highlight markup and embedded
+    newlines. A terminal renders neither, and a raw newline or pipe would break the
+    markdown row — so strip tags, collapse whitespace, escape pipes, then clip."""
+    if not s:
+        return ""
+    text = " ".join(_TAG_RE.sub("", s).split()).replace("|", r"\|")
+    return text[:width] + "…" if len(text) > width else text
+
+
+def _format_search_table(payload: dict) -> str:
+    items = payload.get("items") or []
+    head = (f"{payload.get('query')!r} — {payload.get('returned', len(items))} hit(s) "
+            f"[{', '.join(payload.get('namespaces') or [])}] mode={payload.get('mode')}"
+            + ("  (truncated — raise --limit for more)" if payload.get("truncated") else ""))
+    if not items:
+        return f"{head}\n_(no matches)_\n"
+    out = [head, "", "| Type | Score | Title | Snippet | Document ID |", "|---|---|---|---|---|"]
+    for it in items:
+        score = it.get("score")
+        out.append(
+            f"| {it.get('template_value') or ''} | {'' if score is None else f'{score:.2f}'} | "
+            f"{(it.get('title') or '').replace('|', chr(92) + '|')[:60]} | "
+            f"{_clean_snippet(it.get('snippet'))} | {it.get('document_id') or ''} |"
+        )
+    return "\n".join(out) + "\n"
+
+
 def _format_read_table(payload: dict) -> str:
     items = payload.get("items") or []
     head = (f"{payload.get('type')} — {payload.get('total', len(items))} doc(s) "
@@ -385,6 +426,19 @@ def main() -> None:
     flags_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
     flags_sp.add_argument("--format", choices=["table", "json"], default="table")
 
+    search_sp = sub.add_parser("search", help="full-text search across the whole corpus "
+                                             "(kb + library) — content search, not field filters")
+    search_sp.add_argument("q", metavar="TERMS", help="search terms")
+    search_sp.add_argument("--type", dest="type_", metavar="TYPE",
+                           help="restrict to one doc type, e.g. CASE_RECORD, FIRESIDE")
+    # dest=mode_ : the subparser dest is already "mode" (the verb name) — reusing it
+    # here would clobber the selected subcommand.
+    search_sp.add_argument("--mode", dest="mode_", choices=["auto", "fts", "substring"],
+                           default="auto",
+                           help="auto (default) falls back to substring when FTS finds nothing")
+    search_sp.add_argument("--limit", type=int, default=25, help="max hits (default 25, cap 100)")
+    search_sp.add_argument("--format", choices=["table", "json"], default="table")
+
     read_sp = sub.add_parser("read", help="generic typed read (CASE-683) — every type "
                                           "kb-write.py can write is readable here, via GET /read/:type")
     read_sp.add_argument("type_", metavar="TYPE",
@@ -420,6 +474,17 @@ def main() -> None:
             else:
                 sys.stdout.write(render_case(payload, view))
             sys.exit(0)
+
+        elif args.mode == "search":
+            payload = search_docs(args.q, args.type_, args.mode_, args.limit)
+            if payload is None:
+                print("search unavailable on this instance (no /search route)", file=sys.stderr)
+                sys.exit(1)
+            if args.format == "json":
+                sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+            else:
+                sys.stdout.write(_format_search_table(payload))
+            sys.exit(0 if payload.get("items") else 1)
 
         elif args.mode == "read":
             payload = read_type(args.type_, args.filter, args.namespace, args.page, args.page_size)

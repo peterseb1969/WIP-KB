@@ -1019,4 +1019,110 @@ router.get('/types', async (req, res) => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// Full-text search (CASE-707). The structured verbs above filter on values you
+// already know; this is the "which docs mention X" surface. Without it an agent's
+// only options were grep-after-fetch or raw reporting SQL — and the SQL detour is
+// exactly what the gateway-only discipline exists to prevent.
+//
+// kb + library are ONE corpus: the fan-out mirrors the UI's, including its
+// per-namespace catch, because a namespace with no FTS data yet must not sink the
+// whole search.
+
+// Namespaces reach SQL as identifiers; they come from env, not callers, but are
+// validated anyway. Document ids are interpolated into IN-lists — guard likewise.
+const SQL_NAME_RE = /^[a-z0-9_]+$/
+const SQL_ID_RE = /^[0-9a-f][0-9a-f-]{15,}$/i
+
+// FTS hits carry the template value but NO title, and a title is what makes a
+// result readable. Enrich with ONE reporting query per namespace (a UNION over the
+// matched types' tables) rather than N per-document fetches.
+async function titlesForHits(ns: string, hits: AnyObj[], key: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const byStem = new Map<string, string[]>()
+  for (const h of hits) {
+    const stem = String(h.value ?? '').toLowerCase()
+    const id = String(h.id ?? '')
+    if (!SQL_NAME_RE.test(stem) || !SQL_ID_RE.test(id)) continue
+    byStem.set(stem, [...(byStem.get(stem) ?? []), id])
+  }
+  if (byStem.size === 0) return out
+  const stems = [...byStem.keys()]
+  // Only union tables that actually expose `title` — one missing column would
+  // error the entire union and cost every result its title.
+  const probe = await wipReq('POST', '/api/reporting-sync/query', key, {
+    namespace: ns,
+    sql:
+      `SELECT table_name FROM information_schema.columns WHERE table_schema = '${ns}' ` +
+      `AND column_name = 'title' AND table_name IN (${stems.map((s) => `'doc_${s}'`).join(',')})`,
+    max_rows: 200,
+  })
+  const titled = new Set((probe.rows ?? []).map((r: AnyObj) => String(r.table_name)))
+  const parts = stems
+    .filter((s) => titled.has(`doc_${s}`))
+    .map(
+      (s) =>
+        `SELECT document_id, title FROM "${ns}"."doc_${s}" ` +
+        `WHERE document_id IN (${(byStem.get(s) as string[]).map((i) => `'${i}'`).join(',')})`,
+    )
+  if (parts.length === 0) return out
+  const d = await wipReq('POST', '/api/reporting-sync/query', key, {
+    namespace: ns, sql: parts.join('\nUNION ALL\n'), max_rows: 2000,
+  })
+  for (const r of d.rows ?? []) if (r.title) out.set(String(r.document_id), String(r.title))
+  return out
+}
+
+// GET /search?q=&mode=auto|fts|substring&type=&limit=
+router.get('/search', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const q = String(req.query.q ?? '').trim()
+  if (!q) return res.status(400).json({ error: 'q is required' })
+  const raw = String(req.query.mode ?? 'auto')
+  const mode = ['auto', 'fts', 'substring'].includes(raw) ? raw : 'auto'
+  const typeFilter = req.query.type ? String(req.query.type).toUpperCase() : null
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100)
+  const namespaces = [...new Set([NS_DEFAULT, NS_LIBRARY])].filter((n) => SQL_NAME_RE.test(n))
+
+  const perNs = await Promise.all(
+    namespaces.map(async (ns) => {
+      try {
+        const r = await wipReq(
+          'POST', `/api/reporting-sync/search?namespace=${encodeURIComponent(ns)}`, key,
+          { query: q, mode, types: ['document'], page_size: 100 },
+        )
+        const hits: AnyObj[] = Object.values(r.results ?? {}).flatMap(
+          (b) => ((b as AnyObj).items as AnyObj[]) ?? [],
+        )
+        const kept = typeFilter
+          ? hits.filter((h) => String(h.value ?? '').toUpperCase() === typeFilter)
+          : hits
+        const titles = await titlesForHits(ns, kept, key)
+        return kept.map((h) => ({
+          document_id: h.id,
+          template_value: h.value ?? null,
+          namespace: ns,
+          title: titles.get(String(h.id)) ?? null,
+          score: h.score == null ? null : Number(h.score),
+          // Snippet carries the platform's <b> highlight markup and embedded
+          // newlines; passed through as-is so each consumer renders it its own way.
+          snippet: h.snippet ?? null,
+          updated_at: h.updated_at ?? null,
+        }))
+      } catch {
+        return [] // a namespace with no FTS data must not sink the whole search
+      }
+    }),
+  )
+  const all = perNs.flat().sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+  // Report the cap rather than silently truncating: the per-namespace page_size
+  // above is itself a window, so `truncated` means "there is more", not a total.
+  res.json({
+    query: q, mode, namespaces, type: typeFilter,
+    returned: Math.min(all.length, limit), truncated: all.length > limit,
+    items: all.slice(0, limit),
+  })
+})
+
 export default router
