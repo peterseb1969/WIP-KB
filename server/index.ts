@@ -68,6 +68,13 @@ router.use(requireAuth())
 // raw stream; a json parser upstream of it would consume the stream first.
 router.use('/wip', wipProxy({
   baseUrl: process.env.WIP_BASE_URL || 'https://wip-kb.local',
+  // Both key sources, deliberately. The file is preferred so a key rotation is
+  // picked up on restart instead of stranding a stale inline value; the inline
+  // key is what the deployer injects into the container. Passing both is only
+  // safe from @wip/proxy 0.4.3 on, where a missing/unreadable file falls back to
+  // the inline key with a warning instead of crashing at construction — which is
+  // what a container hits when a bind-mounted .env names a host-only path.
+  apiKeyFile: process.env.WIP_API_KEY_FILE,
   apiKey: process.env.WIP_API_KEY || '',
 }))
 
