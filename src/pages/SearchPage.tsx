@@ -28,6 +28,33 @@ const EMPTY_APP_TERMS = new Map<string, string>()
 // surfaces it on demand via the type facet (CASE-533).
 const SEARCH_HIDDEN = new Set(['BOOTSTRAP_RECORD', 'WRITE_POLICY'])
 
+// Mint types: template value → the integer field holding its handle number. Every
+// one of these is an integer column with NO full-text index, so a typed number can
+// only ever be resolved client-side against the loaded corpus (see the number jump
+// below) — the FTS pass can never match it.
+const NUMBER_FIELD = {
+  CASE_RECORD: 'case_number',
+  FIRESIDE: 'fireside_number',
+  DOCUMENT: 'paper_number',
+  LESSON: 'lesson_number',
+  DESIGN_DECISION: 'decision_number',
+} as const satisfies Record<string, keyof HeaderDoc['data']>
+
+// The handle prefix a user types → its template value. DOCUMENT's Registry prefix is
+// PAPER, which is why "paper 97" must resolve to a DOCUMENT.
+const PREFIX_TYPE: Record<string, keyof typeof NUMBER_FIELD> = {
+  case: 'CASE_RECORD',
+  fireside: 'FIRESIDE',
+  paper: 'DOCUMENT',
+  lesson: 'LESSON',
+  decision: 'DESIGN_DECISION',
+}
+
+// The facet lists raw template values, but DOCUMENT's human handle is PAPER-<n> —
+// without naming both, a user hunting for "paper" concludes the type is missing.
+const TYPE_LABEL: Record<string, string> = { DOCUMENT: 'DOCUMENT (paper)' }
+const typeLabel = (t: string): string => TYPE_LABEL[t] ?? t
+
 async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
   try {
     const t = await wipFetchJson<{ terminology_id?: string; id?: string }>(
@@ -384,14 +411,25 @@ export default function SearchPage() {
   type Hit = { doc: DocItem; score: number | null; snippet: string | null }
   const hits: Hit[] = useMemo(() => {
     if (query.trim()) {
-      // Case-number jump: "457" / "CASE-457" / "#457" → the case with that number.
-      // case_number is an integer (not an FTS-indexed string field), so a bare
-      // number never matches FTS — resolve it directly against the loaded docs.
-      const m = query.trim().match(/^(?:case-?|#)?(\d+)$/i)
+      // Number jump: a minted handle ("CASE-457", "FIRESIDE-21", "PAPER-97", "#457")
+      // or a bare number resolves straight to that document. Mint-type numbers are
+      // integers with no FTS index, so a typed number never matches FTS — it can only
+      // be resolved here, against the loaded docs.
+      const m = query.trim().match(/^(?:(case|fireside|paper|lesson|decision)[-\s]?|#)?(\d+)$/i)
       if (m) {
-        const n = Number(m[1])
+        const n = Number(m[2])
+        // An explicit prefix pins the type. Otherwise a single selected type decides,
+        // so "21" under the FIRESIDE filter finds fireside 21. With no prefix and no
+        // single selection, a bare number still means "case" — unchanged behaviour.
+        const pinned = m[1] ? PREFIX_TYPE[m[1].toLowerCase()] : undefined
+        const selected = tFilter.size === 1 ? [...tFilter][0] : undefined
+        const target: keyof typeof NUMBER_FIELD =
+          pinned ??
+          (selected && selected in NUMBER_FIELD
+            ? (selected as keyof typeof NUMBER_FIELD)
+            : 'CASE_RECORD')
         const doc = filterableDocs.find(
-          (d) => d.template_value === 'CASE_RECORD' && d.data.case_number === n,
+          (d) => d.template_value === target && d.data[NUMBER_FIELD[target]] === n,
         )
         if (doc) return [{ doc, score: null, snippet: null }]
       }
@@ -562,7 +600,7 @@ export default function SearchPage() {
             {allTemplates.map((t) => (
               <FacetCheckbox
                 key={t}
-                label={t}
+                label={typeLabel(t)}
                 count={facetCounts.t.get(t) ?? 0}
                 checked={tFilter.has(t)}
                 onChange={() => toggleSet('t', tFilter, t)}

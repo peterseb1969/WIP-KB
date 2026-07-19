@@ -38,7 +38,15 @@ export interface HeaderDoc {
   updated_at: string
   data: {
     title?: string
+    // Every mint type's human handle is <PREFIX>-<n> backed by an integer number
+    // field. They are loaded (not just case_number) so the search page can resolve
+    // a typed number to any minted doc — integers carry no FTS index, so a bare
+    // number can only ever be matched client-side against these.
     case_number?: number
+    fireside_number?: number
+    paper_number?: number
+    lesson_number?: number
+    decision_number?: number
     authored_by?: string
     session_id?: string
     path?: string
@@ -85,6 +93,10 @@ const NS_RE = /^[a-z0-9_]+$/
 const HEADER_COLS: Record<string, string> = {
   title: 'text',
   case_number: 'integer',
+  fireside_number: 'integer',
+  paper_number: 'integer',
+  lesson_number: 'integer',
+  decision_number: 'integer',
   authored_by: 'text',
   session_id: 'text',
   path: 'text',
@@ -106,6 +118,10 @@ interface RawHeaderRow {
   template_value: string
   title: string | null
   case_number: number | null
+  fireside_number: number | null
+  paper_number: number | null
+  lesson_number: number | null
+  decision_number: number | null
   authored_by: string | null
   session_id: string | null
   path: string | null
@@ -151,6 +167,10 @@ function toHeaderDoc(r: RawHeaderRow, namespace: string): HeaderDoc {
   const data: HeaderDoc['data'] = {}
   if (r.title != null) data.title = r.title
   if (r.case_number != null) data.case_number = r.case_number
+  if (r.fireside_number != null) data.fireside_number = r.fireside_number
+  if (r.paper_number != null) data.paper_number = r.paper_number
+  if (r.lesson_number != null) data.lesson_number = r.lesson_number
+  if (r.decision_number != null) data.decision_number = r.decision_number
   if (r.authored_by != null) data.authored_by = r.authored_by
   if (r.session_id != null) data.session_id = r.session_id
   if (r.path != null) data.path = r.path
