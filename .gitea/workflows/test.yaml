@@ -7,7 +7,9 @@ name: Tests
 # The test command lives in package.json (`npm test`) so CI and local stay one source.
 on:
   push:
-    branches: [main]
+    # develop is where work lands day to day (main is the stable line), so it must
+    # be gated too — otherwise the guard goes quiet exactly where new code arrives.
+    branches: [main, develop]
   pull_request:
 
 jobs:
