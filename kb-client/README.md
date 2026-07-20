@@ -20,7 +20,7 @@ one-shot JSON bundle — or `/files/<name>` per file) and runs it, refreshing on
 |---|---|
 | `kb_client_core.py` | Shared core (stdlib-only): `.claude/kb.json` + API-key resolution (CASE-444/471), target config, and the gateway transport — `gw_get`/`gw_post` with local→remote failover. Imported by every script. |
 | `case-fetch.py` | Read commands — `case` / `journey` / `list` / `fireside` / `library` / `edges` / `flags` / `read <TYPE>` (generic typed read, symmetric to the write path) / `search` (full-text over the whole corpus, kb + library as one) — over the gateway (CASE-393/479/482/518/630/683/707). |
-| `kb-write.py` | **The** write client — one generic surface over `POST /write/:type` for every type (file/dir/`--json` sources, `--patch`/`--edge`, and git-stats via `--git-repo`/`--git-date`/`--git-backfill`). `--list` shows writable types via `GET /types` (CASE-482). |
+| `kb-write.py` | **The** write client — one generic surface over `POST /write/:type` for every type (file/dir/`--json` sources, `--patch`/`--edge`, and git-stats via `--git-repo`/`--git-date`/`--git-backfill`). `--list` shows writable types via `GET /types` — every namespace by default, or one with `--namespace <ns>` (CASE-482/701). |
 | `kb-client.sh` | The runner (CASE-440): fetch/refresh the bundle on `bundle_digest` change, then run a script with `PYTHONPATH` set. Ships inside the bundle — relocated out of FR-YAC. |
 | `install.sh` | One-liner bootstrap (CASE-440): `curl -fsSk -H "X-API-Key: $KEY" {BASE_PATH}/server-api/kb-client/install \| sh` materializes the bundle to `~/.cache/wip-kb-client`. |
 | `case-workflow.md` | The cross-YAC case playbook, served with the client (single source: `docs/playbooks/case-workflow.md`, synced from the gene-pool master). |

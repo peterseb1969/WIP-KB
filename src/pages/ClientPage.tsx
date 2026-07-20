@@ -79,9 +79,15 @@ const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb/cases?status=&filed_by=&severity=&type=&component=&app=', 'list cases (faceted, server-side)'],
   ['GET', 'kb/cases/:n?view=both|case|responses[&response=latest|<seq>]', 'one case: body, response thread, or both (default both)'],
   ['GET', 'kb/sessions  ·  kb/journeys/:day', 'list sessions / a journey day'],
-  ['GET', 'kb/firesides  ·  kb/firesides/:id', 'list firesides / one fireside body'],
+  ['GET', 'kb/firesides  ·  kb/firesides/:id', 'list firesides / one fireside body (:id = a FIRESIDE-<n> synonym, a bare <n>, or a document_id)'],
+  ['GET', 'kb/library-docs  ·  kb/library-docs/:slug', 'list published LIBRARY_DOCs / one body (?release= required for a slug)'],
+  ['GET', 'kb/read/:type', 'generic typed read — every writable type is readable; each query param is an eq-filter on data.<field>'],
+  ['GET', 'kb/search?q=&mode=auto|fts|substring&type=&limit=', 'full-text search across the whole corpus (kb + library merged), ranked, with snippets'],
+  ['GET', 'kb/flags', 'flag-for-YAC dispatch queue — FLAG_RECORDs joined to their target doc'],
+  ['GET', 'kb/edges/:handle', 'every edge touching a doc, both directions (handle = synonym or document_id)'],
   ['GET', 'kb/types', 'doc-type manifest — write_mode + home namespace per type (spans corpus + library)'],
   ['POST', 'kb/write/:type', 'THE write path — {data, edges[]} or {patch, match}. Routes to the type’s home namespace (LIBRARY_DOC → library)'],
+  ['POST', 'kb/edges', 'attach an edge between two EXISTING docs — the sanctioned retry for a failed edge intent'],
 ]
 
 function Copyable({ text, label }: { text: string; label?: string }) {

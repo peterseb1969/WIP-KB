@@ -209,6 +209,43 @@ Terminal. Tell Peter what was applied and that the case is implemented.
 
 ---
 
+## Discovering what you can write — the doc-type manifest
+
+Before writing an unfamiliar type, ask the instance what it accepts. The manifest is
+generated from the templates themselves, so it can never drift from what the gateway
+will take:
+
+```bash
+kbc kb-write.py --list                      # every writable type, across all namespaces
+kbc kb-write.py --list --namespace library  # scope to one namespace
+kbc kb-write.py --list --format json
+```
+
+Each row gives the type, its **home namespace**, its write mode (`mint` = the gateway
+allocates a number + synonym; `natural` = upsert by identity fields), the synonym
+prefix, and the identity fields. Unscoped it spans the corpus **and** the library —
+that is how `LIBRARY_DOC` (namespace `library`) is discoverable at all (CASE-701).
+
+---
+
+## Fetching a doc by its handle
+
+Mint types carry a human handle — `CASE-<n>`, `FIRESIDE-<n>`, `LESSON-<n>`,
+`DECISION-<n>`, `PAPER-<n>` — and the read verbs accept the number directly:
+
+```bash
+kbc case-fetch.py case 692           # cases by number
+kbc case-fetch.py fireside 21        # a fireside by number …
+kbc case-fetch.py fireside FIRESIDE-21   # … or by its full synonym, or a document_id
+kbc case-fetch.py edges FIRESIDE-21  # every edge touching it
+```
+
+`case-fetch.py fireside list` shows the `#` column so you can find the number in the
+first place. For types without a bespoke verb, filter on the number field instead:
+`read LESSON --filter lesson_number=12` (CASE-703).
+
+---
+
 ## Full-text search — find by content (CASE-707)
 
 Every verb above filters on values you already know. This is the "which docs mention

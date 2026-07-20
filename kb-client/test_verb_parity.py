@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""Doc-parity regression: every case-fetch.py verb must appear in the curated
-roster summaries that clients read (CASE-692).
+"""Doc-parity regression: the curated docs must not lag the code (CASE-692/718).
+
+Two checks, both over surfaces that are enumerable from source:
+  1. every `case-fetch.py` verb appears in the two full-roster summaries;
+  2. every KB gateway route appears in the Client page's endpoint table.
 
 argparse `--help` always lists the real verbs, so the hazard is never absolute
 absence — it's the hand-kept roster lines silently drifting behind the code
@@ -69,9 +72,41 @@ for label, path in ROSTERS:
     if missing:
         _fails.append(f"{label}: case-fetch verbs missing from the roster: {missing}")
 
+# 3. Every gateway route must appear in the Client page's endpoint table.
+#    Verbs were only half the surface: /read/:type, /search, /edges, /flags and
+#    /library-docs shipped without ever reaching that table, so a reader concluded
+#    they did not exist (CASE-718). Routes are enumerable from source, so this is
+#    mechanically checkable — unlike the playbook's prose, which stays a human
+#    responsibility and is deliberately NOT faked into a test.
+ROUTE_RE = re.compile(r"router\.(get|post)\(\s*['\"]([^'\"]+)['\"]")
+ENDPOINT_RE = re.compile(r"\[\s*['\"](GET|POST)['\"]\s*,\s*['\"]([^'\"]*)['\"]")
+
+_gw = _read(os.path.join(_repo, "server", "kb-gateway.routes.ts"))
+_cp = _read(os.path.join(_repo, "src", "pages", "ClientPage.tsx"))
+if _gw is None or _cp is None:
+    print("skip: gateway routes / ClientPage not found (running outside the repo?)")
+else:
+    routes = [(m.group(1).upper(), m.group(2)) for m in ROUTE_RE.finditer(_gw)]
+    documented = [(m.group(1), m.group(2)) for m in ENDPOINT_RE.finditer(_cp)]
+    if len(routes) < 5:
+        _fails.append(f"route scrape found only {routes!r} — regex stale vs kb-gateway.routes.ts?")
+    missing = []
+    for method, path in routes:
+        # The table writes paths as `kb<path>`. The boundary stops a parent route
+        # being satisfied by a child: `kb/edges` must not match `kb/edges/:handle`.
+        pat = re.escape("kb" + path) + r"(?![/\w:])"
+        if not any(m == method and re.search(pat, text) for m, text in documented):
+            missing.append(f"{method} {path}")
+    if missing:
+        _fails.append(
+            "src/pages/ClientPage.tsx: gateway routes absent from the endpoint table: "
+            + ", ".join(missing)
+        )
+
 if _fails:
     print("FAIL:")
     for f in _fails:
         print("  -", f)
     raise SystemExit(1)
-print(f"OK — all {len(verbs)} case-fetch verbs present in every roster: {verbs}")
+print(f"OK — {len(verbs)} case-fetch verbs in every roster, and every gateway route "
+      f"documented on the Client page: {verbs}")
