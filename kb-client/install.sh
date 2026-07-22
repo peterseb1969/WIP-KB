@@ -19,15 +19,25 @@
 # POSIX sh (curl|sh target) — no bashisms.
 set -eu
 
-# When run from a repo, derive the instance from .claude/kb.json (single source
-# of truth; PAIRED url+key so a hostname cutover is one edit). Best-effort: a
-# bare `curl|sh` from an arbitrary cwd just uses the literal fallbacks below.
-if [ -r ./.claude/kb.json ]; then
+# When run from a project, derive the instance from its .claude/kb.json (single
+# source of truth; PAIRED url+key so a hostname cutover is one edit). Same
+# resolution rules as kb-client.sh (CASE-755): $CLAUDE_PROJECT_DIR/.claude/kb.json
+# governs when the env var is set, else ./.claude/kb.json; and a kb.json that
+# EXISTS but yields no kb_app_url means "not configured" — exit 2, never a silent
+# fall-through to the canonical-instance defaults with the canonical key. A bare
+# `curl|sh` from a dir with no kb.json keeps the literal fallbacks below.
+KBJSON="${CLAUDE_PROJECT_DIR:+$CLAUDE_PROJECT_DIR/.claude/kb.json}"
+KBJSON="${KBJSON:-./.claude/kb.json}"
+if [ -r "$KBJSON" ]; then
   if [ -z "${KB_APP_URL:-}" ]; then
-    KB_APP_URL="$(python3 -c 'import json;print(json.load(open(".claude/kb.json")).get("kb_app_url",""))' 2>/dev/null || true)"
+    KB_APP_URL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_app_url",""))' "$KBJSON" 2>/dev/null || true)"
+    if [ -z "$KB_APP_URL" ]; then
+      echo "kb-client install: $KBJSON exists but yields no kb_app_url — refusing to fall back to the canonical-instance defaults. Fix the file, or set KB_APP_URL explicitly." >&2
+      exit 2
+    fi
   fi
   if [ -z "${KB_API_KEY_FILE:-}" ]; then
-    _kbj_key="$(python3 -c 'import json;print(json.load(open(".claude/kb.json")).get("kb_api_key_file",""))' 2>/dev/null || true)"
+    _kbj_key="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_api_key_file",""))' "$KBJSON" 2>/dev/null || true)"
     [ -n "$_kbj_key" ] && KB_API_KEY_FILE="$_kbj_key"
   fi
 fi
