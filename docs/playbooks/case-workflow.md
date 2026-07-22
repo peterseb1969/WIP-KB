@@ -17,6 +17,7 @@ which talks only to the KB **gateway** (never the document-store backend).
 - `/wip-case comment <n>` — add a comment (any state; no transition)
 - `/wip-case close <n>` — close without implementing (won't-fix / not-an-issue / deferred)
 - `/wip-case implement <n>` — apply the proposed patch, then close as implemented
+- `/wip-case reopen <n>` — bring a closed/implemented case back to open (regression / disproven close)
 
 ## Prerequisites
 
@@ -53,7 +54,11 @@ synonym, scoped `CASE-<n>#<seq>` for responses, and persists edges. Status-trans
 gateway is pure persistence.
 
 Legal transitions: `open → {responded, closed, implemented}`,
-`responded → {closed, implemented}`; `closed` / `implemented` are terminal.
+`responded → {closed, implemented}`, and the reopen path
+`closed → open` / `implemented → open` — so "terminal" means "resting
+state", not "sealed forever": a case whose fix regressed, or that was
+closed on a premise later disproven, comes back as the SAME case with its
+thread intact instead of a duplicate filing.
 
 ---
 
@@ -206,6 +211,26 @@ proposed fix, tell Peter to `/wip-case respond` first and stop.
    ```
 
 Terminal. Tell Peter what was applied and that the case is implemented.
+
+---
+
+## `/wip-case reopen <n>`
+
+Bring a `closed` or `implemented` case back to `open` — for a fix that
+regressed, or a close whose premise was later disproven. Reopen the SAME
+case rather than filing a duplicate: the thread's history is the context
+the next responder needs. Always say WHY in a comment — a bare status flip
+strands the next reader.
+
+```bash
+kbc kb-write.py CASE_RESPONSE reopen.md --edge RESPONDS_TO:CASE_RECORD:<n>
+#   reopen.md frontmatter: case_number: <n> / response_kind: comment / author: <id> / doc_status: published
+#   body: why this is coming back (what regressed / which premise fell)
+kbc kb-write.py CASE_RECORD --patch status=open --match case_number=<n>
+```
+
+Only from `closed` or `implemented` (an `open`/`responded` case has nothing
+to reopen). The case then walks the normal machine again.
 
 ---
 

@@ -3,10 +3,10 @@
 // domain" (Peter, 2026-06-03/12; spec: FR-YAC/papers/kb-write-gateway-design.md).
 //
 //   POST {BASE_PATH}/server-api/kb/cases                 -> allocate + create (file flow)
-//   POST {BASE_PATH}/server-api/kb/cases/:n/respond      -> append Response,  open -> responded
-//   POST {BASE_PATH}/server-api/kb/cases/:n/comment      -> append Comment,   no transition
-//   POST {BASE_PATH}/server-api/kb/cases/:n/close        -> append Resolution, -> closed
-//   POST {BASE_PATH}/server-api/kb/cases/:n/implement    -> append Implementation, -> implemented
+//   (case respond/comment/close/implement/reopen all ride POST /write/:type —
+//   a CASE_RESPONSE doc plus a CASE_RECORD status patch; the per-case POST
+//   verbs that once lived here are retired. Transition VALIDITY is enforced
+//   caller-side by the served playbook; this gateway persists what it is sent.)
 //
 // Design rules (the case response is the contract):
 // - UN-PRIVILEGED: every WIP call executes with the CALLER's X-API-Key. The
@@ -16,7 +16,9 @@
 // - Append semantics via the platform's if_match optimistic concurrency: a
 //   comment/response POST re-reads and retries on concurrency_conflict, so two
 //   agents writing the same case both land (the CASE-462 race class).
-// - Server-side status machine: illegal transitions are 422, not discipline.
+// - Status-transition validity is the CALLER's job (served playbook); the
+//   gateway persists any status the schema accepts. It stopped being a
+//   server-side machine when the per-case verbs retired into /write/:type.
 // - Mounted PUBLIC (before requireAuth) like kb-client.routes; the gateway
 //   browser-auth exemption is the manifest route line (CASE-439 pattern).
 import { Router, type Request, type Response } from 'express'
