@@ -278,6 +278,7 @@ export default function SearchPage() {
   const vFilter = useMemo(() => csvSet(params.get('v')), [params])
   const pFilter = useMemo(() => csvSet(params.get('p')), [params])
   const rFilter = useMemo(() => csvSet(params.get('r')), [params])
+  const oFilter = useMemo(() => csvSet(params.get('o')), [params])
   const [page, setPage] = useState(1)
 
   const [draft, setDraft] = useState(query)
@@ -411,6 +412,17 @@ export default function SearchPage() {
     [docsInTypeScope],
   )
 
+  // Topics = KB_TOPIC term values on the docs that carry them (CASE-760
+  // Phase 2). A doc holds an ARRAY of topics, so scope/count logic goes
+  // through the same array-aware bucket the Author facet uses.
+  const allTopics = useMemo(
+    () =>
+      Array.from(
+        new Set(docsInTypeScope.flatMap((d) => d.data.topics ?? [])),
+      ).sort(),
+    [docsInTypeScope],
+  )
+
   type Hit = { doc: DocItem; score: number | null; snippet: string | null }
   const hits: Hit[] = useMemo(() => {
     if (query.trim()) {
@@ -466,9 +478,11 @@ export default function SearchPage() {
         if (vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
         if (pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
         if (rFilter.size > 0 && !rFilter.has(doc.data.release ?? '')) return false
+        if (oFilter.size > 0 && !(doc.data.topics ?? []).some((t) => oFilter.has(t)))
+          return false
         return true
       }),
-    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, appOf],
+    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, oFilter, appOf],
   )
 
   // Per-option counts for each facet. "What would the result count be if I
@@ -476,7 +490,7 @@ export default function SearchPage() {
   // standard faceted-search semantics. Zero-counts stay visible (rendered
   // muted by FacetCheckbox) so the operator sees the "no current match"
   // signal without having to click.
-  type FacetKey = 't' | 's' | 'a' | 'k' | 'v' | 'p' | 'r'
+  type FacetKey = 't' | 's' | 'a' | 'k' | 'v' | 'p' | 'r' | 'o'
   const facetCounts = useMemo(() => {
     function passes(doc: DocItem, skip: FacetKey): boolean {
       // Default-hidden CASE_RESPONSE shouldn't inflate other facets' counts, but
@@ -495,6 +509,12 @@ export default function SearchPage() {
       if (skip !== 'v' && vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
       if (skip !== 'p' && pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
       if (skip !== 'r' && rFilter.size > 0 && !rFilter.has(doc.data.release ?? '')) return false
+      if (
+        skip !== 'o' &&
+        oFilter.size > 0 &&
+        !(doc.data.topics ?? []).some((t) => oFilter.has(t))
+      )
+        return false
       return true
     }
     function bucket(
@@ -518,8 +538,9 @@ export default function SearchPage() {
       v: bucket('v', (d) => d.data.severity),
       p: bucket('p', (d) => appOf(d)),
       r: bucket('r', (d) => d.data.release),
+      o: bucket('o', (d) => d.data.topics),
     }
-  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, appOf])
+  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, oFilter, appOf])
 
   const hasCaseInScope = useMemo(
     () => filtered.some((h) => typeof h.doc.data.case_number === 'number'),
@@ -589,7 +610,7 @@ export default function SearchPage() {
   }
 
   const activeFilterCount =
-    tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size + pFilter.size + rFilter.size
+    tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size + pFilter.size + rFilter.size + oFilter.size
   const isLoading =
     allDocsQ.isLoading || (query.trim() && searchQ.isLoading)
   const error = allDocsQ.error ?? searchQ.error
@@ -607,6 +628,17 @@ export default function SearchPage() {
                 count={facetCounts.t.get(t) ?? 0}
                 checked={tFilter.has(t)}
                 onChange={() => toggleSet('t', tFilter, t)}
+              />
+            ))}
+          </FacetSection>
+          <FacetSection title="Topic" allOptions={allTopics} defaultOpen>
+            {allTopics.map((o) => (
+              <FacetCheckbox
+                key={o}
+                label={o}
+                count={facetCounts.o.get(o) ?? 0}
+                checked={oFilter.has(o)}
+                onChange={() => toggleSet('o', oFilter, o)}
               />
             ))}
           </FacetSection>

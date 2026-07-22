@@ -64,6 +64,11 @@ export interface HeaderDoc {
     app_term_id?: string
     release?: string
     component?: string
+    // KB_TOPIC term values (CASE-760 Phase 2). Reporting stores the term array
+    // as one jsonb column (no row flattening); surfaced via the template's
+    // cross_version_view declaration, since a post-split default view keeps its
+    // creation-time shape and does not widen on new template versions.
+    topics?: string[]
   }
 }
 
@@ -121,6 +126,7 @@ const HEADER_COLS: Record<string, string> = {
   app_term_id: 'text',
   release: 'text',
   component: 'text',
+  topics: 'jsonb',
 }
 
 interface RawHeaderRow {
@@ -146,6 +152,8 @@ interface RawHeaderRow {
   app_term_id: string | null
   release: string | null
   component: string | null
+  // jsonb — arrives as a JSON-encoded string from the reporting endpoint
+  topics: string | string[] | null
 }
 
 // The reporting API's own view of which relation is an entity's query surface
@@ -228,6 +236,14 @@ function toHeaderDoc(r: RawHeaderRow, namespace: string): HeaderDoc {
   if (r.app_term_id != null) data.app_term_id = r.app_term_id
   if (r.release != null) data.release = r.release
   if (r.component != null) data.component = r.component
+  if (r.topics != null) {
+    try {
+      const t = typeof r.topics === 'string' ? JSON.parse(r.topics) : r.topics
+      if (Array.isArray(t) && t.length > 0) data.topics = t.filter((x) => typeof x === 'string')
+    } catch {
+      // malformed jsonb payload — treat as untagged rather than failing the row
+    }
+  }
   return {
     document_id: r.document_id,
     namespace,
