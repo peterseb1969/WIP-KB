@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
 import { fetchCorpusHeaders, type HeaderDoc } from '../lib/reporting'
+import { fetchTopicTree, type TopicNode, type TopicTree } from '../lib/topics'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
@@ -413,8 +414,11 @@ export default function SearchPage() {
   )
 
   // Topics = KB_TOPIC term values on the docs that carry them (CASE-760
-  // Phase 2). A doc holds an ARRAY of topics, so scope/count logic goes
-  // through the same array-aware bucket the Author facet uses.
+  // Phase 2). A doc holds an ARRAY of topics. The facet renders the KB_TOPIC
+  // ontology as a TREE, and selecting a topic filters by that topic PLUS all
+  // its descendants (both relation types) — "backup-restore" matches a doc
+  // tagged only "fresh-restore". Without a reachable taxonomy the facet
+  // degrades to a flat list of the values present.
   const allTopics = useMemo(
     () =>
       Array.from(
@@ -422,6 +426,23 @@ export default function SearchPage() {
       ).sort(),
     [docsInTypeScope],
   )
+  const topicTreeQ = useQuery<TopicTree | null>({
+    queryKey: ['kb-topic-tree', CORPUS_NS],
+    queryFn: () => fetchTopicTree(CORPUS_NS),
+    staleTime: 5 * 60_000,
+  })
+  const topicTree = topicTreeQ.data ?? null
+  // The selected filter, expanded to descendant sets. null = no topic filter.
+  const selectedTopics = useMemo(() => {
+    if (oFilter.size === 0) return null
+    const s = new Set<string>()
+    for (const v of oFilter) {
+      const exp = topicTree?.expansion.get(v)
+      if (exp) exp.forEach((x) => s.add(x))
+      else s.add(v)
+    }
+    return s
+  }, [oFilter, topicTree])
 
   type Hit = { doc: DocItem; score: number | null; snippet: string | null }
   const hits: Hit[] = useMemo(() => {
@@ -478,11 +499,11 @@ export default function SearchPage() {
         if (vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
         if (pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
         if (rFilter.size > 0 && !rFilter.has(doc.data.release ?? '')) return false
-        if (oFilter.size > 0 && !(doc.data.topics ?? []).some((t) => oFilter.has(t)))
+        if (selectedTopics && !(doc.data.topics ?? []).some((t) => selectedTopics.has(t)))
           return false
         return true
       }),
-    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, oFilter, appOf],
+    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, selectedTopics, appOf],
   )
 
   // Per-option counts for each facet. "What would the result count be if I
@@ -511,8 +532,8 @@ export default function SearchPage() {
       if (skip !== 'r' && rFilter.size > 0 && !rFilter.has(doc.data.release ?? '')) return false
       if (
         skip !== 'o' &&
-        oFilter.size > 0 &&
-        !(doc.data.topics ?? []).some((t) => oFilter.has(t))
+        selectedTopics &&
+        !(doc.data.topics ?? []).some((t) => selectedTopics.has(t))
       )
         return false
       return true
@@ -530,6 +551,22 @@ export default function SearchPage() {
       }
       return m
     }
+    // Topic counts roll up: a node's count is the number of in-scope docs
+    // tagged with the node OR any descendant — the same set selecting it
+    // would filter to. Falls back to per-value counts without a tree.
+    const oCounts = new Map<string, number>()
+    if (topicTree) {
+      for (const [val, exp] of topicTree.expansion) {
+        let c = 0
+        for (const h of hits) {
+          if (!passes(h.doc, 'o')) continue
+          if ((h.doc.data.topics ?? []).some((t) => exp.has(t))) c++
+        }
+        oCounts.set(val, c)
+      }
+    } else {
+      for (const [k, v] of bucket('o', (d) => d.data.topics)) oCounts.set(k, v)
+    }
     return {
       t: bucket('t', (d) => d.template_value),
       s: bucket('s', (d) => workflowStatus(d)),
@@ -538,9 +575,9 @@ export default function SearchPage() {
       v: bucket('v', (d) => d.data.severity),
       p: bucket('p', (d) => appOf(d)),
       r: bucket('r', (d) => d.data.release),
-      o: bucket('o', (d) => d.data.topics),
+      o: oCounts,
     }
-  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, oFilter, appOf])
+  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, selectedTopics, topicTree, appOf])
 
   const hasCaseInScope = useMemo(
     () => filtered.some((h) => typeof h.doc.data.case_number === 'number'),
@@ -609,6 +646,23 @@ export default function SearchPage() {
     setParam('q', draft.trim() || null)
   }
 
+  // The Topic facet renders the KB_TOPIC ontology as an indented tree. Counts
+  // and selection are subtree roll-ups (see selectedTopics/facetCounts.o), so
+  // a parent row is a real filter, not a header.
+  function renderTopicNodes(nodes: TopicNode[], depth: number): ReactNode[] {
+    return nodes.flatMap((n) => [
+      <div key={n.value} style={{ paddingLeft: depth * 12 }}>
+        <FacetCheckbox
+          label={n.label}
+          count={facetCounts.o.get(n.value) ?? 0}
+          checked={oFilter.has(n.value)}
+          onChange={() => toggleSet('o', oFilter, n.value)}
+        />
+      </div>,
+      ...renderTopicNodes(n.children, depth + 1),
+    ])
+  }
+
   const activeFilterCount =
     tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size + pFilter.size + rFilter.size + oFilter.size
   const isLoading =
@@ -632,15 +686,17 @@ export default function SearchPage() {
             ))}
           </FacetSection>
           <FacetSection title="Topic" allOptions={allTopics} defaultOpen>
-            {allTopics.map((o) => (
-              <FacetCheckbox
-                key={o}
-                label={o}
-                count={facetCounts.o.get(o) ?? 0}
-                checked={oFilter.has(o)}
-                onChange={() => toggleSet('o', oFilter, o)}
-              />
-            ))}
+            {topicTree
+              ? renderTopicNodes(topicTree.roots, 0)
+              : allTopics.map((o) => (
+                  <FacetCheckbox
+                    key={o}
+                    label={o}
+                    count={facetCounts.o.get(o) ?? 0}
+                    checked={oFilter.has(o)}
+                    onChange={() => toggleSet('o', oFilter, o)}
+                  />
+                ))}
           </FacetSection>
           <FacetSection title="Release" allOptions={allReleases} defaultOpen>
             {allReleases.map((r) => (
