@@ -87,6 +87,17 @@ export interface KbSummary {
 // interpolated into SQL identifiers, so validate the shape defensively.
 const NS_RE = /^[a-z0-9_]+$/
 
+// Reporting retains soft-deleted documents as rows (the kb namespace runs
+// deletion_mode: retain), flagged with the platform lifecycle column
+// status = 'deleted'. The document-store's query surface defaults to
+// active-only; every reporting query that ENUMERATES content (counts, latest
+// lists, the corpus, flags, edge degrees) must apply the same default, or the
+// UI shows retired docs the API-based surfaces correctly hide. Lookups that
+// RESOLVE an existing reference by id (fetchDocTitlesByIds) deliberately skip
+// this filter: a doc that points at a retired doc must still render that
+// reference — retired means invisible to new reads, not broken for old ones.
+const ONLY_ACTIVE = `status = 'active'`
+
 // Header columns projected when the template has them (document_id / created_at /
 // updated_at are on every doc table). `data_status` carries the workflow status
 // (data.status); top-level `status` is the WIP lifecycle, not what the UI means.
@@ -255,7 +266,7 @@ async function fetchNamespaceSummary(
   }
 
   const countsSql = tables
-    .map(([stem]) => `SELECT '${stem.toUpperCase()}' AS t, count(*)::int AS c FROM "${namespace}"."doc_${stem}"`)
+    .map(([stem]) => `SELECT '${stem.toUpperCase()}' AS t, count(*)::int AS c FROM "${namespace}"."doc_${stem}" WHERE ${ONLY_ACTIVE}`)
     .join(' UNION ALL ')
 
   // Each per-table branch is LIMIT-bounded, so the union is ≤ tables×limit rows —
@@ -265,7 +276,7 @@ async function fetchNamespaceSummary(
       ([stem, present]) =>
         `(SELECT document_id, created_at, updated_at, ${headerProjection(present)}, ` +
         `'${stem.toUpperCase()}' AS template_value ` +
-        `FROM "${namespace}"."doc_${stem}" ORDER BY updated_at DESC LIMIT ${limit})`,
+        `FROM "${namespace}"."doc_${stem}" WHERE ${ONLY_ACTIVE} ORDER BY updated_at DESC LIMIT ${limit})`,
     )
     .join('\nUNION ALL\n')
 
@@ -277,7 +288,7 @@ async function fetchNamespaceSummary(
     hasCases
       ? reportingQuery<{ ds: string | null; c: number }>(
           namespace,
-          `SELECT data_status AS ds, count(*)::int AS c FROM "${namespace}"."doc_case_record" GROUP BY data_status`,
+          `SELECT data_status AS ds, count(*)::int AS c FROM "${namespace}"."doc_case_record" WHERE ${ONLY_ACTIVE} GROUP BY data_status`,
         )
       : Promise.resolve(null),
   ])
@@ -356,7 +367,7 @@ export async function fetchCorpusHeaders(
         .map(
           ([stem, present]) =>
             `SELECT document_id, created_at, updated_at, ${headerProjection(present)}, ` +
-            `'${stem.toUpperCase()}' AS template_value FROM "${ns}"."doc_${stem}"`,
+            `'${stem.toUpperCase()}' AS template_value FROM "${ns}"."doc_${stem}" WHERE ${ONLY_ACTIVE}`,
         )
         .join('\nUNION ALL\n')
       const { rows } = await reportingQuery<RawHeaderRow>(ns, sql, 50000)
@@ -386,6 +397,8 @@ export interface RefTitle {
 
 // Titles for a set of document ids (any entity type) across namespaces — one query
 // per namespace, replacing DocPage's per-reference full-document fetches.
+// No ONLY_ACTIVE filter here, on purpose: these ids come from existing documents'
+// references, and a reference to a retired doc must keep resolving to its title.
 export async function fetchDocTitlesByIds(
   namespaces: string[],
   ids: string[],
@@ -434,7 +447,7 @@ export async function fetchFlagTargets(
   if (!idList) return out
   const { rows } = await reportingQuery<{ document_id: string; target_yac: string | null }>(
     namespace,
-    `SELECT document_id, target_yac FROM "${namespace}"."doc_flag_record" WHERE document_id IN (${idList})`,
+    `SELECT document_id, target_yac FROM "${namespace}"."doc_flag_record" WHERE ${ONLY_ACTIVE} AND document_id IN (${idList})`,
   )
   for (const r of rows) if (r.target_yac) out.set(r.document_id, r.target_yac)
   return out
@@ -458,8 +471,8 @@ export async function fetchPeerDegrees(
   if (edgeTables.length === 0) return new Map()
   const union = edgeTables
     .flatMap((t) => [
-      `SELECT source_ref AS ref FROM "${namespace}"."${t.table_name}"`,
-      `SELECT target_ref AS ref FROM "${namespace}"."${t.table_name}"`,
+      `SELECT source_ref AS ref FROM "${namespace}"."${t.table_name}" WHERE ${ONLY_ACTIVE}`,
+      `SELECT target_ref AS ref FROM "${namespace}"."${t.table_name}" WHERE ${ONLY_ACTIVE}`,
     ])
     .join(' UNION ALL ')
   const { rows } = await reportingQuery<{ ref: string; c: number }>(
