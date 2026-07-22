@@ -54,7 +54,7 @@ Identity fields drive upsert (same identity → new version; different → new d
 | `YAC_MEMORY` | `owner` + `mem_key` | natural | A YAC's persisted memory file (CASE-507) | title, description, body |
 | `FLAG_RECORD` | (flag identity) | natural (UI write) | **The one UI write** — flag-for-YAC | title, body |
 | `AGENT_IDENTITY` | (agent key) | natural (reference) | YAC identity records | — |
-| `BOOTSTRAP_RECORD` | `bootstrap_id` | natural | Bootstrap provenance audit | — |
+| `KB_BOOTSTRAP_RECORD` | `bootstrap_id` | natural | Bootstrap provenance audit (namespace-prefixed value; namespaces bootstrapped pre-prefixing carry `BOOTSTRAP_RECORD`) | — |
 | `WRITE_POLICY` | `doc_type` | natural (config) | Per-type mint/natural config the gateway reads (CASE-482) | — |
 
 > The identity/field details per template are in DESIGN.md §5 and the seed JSON.

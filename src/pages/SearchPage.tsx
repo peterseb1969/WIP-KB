@@ -25,8 +25,11 @@ type DocItem = HeaderDoc
 const EMPTY_APP_TERMS = new Map<string, string>()
 
 // Structural types kept out of search. CASE_RESPONSE is NOT here — search
-// surfaces it on demand via the type facet (CASE-533).
-const SEARCH_HIDDEN = new Set(['BOOTSTRAP_RECORD', 'WRITE_POLICY'])
+// surfaces it on demand via the type facet (CASE-533). The bootstrap record
+// appears under both values: namespaces bootstrapped before the
+// namespace-prefixing change carry the unprefixed BOOTSTRAP_RECORD, fresh
+// bootstraps mint KB_BOOTSTRAP_RECORD.
+const SEARCH_HIDDEN = new Set(['BOOTSTRAP_RECORD', 'KB_BOOTSTRAP_RECORD', 'WRITE_POLICY'])
 
 // Mint types: template value → the integer field holding its handle number. Every
 // one of these is an integer column with NO full-text index, so a typed number can

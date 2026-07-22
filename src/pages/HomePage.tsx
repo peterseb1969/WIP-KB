@@ -12,7 +12,10 @@ import { NAMESPACES } from '../lib/namespaces'
 // CASE_RESPONSE is a scoped child of a CASE_RECORD (viewable inline in the case
 // thread); as a standalone group box it's just a list of case numbers eating
 // screen space, so it's hidden here too (CASE-533).
-const HIDDEN_TYPES = new Set(['BOOTSTRAP_RECORD', 'WRITE_POLICY', 'CASE_RESPONSE'])
+// The bootstrap record appears under both values: namespaces bootstrapped
+// before the namespace-prefixing change carry the unprefixed
+// BOOTSTRAP_RECORD, fresh bootstraps mint KB_BOOTSTRAP_RECORD.
+const HIDDEN_TYPES = new Set(['BOOTSTRAP_RECORD', 'KB_BOOTSTRAP_RECORD', 'WRITE_POLICY', 'CASE_RESPONSE'])
 
 // The start page renders header fields only (title/case/status/dates), so a
 // document here is the reporting-sourced HeaderDoc — no body is ever fetched.

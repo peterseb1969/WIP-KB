@@ -6,7 +6,7 @@
   "identity_fields": ["flag_type", "flagged_document"],
   "fields": [
     { "name": "flag_type",        "label": "Flag Type",        "type": "string",  "mandatory": true },
-    { "name": "flagged_document", "label": "Flagged Document", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "BOOTSTRAP_RECORD", "DOCUMENT"] },
+    { "name": "flagged_document", "label": "Flagged Document", "type": "reference", "mandatory": true, "reference_type": "document", "target_templates": ["CASE_RECORD", "DESIGN_DECISION", "LESSON", "FIRESIDE", "JOURNEY_ENTRY", "GIT_STATS_SNAPSHOT", "AGENT_IDENTITY", "KB_BOOTSTRAP_RECORD", "DOCUMENT"] },
     { "name": "title",       "label": "Title",       "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "body",        "label": "Body",        "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "authored_by", "label": "Authored By", "type": "string",  "mandatory": true },

@@ -48,6 +48,19 @@ interface NamespacePlan {
   label: string
 }
 
+// The bootstrap provenance template's value is namespace-prefixed
+// (<NS_PREFIX>_BOOTSTRAP_RECORD): every app used to mint the same literal
+// BOOTSTRAP_RECORD from its own seed copy, so any merge of two app-derived
+// namespaces collided on that one template and refused — and a prefixed record
+// carried into a merged namespace is self-labeling foreign history. Derived
+// from the app's CANONICAL corpus namespace, not the per-run override: the
+// seed file carries this same literal value, and seed and lookup must agree
+// even when the test harness bootstraps into a scratch namespace. Namespaces
+// bootstrapped before this change keep their unprefixed BOOTSTRAP_RECORD —
+// a template's value is its identity; renaming would be a fork.
+const CANONICAL_CORPUS_NS = 'kb'
+export const BOOTSTRAP_RECORD_VALUE = `${CANONICAL_CORPUS_NS.toUpperCase().replace(/-/g, '_')}_BOOTSTRAP_RECORD`
+
 /**
  * Resolve the namespaces to bootstrap from env.
  *
@@ -62,7 +75,7 @@ interface NamespacePlan {
  * deployment picks its own corpus name, so we substitute it here.
  */
 function buildPlans(): NamespacePlan[] {
-  const corpus = process.env.KB_BOOTSTRAP_NAMESPACE || process.env.WIP_NAMESPACE || 'kb'
+  const corpus = process.env.KB_BOOTSTRAP_NAMESPACE || process.env.WIP_NAMESPACE || CANONICAL_CORPUS_NS
   const libraryNs = process.env.KB_BOOTSTRAP_NAMESPACE
     ? '' // single-namespace test harness (tools/bootstrap-ns.ts)
     : process.env.KB_LIBRARY_NAMESPACE || 'library' // two-namespace by default (CASE-518)
@@ -435,13 +448,14 @@ async function writeBootstrapRecord(
     terminologiesCreated: string[]
   },
 ): Promise<void> {
-  // Resolve BOOTSTRAP_RECORD's template_id (and version) first. The
-  // /api/document-store/documents endpoint requires template_id —
+  // Resolve the bootstrap-record template_id (and version) first — by the
+  // namespace-prefixed value the seed just created (BOOTSTRAP_RECORD_VALUE).
+  // The /api/document-store/documents endpoint requires template_id —
   // template_value is not auto-resolved at this surface. Per PoNIF #6,
   // pass an explicit template_version so the document validates against
   // the version we just created, not "latest" from cache.
   const tmpl = (await wipGet(
-    `/api/template-store/templates/by-value/BOOTSTRAP_RECORD?namespace=${namespace}`,
+    `/api/template-store/templates/by-value/${BOOTSTRAP_RECORD_VALUE}?namespace=${namespace}`,
   )) as { template_id: string; version: number }
 
   const bootstrapId = `bootstrap-${meta.startedAt.replace(/[:.]/g, '-')}`

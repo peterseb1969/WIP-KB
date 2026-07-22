@@ -80,8 +80,10 @@ Offer-on-empty / use-on-exists, now **two-namespace** (`buildPlans()` →
 namespace (`kb` + `library`) exists. **Any missing →** show an explicit bootstrap
 offer (never auto-bootstrap). Each namespace is seeded in filename order
 (terminologies → terms → templates → WRITE_POLICY docs); the library is created with
-`allowed_external_refs → kb`; one `BOOTSTRAP_RECORD` provenance doc is written to the
-corpus. `runBootstrap` **skips any namespace that already exists** (per-namespace
+`allowed_external_refs → kb`; one `KB_BOOTSTRAP_RECORD` provenance doc is written to
+the corpus (namespace-prefixed value so app-derived namespaces never collide on it in
+a merge; namespaces bootstrapped before the prefixing carry the unprefixed
+`BOOTSTRAP_RECORD` — a template's value is its identity, so they are never renamed). `runBootstrap` **skips any namespace that already exists** (per-namespace
 use-on-exists), so bootstrapping `library` onto an existing `kb` leaves the corpus
 untouched. **Consequence:** with no reconcile, a *new* doc-type added to a seed does
 not land on an already-bootstrapped namespace via redeploy — it must be created
