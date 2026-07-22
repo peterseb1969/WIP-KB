@@ -432,6 +432,22 @@ export default function SearchPage() {
     staleTime: 5 * 60_000,
   })
   const topicTree = topicTreeQ.data ?? null
+  // Open/closed branches of the Topic tree. Empty set = everything collapsed,
+  // which is the default view; "Expand all" fills it with every parent value.
+  const [openTopics, setOpenTopics] = useState<Set<string>>(new Set())
+  const allTopicParents = useMemo(() => {
+    const out = new Set<string>()
+    const walk = (nodes: TopicNode[]) => {
+      for (const n of nodes) {
+        if (n.children.length > 0) {
+          out.add(n.value)
+          walk(n.children)
+        }
+      }
+    }
+    walk(topicTree?.roots ?? [])
+    return out
+  }, [topicTree])
   // The selected filter, expanded to descendant sets. null = no topic filter.
   const selectedTopics = useMemo(() => {
     if (oFilter.size === 0) return null
@@ -648,19 +664,43 @@ export default function SearchPage() {
 
   // The Topic facet renders the KB_TOPIC ontology as an indented tree. Counts
   // and selection are subtree roll-ups (see selectedTopics/facetCounts.o), so
-  // a parent row is a real filter, not a header.
+  // a parent row is a real filter, not a header. Every branch is collapsible,
+  // starts collapsed, and collapse state is independent of selection — a
+  // checked topic keeps filtering while its branch is folded away.
   function renderTopicNodes(nodes: TopicNode[], depth: number): ReactNode[] {
-    return nodes.flatMap((n) => [
-      <div key={n.value} style={{ paddingLeft: depth * 12 }}>
-        <FacetCheckbox
-          label={n.label}
-          count={facetCounts.o.get(n.value) ?? 0}
-          checked={oFilter.has(n.value)}
-          onChange={() => toggleSet('o', oFilter, n.value)}
-        />
-      </div>,
-      ...renderTopicNodes(n.children, depth + 1),
-    ])
+    return nodes.flatMap((n) => {
+      const isOpen = openTopics.has(n.value)
+      const row = (
+        <div key={n.value} className="flex items-center" style={{ paddingLeft: depth * 12 }}>
+          {n.children.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                const next = new Set(openTopics)
+                if (isOpen) next.delete(n.value)
+                else next.add(n.value)
+                setOpenTopics(next)
+              }}
+              aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${n.label}`}
+              className="shrink-0 rounded p-0.5 text-text-muted hover:bg-background"
+            >
+              {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            </button>
+          ) : (
+            <span className="w-4 shrink-0" />
+          )}
+          <div className="min-w-0 flex-1">
+            <FacetCheckbox
+              label={n.label}
+              count={facetCounts.o.get(n.value) ?? 0}
+              checked={oFilter.has(n.value)}
+              onChange={() => toggleSet('o', oFilter, n.value)}
+            />
+          </div>
+        </div>
+      )
+      return isOpen ? [row, ...renderTopicNodes(n.children, depth + 1)] : [row]
+    })
   }
 
   const activeFilterCount =
@@ -686,6 +726,24 @@ export default function SearchPage() {
             ))}
           </FacetSection>
           <FacetSection title="Topic" allOptions={allTopics} defaultOpen>
+            {topicTree && (
+              <div className="mb-1 flex gap-2 px-1">
+                <button
+                  type="button"
+                  onClick={() => setOpenTopics(new Set(allTopicParents))}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Expand all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpenTopics(new Set())}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Collapse all
+                </button>
+              </div>
+            )}
             {topicTree
               ? renderTopicNodes(topicTree.roots, 0)
               : allTopics.map((o) => (
