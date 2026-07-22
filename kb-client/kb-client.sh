@@ -30,17 +30,35 @@
 # the canonical instance's key).
 set -euo pipefail
 
-# Single source of truth for the canonical instance: the calling repo's
-# .claude/kb.json (kb_app_url + kb_api_key_file). When the env doesn't already
-# pin the target, derive both from it — PAIRED, so a hostname cutover (e.g.
-# wip-kb.local -> kb.internal) is one edit to kb.json and CASE-444's url/key
-# pairing guard stays intact. Literal fallbacks below are the last resort.
-if [ -r ./.claude/kb.json ]; then
+# Single source of truth for the target instance: the calling project's
+# .claude/kb.json (kb_app_url + kb_api_key_file). When CLAUDE_PROJECT_DIR is
+# set, THAT project's kb.json governs — the same file harness callers tier-gate
+# on — so the file that decides WHETHER a call happens is the file that decides
+# WHERE it lands, regardless of the process's cwd (CASE-755; the gate-vs-target
+# split let a test suite write to production, CASE-736). Without the env var,
+# ./.claude/kb.json (the caller's cwd) keeps governing as before.
+#
+# When the env doesn't already pin the target, derive both values from the file
+# — PAIRED, so a hostname cutover (e.g. wip-kb.local -> kb.internal) is one
+# edit to kb.json and CASE-444's url/key pairing guard stays intact.
+#
+# Fail-closed rule (CASE-755): a kb.json that EXISTS but yields no kb_app_url
+# (empty `{}`, missing key, malformed JSON) means "not configured" and is a
+# hard exit 2 — never a fall-through to the canonical-instance defaults with
+# the canonical key. A genuinely ABSENT kb.json keeps the literal fallbacks
+# below: they are load-bearing for tier-2 clones and interactive use.
+KBJSON="${CLAUDE_PROJECT_DIR:+$CLAUDE_PROJECT_DIR/.claude/kb.json}"
+KBJSON="${KBJSON:-./.claude/kb.json}"
+if [ -r "$KBJSON" ]; then
   if [ -z "${KB_APP_URL:-}" ]; then
-    KB_APP_URL="$(python3 -c 'import json;print(json.load(open(".claude/kb.json")).get("kb_app_url",""))' 2>/dev/null || true)"
+    KB_APP_URL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_app_url",""))' "$KBJSON" 2>/dev/null || true)"
+    if [ -z "$KB_APP_URL" ]; then
+      echo "kb-client: $KBJSON exists but yields no kb_app_url — refusing to fall back to the canonical-instance defaults. Fix the file, or set KB_APP_URL explicitly." >&2
+      exit 2
+    fi
   fi
   if [ -z "${KB_API_KEY_FILE:-}" ]; then
-    _kbj_key="$(python3 -c 'import json;print(json.load(open(".claude/kb.json")).get("kb_api_key_file",""))' 2>/dev/null || true)"
+    _kbj_key="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_api_key_file",""))' "$KBJSON" 2>/dev/null || true)"
     [ -n "$_kbj_key" ] && KB_API_KEY_FILE="$_kbj_key"
   fi
 fi
