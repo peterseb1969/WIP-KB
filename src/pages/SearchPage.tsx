@@ -667,9 +667,20 @@ export default function SearchPage() {
   // a parent row is a real filter, not a header. Every branch is collapsible,
   // starts collapsed, and collapse state is independent of selection — a
   // checked topic keeps filtering while its branch is folded away.
-  function renderTopicNodes(nodes: TopicNode[], depth: number): ReactNode[] {
+  function renderTopicNodes(
+    nodes: TopicNode[],
+    depth: number,
+    // Label of the nearest selected ancestor, when one covers this branch.
+    // Covered rows render checked-and-locked: the subtree roll-up already
+    // includes them, and the toggleable selection truthfully lives on the
+    // ancestor — an independently clickable child checkbox here would either
+    // lie about state or need "split the parent" semantics.
+    coveredBy: string | null = null,
+  ): ReactNode[] {
     return nodes.flatMap((n) => {
       const isOpen = openTopics.has(n.value)
+      const explicit = oFilter.has(n.value)
+      const implied = coveredBy !== null
       const row = (
         <div key={n.value} className="flex items-center" style={{ paddingLeft: depth * 12 }}>
           {n.children.length > 0 ? (
@@ -693,13 +704,16 @@ export default function SearchPage() {
             <FacetCheckbox
               label={n.label}
               count={facetCounts.o.get(n.value) ?? 0}
-              checked={oFilter.has(n.value)}
+              checked={explicit || implied}
+              disabled={implied}
+              hint={implied ? `Included via "${coveredBy}"` : undefined}
               onChange={() => toggleSet('o', oFilter, n.value)}
             />
           </div>
         </div>
       )
-      return isOpen ? [row, ...renderTopicNodes(n.children, depth + 1)] : [row]
+      const childCover = coveredBy ?? (explicit ? n.label : null)
+      return isOpen ? [row, ...renderTopicNodes(n.children, depth + 1, childCover)] : [row]
     })
   }
 
@@ -1044,21 +1058,32 @@ function FacetCheckbox({
   count,
   checked,
   onChange,
+  disabled = false,
+  hint,
 }: {
   label: string
   count?: number
   checked: boolean
   onChange: () => void
+  // A disabled row shows DERIVED state — e.g. a topic checked because a
+  // selected ancestor's subtree covers it. The real selection lives elsewhere,
+  // so the row is not clickable; `hint` says where.
+  disabled?: boolean
+  hint?: string
 }) {
   // count === 0 → muted, so "blocks-me (0)" signals "no current match" at a glance
   const countMuted = count === 0
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-background">
+    <label
+      title={hint}
+      className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-background'}`}
+    >
       <input
         type="checkbox"
         checked={checked}
         onChange={onChange}
-        className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary/40"
+        disabled={disabled}
+        className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary/40 disabled:cursor-not-allowed"
       />
       <span className={`min-w-0 flex-1 truncate ${checked ? 'font-medium text-text' : 'text-text'}`}>
         {label}
