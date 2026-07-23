@@ -8,6 +8,8 @@ import remarkFrontmatter from 'remark-frontmatter'
 import { ArrowLeft } from 'lucide-react'
 import { FlagModal, QuickFlagButton } from '../components/FlagModal'
 import { RelationshipGraph } from '../components/RelationshipGraph'
+import { RelationshipPicker } from '../components/RelationshipPicker'
+import { CaseActions } from '../components/CaseActions'
 import { CaseThread, type ResponseDoc } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
 import { fetchDocTitlesByIds, fetchFlagTargets, fetchPeerDegrees } from '../lib/reporting'
@@ -352,6 +354,11 @@ export default function DocPage() {
   // output in their own namespace) don't show it.
   const canFlag = doc.namespace === CORPUS_NS
 
+  // CASE-484 increment 2: close/reopen is offered on a case with a number + status.
+  const isCase = doc.template_value === 'CASE_RECORD'
+  const caseNumber = typeof data.case_number === 'number' ? data.case_number : null
+  const caseStatus = typeof data.status === 'string' ? data.status : null
+
   // Surface metadata.custom alongside template-defined data fields. Render
   // every key (no hide list) in insertion order from the API response —
   // Peter explicitly wants the full audit trail visible (CASE-322, closed).
@@ -540,6 +547,10 @@ export default function DocPage() {
               Flag for YAC
             </button>
             <QuickFlagButton sourceDocId={id} sourceDocTitle={docLabel(data, id)} />
+            <RelationshipPicker sourceDocId={id} />
+            {isCase && caseNumber !== null && caseStatus && (
+              <CaseActions docId={id} caseNumber={caseNumber} status={caseStatus} />
+            )}
           </div>
         )}
 
