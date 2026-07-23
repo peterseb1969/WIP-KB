@@ -3,6 +3,7 @@ import express, { Router } from 'express'
 import cors from 'cors'
 import session from 'express-session'
 import path from 'path'
+import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { wipProxy, appConfigHandler } from '@wip/proxy'
 import { initAgent, ask } from './agent.js'
@@ -19,6 +20,18 @@ const PORT = parseInt(process.env.PORT || '3012')
 // The reverse proxy does NOT strip the prefix; the app mounts every route
 // under APP_BASE_PATH so cookies, OIDC redirects, and asset URLs all match.
 const BASE_PATH = (process.env.APP_BASE_PATH || '').replace(/\/$/, '') || '/'
+
+// Resolve the WIP API key once (file preferred, like the /wip proxy) for the
+// browser→gateway bridge below. File-first so a key rotation is picked up on
+// restart rather than stranding a stale inline value.
+function resolveWipKey(): string {
+  const f = process.env.WIP_API_KEY_FILE
+  if (f) {
+    try { return readFileSync(f, 'utf-8').trim() } catch { /* fall back to inline */ }
+  }
+  return process.env.WIP_API_KEY || ''
+}
+const WIP_KEY = resolveWipKey()
 
 const app = express()
 const router = Router()
@@ -83,6 +96,20 @@ router.use((req, res, next) => {
   if (req.path.startsWith('/wip')) return next()
   express.json()(req, res, next)
 })
+
+// Browser → KB gateway bridge (CASE-484): the human UI reaches the SAME write
+// core the CLI uses — "one core, two front-ends", never a second write path.
+// The gateway requires an X-API-Key (it executes WIP calls with the caller's
+// key); a browser session carries none, so inject the server's WIP key — the
+// identical key the /wip proxy already injects for every authenticated browser
+// REST write, so the bridge grants the UI no privilege it didn't already have.
+// Mounted AFTER requireAuth(): the browser session is the credential that gates
+// it. Distinct path from the public CLI mount (/server-api/kb) — Express matches
+// on the `kb-ui` segment, so the two never collide. Body is JSON-parsed above.
+router.use('/server-api/kb-ui', (req, _res, next) => {
+  if (WIP_KEY) req.headers['x-api-key'] = WIP_KEY
+  next()
+}, kbGatewayRoutes)
 
 // Runtime config (admin-only) — set/rotate the Anthropic key without a redeploy (CASE-508)
 router.use('/server-api/config', requireAdmin(), configRoutes)
