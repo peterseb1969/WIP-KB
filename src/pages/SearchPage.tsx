@@ -94,18 +94,13 @@ async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
   }
 }
 
-// "Filed" sort: the doc was CREATED in kb when it was filed, so created_at IS the
-// filing moment. Scoped to cases (case_number present) so non-case docs stay null
-// and sort to the end. (Header docs come from reporting, which does not carry the
-// legacy metadata.custom.filed_at; created_at is the filing moment for every
-// gateway-filed case anyway — CASE-464/CASE-687.)
-function filedAt(doc: DocItem): Date | null {
-  if (typeof doc.data.case_number === 'number') {
-    const d = new Date(doc.created_at)
-    if (!isNaN(d.getTime())) return d
-  }
-  return null
-}
+// "Filed" sort: ordered by case_number, NOT by a timestamp. `created_at` cannot
+// serve here — it carries the current VERSION's creation time, so it advances on
+// every status transition and a "filed" sort over it silently degrades into a
+// last-modified sort (CASE-802). The gateway allocates case_number monotonically
+// at filing time, so ascending case_number IS filing order — exact, though it
+// yields an order rather than a date. Scoped to cases; everything else sorts to
+// the end via compareCaseNumber's null handling.
 
 // "Modified" sort: when the case last moved. A gateway status transition PATCHes
 // the case doc, so updated_at tracks the last transition. (Reporting does not carry
@@ -713,9 +708,9 @@ export default function SearchPage() {
         case 'case_desc':
           return compareCaseNumber(a.doc, b.doc, 'desc')
         case 'filed_desc':
-          return compareDate(filedAt(a.doc), filedAt(b.doc), 'desc')
+          return compareCaseNumber(a.doc, b.doc, 'desc')
         case 'filed_asc':
-          return compareDate(filedAt(a.doc), filedAt(b.doc), 'asc')
+          return compareCaseNumber(a.doc, b.doc, 'asc')
         case 'modified_desc':
           return compareDate(statusModifiedAt(a.doc), statusModifiedAt(b.doc), 'desc')
         case 'modified_asc':
@@ -989,9 +984,12 @@ export default function SearchPage() {
             className="rounded-md border border-gray-200 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
           >
             {SORT_OPTIONS.map((o) => {
+              // Filed is case_number-ordered too (see filedAt's removal note),
+              // so it needs a case in scope exactly like the Case # options.
               const isDisabled =
                 (o.key === 'relevance' && !query.trim()) ||
-                ((o.key === 'case_asc' || o.key === 'case_desc') && !hasCaseInScope)
+                (['case_asc', 'case_desc', 'filed_asc', 'filed_desc'].includes(o.key) &&
+                  !hasCaseInScope)
               return (
                 <option key={o.key} value={o.key} disabled={isDisabled}>
                   {o.label}

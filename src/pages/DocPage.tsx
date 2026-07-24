@@ -109,6 +109,29 @@ export default function DocPage() {
     staleTime: 30_000,
   })
 
+  // A document's `created_at` is the CURRENT VERSION's timestamp, not the
+  // entity's: every edit creates a version and moves it forward, so a case
+  // filed in June but status-patched today reads as created today (and the
+  // "updated" clause below, rendered only when the two differ, never shows —
+  // they are always equal). Version 1 holds the real creation time. Fetched
+  // per doc view; falls back to doc.created_at if history is unavailable.
+  // (CASE-802 asks the platform to expose this without a versions call.)
+  const { data: firstCreatedAt } = useQuery<string | null>({
+    queryKey: ['doc-first-created', id],
+    queryFn: async () => {
+      const res = await fetch(
+        `${import.meta.env.BASE_URL}wip/api/document-store/documents/${id}/versions`,
+      )
+      if (!res.ok) return null
+      const d = (await res.json()) as { versions?: Array<{ version: number; created_at: string }> }
+      let first: { version: number; created_at: string } | undefined
+      for (const v of d.versions ?? []) if (!first || v.version < first.version) first = v
+      return first?.created_at ?? null
+    },
+    enabled: !!id,
+    staleTime: 60_000,
+  })
+
   // location.key === 'default' means the user landed directly on this URL
   // with no prior history (deep-link / refresh) — navigate(-1) would leave
   // the app, so fall back to the start page.
@@ -347,6 +370,8 @@ export default function DocPage() {
   )
   const isRoot = data.root === true
   const orphan = !isRoot && incoming.length === 0 && outgoing.length === 0
+  // v1's timestamp when history resolved, else the (version-scoped) doc value.
+  const createdAt = firstCreatedAt ?? doc.created_at
 
   // Flag-for-YAC writes a FLAG_RECORD in the corpus namespace + a FLAGGED_FROM
   // edge to this doc. Cross-namespace relationships are unsupported (CASE-538),
@@ -481,9 +506,9 @@ export default function DocPage() {
             {[
               typeof data.authored_by === 'string' && data.authored_by,
               typeof data.doc_status === 'string' && data.doc_status,
-              doc.created_at && `created ${new Date(doc.created_at).toLocaleString()}`,
+              createdAt && `created ${new Date(createdAt).toLocaleString()}`,
               doc.updated_at &&
-                doc.updated_at !== doc.created_at &&
+                doc.updated_at !== createdAt &&
                 `updated ${new Date(doc.updated_at).toLocaleString()}`,
             ]
               .filter(Boolean)
