@@ -59,6 +59,25 @@ const PREFIX_TYPE: Record<string, keyof typeof NUMBER_FIELD> = {
 const TYPE_LABEL: Record<string, string> = { DOCUMENT: 'DOCUMENT (paper)' }
 const typeLabel = (t: string): string => TYPE_LABEL[t] ?? t
 
+// Friendly, lowercase plurals for the scope line ("Searching cases, lessons, …").
+// Falls back to the lowercased template value for any type not named here.
+const SCOPE_LABEL: Record<string, string> = {
+  CASE_RECORD: 'cases',
+  CASE_RESPONSE: 'responses',
+  DESIGN_DECISION: 'decisions',
+  LESSON: 'lessons',
+  FIRESIDE: 'firesides',
+  SESSION: 'sessions',
+  DOCUMENT: 'papers',
+  JOURNEY_ENTRY: 'journal',
+  YAC_MEMORY: 'memories',
+  AGENT_IDENTITY: 'agents',
+  FLAG_RECORD: 'flags',
+  GIT_STATS_SNAPSHOT: 'git-stats',
+  LIBRARY_DOC: 'library',
+}
+const scopeLabel = (t: string): string => SCOPE_LABEL[t] ?? t.toLowerCase()
+
 async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
   try {
     const t = await wipFetchJson<{ terminology_id?: string; id?: string }>(
@@ -280,6 +299,15 @@ export default function SearchPage() {
   const pFilter = useMemo(() => csvSet(params.get('p')), [params])
   const rFilter = useMemo(() => csvSet(params.get('r')), [params])
   const oFilter = useMemo(() => csvSet(params.get('o')), [params])
+  // CASE_RESPONSE is the one type excluded even under "no type filter" (CASE-533:
+  // responses are readable inline in the case thread, so they're default-hidden
+  // noise in a mixed result set). That exclusion used to be invisible — an empty
+  // Type facet silently meant "everything EXCEPT responses", so a term that only
+  // appears in a response returned nothing with no explanation. `resp=1` is the
+  // scope-line opt-in that ADDS responses to the unfiltered set (distinct from
+  // ticking CASE_RESPONSE in the Type facet, which NARROWS to responses only).
+  const includeResponses = params.get('resp') === '1'
+  const showResponses = tFilter.has('CASE_RESPONSE') || (tFilter.size === 0 && includeResponses)
   const [page, setPage] = useState(1)
 
   const [draft, setDraft] = useState(query)
@@ -504,9 +532,10 @@ export default function SearchPage() {
   const filtered = useMemo(
     () =>
       hits.filter(({ doc }) => {
-        // CASE_RESPONSE is default-hidden noise (viewable inline under its parent
-        // case); surface it only when explicitly selected in the type facet (CASE-533).
-        if (doc.template_value === 'CASE_RESPONSE' && !tFilter.has('CASE_RESPONSE')) return false
+        // CASE_RESPONSE is default-hidden (viewable inline under its parent case);
+        // surfaced when the Type facet selects it OR the scope-line "include
+        // responses" toggle is on (CASE-533 / scope-transparency follow-up).
+        if (doc.template_value === 'CASE_RESPONSE' && !showResponses) return false
         if (tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
         if (sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
         if (aFilter.size > 0 && !docAuthors(authorSource(doc)).some((r) => aFilter.has(r)))
@@ -532,7 +561,7 @@ export default function SearchPage() {
     function passes(doc: DocItem, skip: FacetKey): boolean {
       // Default-hidden CASE_RESPONSE shouldn't inflate other facets' counts, but
       // stays counted in the type facet itself (skip==='t') so it's selectable (CASE-533).
-      if (skip !== 't' && doc.template_value === 'CASE_RESPONSE' && !tFilter.has('CASE_RESPONSE'))
+      if (skip !== 't' && doc.template_value === 'CASE_RESPONSE' && !showResponses)
         return false
       if (skip !== 't' && tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
       if (skip !== 's' && sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
@@ -639,6 +668,21 @@ export default function SearchPage() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const safePage = Math.min(page, pageCount)
   const visible = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
+  // Scope line: which types the current result set actually spans. With a type
+  // filter active it's the selected types; otherwise every type present except
+  // responses (which ride the separate include toggle). This is the disclosure
+  // that makes "empty facet ≠ everything" visible instead of silent.
+  const scopeTypeValues =
+    tFilter.size > 0 ? [...tFilter].sort() : allTemplates.filter((t) => t !== 'CASE_RESPONSE')
+  const scopeText = scopeTypeValues.map(scopeLabel).join(', ')
+  // Response matches that are being withheld from the default (unfiltered) view —
+  // the actionable "you searched, N responses matched, here's how to see them".
+  const responseMatchCount = query.trim()
+    ? hits.filter((h) => h.doc.template_value === 'CASE_RESPONSE').length
+    : 0
+  const responsesHiddenNudge =
+    query.trim() && tFilter.size === 0 && !includeResponses ? responseMatchCount : 0
 
   function setParam(key: string, value: string | null) {
     const next = new URLSearchParams(params)
@@ -924,14 +968,66 @@ export default function SearchPage() {
           </div>
         )}
 
+        {/* Scope line — what the result set actually spans, so "empty facet ≠
+            everything" is visible, not silent. Responses ride an explicit toggle. */}
+        {!isLoading && !error && allTemplates.length > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-x-1.5 text-xs text-text-muted">
+            <span>Searching {scopeText || 'the corpus'}</span>
+            {tFilter.size === 0 && (
+              <>
+                <span aria-hidden>·</span>
+                {showResponses ? (
+                  <span>
+                    responses included{' '}
+                    <button
+                      type="button"
+                      onClick={() => setParam('resp', null)}
+                      className="text-primary hover:underline"
+                    >
+                      exclude
+                    </button>
+                  </span>
+                ) : (
+                  <span>
+                    responses excluded{' '}
+                    <button
+                      type="button"
+                      onClick={() => setParam('resp', '1')}
+                      className="text-primary hover:underline"
+                    >
+                      include
+                    </button>
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {/* Results meta */}
         <div className="mb-3 flex items-center justify-between text-xs text-text-muted">
           <span>
-            {isLoading
-              ? 'Loading…'
-              : error
-                ? 'Error'
-                : `${total} result${total === 1 ? '' : 's'}${query.trim() ? ` for "${query.trim()}"` : ''}`}
+            {isLoading ? (
+              'Loading…'
+            ) : error ? (
+              'Error'
+            ) : (
+              <>
+                {`${total} result${total === 1 ? '' : 's'}${query.trim() ? ` for "${query.trim()}"` : ''}`}
+                {responsesHiddenNudge > 0 && (
+                  <>
+                    {' · '}
+                    <button
+                      type="button"
+                      onClick={() => setParam('resp', '1')}
+                      className="text-primary hover:underline"
+                    >
+                      {responsesHiddenNudge} more in responses
+                    </button>
+                  </>
+                )}
+              </>
+            )}
           </span>
           {pageCount > 1 && (
             <span>
