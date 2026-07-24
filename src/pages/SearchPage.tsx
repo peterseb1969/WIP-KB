@@ -299,15 +299,14 @@ export default function SearchPage() {
   const pFilter = useMemo(() => csvSet(params.get('p')), [params])
   const rFilter = useMemo(() => csvSet(params.get('r')), [params])
   const oFilter = useMemo(() => csvSet(params.get('o')), [params])
-  // CASE_RESPONSE is the one type excluded even under "no type filter" (CASE-533:
-  // responses are readable inline in the case thread, so they're default-hidden
-  // noise in a mixed result set). That exclusion used to be invisible — an empty
-  // Type facet silently meant "everything EXCEPT responses", so a term that only
-  // appears in a response returned nothing with no explanation. `resp=1` is the
-  // scope-line opt-in that ADDS responses to the unfiltered set (distinct from
-  // ticking CASE_RESPONSE in the Type facet, which NARROWS to responses only).
-  const includeResponses = params.get('resp') === '1'
-  const showResponses = tFilter.has('CASE_RESPONSE') || (tFilter.size === 0 && includeResponses)
+  // Response matches FOLD into their parent case by default: a matching
+  // CASE_RESPONSE contributes an attributed sub-hit under the case it belongs to
+  // rather than a standalone row, and a case whose ONLY match is in a response
+  // still appears. This replaces the old silent exclusion (an empty Type facet
+  // used to mean "everything EXCEPT responses", so a term living only in a
+  // response returned nothing, with no way to see why). Ticking CASE_RESPONSE in
+  // the Type facet opts out of folding and lists raw response rows instead.
+  const foldResponses = !tFilter.has('CASE_RESPONSE')
   const [page, setPage] = useState(1)
 
   const [draft, setDraft] = useState(query)
@@ -488,7 +487,31 @@ export default function SearchPage() {
     return s
   }, [oFilter, topicTree])
 
-  type Hit = { doc: DocItem; score: number | null; snippet: string | null }
+  // A matching response, carried on its parent case's hit.
+  type ResponseMatch = {
+    documentId: string
+    seq: number | null
+    score: number | null
+    snippet: string | null
+  }
+  type Hit = {
+    doc: DocItem
+    score: number | null
+    snippet: string | null
+    // Present on CASE_RECORD hits whose responses matched the query.
+    responseMatches?: ResponseMatch[]
+  }
+
+  // case_number → the CASE_RECORD doc, so a response hit can find its parent.
+  const caseByNumber = useMemo(() => {
+    const m = new Map<number, DocItem>()
+    for (const d of filterableDocs) {
+      if (d.template_value !== 'CASE_RECORD') continue
+      if (typeof d.data.case_number === 'number') m.set(d.data.case_number, d)
+    }
+    return m
+  }, [filterableDocs])
+
   const hits: Hit[] = useMemo(() => {
     if (query.trim()) {
       // Number jump: a minted handle ("CASE-457", "FIRESIDE-21", "PAPER-97", "#457")
@@ -516,26 +539,76 @@ export default function SearchPage() {
       const ftsHits = Object.values(searchQ.data?.results ?? {}).flatMap((b) => b.items)
       const seen = new Set<string>()
       const result: Hit[] = []
+      // Response matches, grouped by their parent case's document_id, to be
+      // attached after the main pass (the parent may appear before OR after the
+      // response in the FTS result order).
+      const byParent = new Map<string, ResponseMatch[]>()
       for (const h of ftsHits) {
         if (h.type !== 'document') continue
         if (seen.has(h.id)) continue
         seen.add(h.id)
         const doc = docsById.get(h.id)
         if (!doc) continue // docsById holds only entity docs (edges/structural excluded at source)
+        if (doc.template_value === 'CASE_RESPONSE') {
+          const parent =
+            typeof doc.data.case_number === 'number'
+              ? caseByNumber.get(doc.data.case_number)
+              : undefined
+          if (parent) {
+            const arr = byParent.get(parent.document_id) ?? []
+            arr.push({
+              documentId: doc.document_id,
+              seq: typeof doc.data.response_seq === 'number' ? doc.data.response_seq : null,
+              score: h.score,
+              snippet: h.snippet,
+            })
+            byParent.set(parent.document_id, arr)
+          }
+          // The response row itself stays in `hits` regardless: it keeps the Type
+          // facet's CASE_RESPONSE count honest (so the count reflects real matches
+          // and the type stays selectable) and becomes the visible row when the
+          // user opts out of folding. `filtered` drops it while folding is on.
+          // An orphan response (parent case not loaded) has no fold target, so
+          // this row is also what keeps its match from vanishing entirely.
+          result.push({ doc, score: h.score, snippet: h.snippet })
+          continue
+        }
         result.push({ doc, score: h.score, snippet: h.snippet })
+      }
+      // Attach response matches to parents already in the result set, and
+      // synthesize a hit for any case that matched ONLY through its responses —
+      // the case that used to be invisible.
+      const inResult = new Set(result.map((r) => r.doc.document_id))
+      for (const [parentId, matches] of byParent) {
+        matches.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+        const existing = result.find((r) => r.doc.document_id === parentId)
+        if (existing) {
+          existing.responseMatches = matches
+          continue
+        }
+        if (inResult.has(parentId)) continue
+        const parent = docsById.get(parentId)
+        if (!parent) continue
+        // No body match of its own — rank it by its best-scoring response so it
+        // sorts sensibly among body matches instead of falling to the bottom.
+        const best = matches.reduce<number | null>(
+          (mx, m) => (m.score != null && (mx == null || m.score > mx) ? m.score : mx),
+          null,
+        )
+        result.push({ doc: parent, score: best, snippet: null, responseMatches: matches })
       }
       return result
     }
     return filterableDocs.map((d) => ({ doc: d, score: null, snippet: null }))
-  }, [query, searchQ.data, docsById, filterableDocs])
+  }, [query, searchQ.data, docsById, filterableDocs, caseByNumber])
 
   const filtered = useMemo(
     () =>
       hits.filter(({ doc }) => {
-        // CASE_RESPONSE is default-hidden (viewable inline under its parent case);
-        // surfaced when the Type facet selects it OR the scope-line "include
-        // responses" toggle is on (CASE-533 / scope-transparency follow-up).
-        if (doc.template_value === 'CASE_RESPONSE' && !showResponses) return false
+        // While folding, a response is represented by the sub-hit on its parent
+        // case, so its standalone row is dropped (it would double-report the same
+        // match). Opting out of folding — ticking CASE_RESPONSE — lists them.
+        if (doc.template_value === 'CASE_RESPONSE' && foldResponses) return false
         if (tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
         if (sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
         if (aFilter.size > 0 && !docAuthors(authorSource(doc)).some((r) => aFilter.has(r)))
@@ -561,7 +634,7 @@ export default function SearchPage() {
     function passes(doc: DocItem, skip: FacetKey): boolean {
       // Default-hidden CASE_RESPONSE shouldn't inflate other facets' counts, but
       // stays counted in the type facet itself (skip==='t') so it's selectable (CASE-533).
-      if (skip !== 't' && doc.template_value === 'CASE_RESPONSE' && !showResponses)
+      if (skip !== 't' && doc.template_value === 'CASE_RESPONSE' && foldResponses)
         return false
       if (skip !== 't' && tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
       if (skip !== 's' && sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
@@ -676,13 +749,6 @@ export default function SearchPage() {
   const scopeTypeValues =
     tFilter.size > 0 ? [...tFilter].sort() : allTemplates.filter((t) => t !== 'CASE_RESPONSE')
   const scopeText = scopeTypeValues.map(scopeLabel).join(', ')
-  // Response matches that are being withheld from the default (unfiltered) view —
-  // the actionable "you searched, N responses matched, here's how to see them".
-  const responseMatchCount = query.trim()
-    ? hits.filter((h) => h.doc.template_value === 'CASE_RESPONSE').length
-    : 0
-  const responsesHiddenNudge =
-    query.trim() && tFilter.size === 0 && !includeResponses ? responseMatchCount : 0
 
   function setParam(key: string, value: string | null) {
     const next = new URLSearchParams(params)
@@ -972,33 +1038,17 @@ export default function SearchPage() {
             everything" is visible, not silent. Responses ride an explicit toggle. */}
         {!isLoading && !error && allTemplates.length > 0 && (
           <div className="mb-2 flex flex-wrap items-center gap-x-1.5 text-xs text-text-muted">
-            <span>Searching {scopeText || 'the corpus'}</span>
-            {tFilter.size === 0 && (
+            <span>
+              {query.trim() ? 'Searching' : 'Browsing'} {scopeText || 'the corpus'}
+            </span>
+            {query.trim() && (
               <>
                 <span aria-hidden>·</span>
-                {showResponses ? (
-                  <span>
-                    responses included{' '}
-                    <button
-                      type="button"
-                      onClick={() => setParam('resp', null)}
-                      className="text-primary hover:underline"
-                    >
-                      exclude
-                    </button>
-                  </span>
-                ) : (
-                  <span>
-                    responses excluded{' '}
-                    <button
-                      type="button"
-                      onClick={() => setParam('resp', '1')}
-                      className="text-primary hover:underline"
-                    >
-                      include
-                    </button>
-                  </span>
-                )}
+                <span>
+                  {foldResponses
+                    ? 'case responses are searched too, shown under their case'
+                    : 'responses listed as their own results'}
+                </span>
               </>
             )}
           </div>
@@ -1007,27 +1057,11 @@ export default function SearchPage() {
         {/* Results meta */}
         <div className="mb-3 flex items-center justify-between text-xs text-text-muted">
           <span>
-            {isLoading ? (
-              'Loading…'
-            ) : error ? (
-              'Error'
-            ) : (
-              <>
-                {`${total} result${total === 1 ? '' : 's'}${query.trim() ? ` for "${query.trim()}"` : ''}`}
-                {responsesHiddenNudge > 0 && (
-                  <>
-                    {' · '}
-                    <button
-                      type="button"
-                      onClick={() => setParam('resp', '1')}
-                      className="text-primary hover:underline"
-                    >
-                      {responsesHiddenNudge} more in responses
-                    </button>
-                  </>
-                )}
-              </>
-            )}
+            {isLoading
+              ? 'Loading…'
+              : error
+                ? 'Error'
+                : `${total} result${total === 1 ? '' : 's'}${query.trim() ? ` for "${query.trim()}"` : ''}`}
           </span>
           {pageCount > 1 && (
             <span>
@@ -1045,7 +1079,7 @@ export default function SearchPage() {
           <EmptyState query={query} onBrowse={(t) => toggleSet('t', new Set(), t)} templates={allTemplates} />
         ) : (
           <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-surface">
-            {visible.map(({ doc, score, snippet }) => (
+            {visible.map(({ doc, score, snippet, responseMatches }) => (
               <li key={doc.document_id}>
                 <Link
                   to={`/doc/${doc.document_id}`}
@@ -1082,6 +1116,39 @@ export default function SearchPage() {
                     </div>
                   </div>
                 </Link>
+                {/* Matching responses, attributed to the case they belong to.
+                    Outside the row's <Link> — each is its own link, and an
+                    anchor cannot nest inside another anchor. */}
+                {foldResponses && responseMatches && responseMatches.length > 0 && (
+                  <div className="border-t border-gray-100 bg-background/50 px-4 py-2">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                      {responseMatches.length} matching{' '}
+                      {responseMatches.length === 1 ? 'response' : 'responses'}
+                    </p>
+                    <ul className="space-y-1">
+                      {responseMatches.map((rm) => (
+                        <li key={rm.documentId}>
+                          <Link
+                            to={`/doc/${rm.documentId}`}
+                            className="flex gap-2 rounded px-1.5 py-1 transition hover:bg-surface"
+                          >
+                            <span className="shrink-0 font-mono text-xs text-primary">
+                              ↳ {rm.seq !== null ? `#${rm.seq}` : 'response'}
+                            </span>
+                            {rm.snippet && (
+                              <span
+                                className="fts-snippet min-w-0 flex-1 text-sm text-text-muted"
+                                dangerouslySetInnerHTML={{
+                                  __html: sanitiseFtsSnippet(rm.snippet),
+                                }}
+                              />
+                            )}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

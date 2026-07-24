@@ -44,6 +44,9 @@ export interface HeaderDoc {
     // a typed number to any minted doc — integers carry no FTS index, so a bare
     // number can only ever be matched client-side against these.
     case_number?: number
+    // CASE_RESPONSE's per-case sequence — the "#3" in the CASE-<n>#<seq> handle.
+    // Loaded so a response FTS hit can be labelled when it folds into its case.
+    response_seq?: number
     fireside_number?: number
     paper_number?: number
     lesson_number?: number
@@ -110,6 +113,7 @@ const ONLY_ACTIVE = `status = 'active'`
 const HEADER_COLS: Record<string, string> = {
   title: 'text',
   case_number: 'integer',
+  response_seq: 'integer',
   fireside_number: 'integer',
   paper_number: 'integer',
   lesson_number: 'integer',
@@ -136,6 +140,7 @@ interface RawHeaderRow {
   template_value: string
   title: string | null
   case_number: number | null
+  response_seq: number | null
   fireside_number: number | null
   paper_number: number | null
   lesson_number: number | null
@@ -220,6 +225,7 @@ function toHeaderDoc(r: RawHeaderRow, namespace: string): HeaderDoc {
   const data: HeaderDoc['data'] = {}
   if (r.title != null) data.title = r.title
   if (r.case_number != null) data.case_number = r.case_number
+  if (r.response_seq != null) data.response_seq = r.response_seq
   if (r.fireside_number != null) data.fireside_number = r.fireside_number
   if (r.paper_number != null) data.paper_number = r.paper_number
   if (r.lesson_number != null) data.lesson_number = r.lesson_number
