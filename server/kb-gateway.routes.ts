@@ -1090,38 +1090,60 @@ router.get('/search', async (req, res) => {
   const perNs = await Promise.all(
     namespaces.map(async (ns) => {
       try {
+        // The type filter is DELEGATED to reporting-sync rather than applied here.
+        // Filtering locally on each hit's reported type meant two places decided
+        // what a type name matches, and they disagreed the moment the reporting
+        // layer changed how it names things (CASE-810: hits came back as
+        // CASE_RECORD__V1, so an equality test against CASE_RECORD silently kept
+        // nothing). It also made the platform's unmatched-template signal
+        // unreachable — it can only report on a filter it was actually given.
         const r = await wipReq(
           'POST', `/api/reporting-sync/search?namespace=${encodeURIComponent(ns)}`, key,
-          { query: q, mode, types: ['document'], page_size: 100 },
+          { query: q, mode, types: ['document'], page_size: 100, ...(typeFilter ? { template: typeFilter } : {}) },
         )
         const hits: AnyObj[] = Object.values(r.results ?? {}).flatMap(
           (b) => ((b as AnyObj).items as AnyObj[]) ?? [],
         )
-        const kept = typeFilter
-          ? hits.filter((h) => String(h.value ?? '').toUpperCase() === typeFilter)
-          : hits
-        const titles = await titlesForHits(ns, kept, key)
-        return kept.map((h) => ({
-          document_id: h.id,
-          template_value: h.value ?? null,
-          namespace: ns,
-          title: titles.get(String(h.id)) ?? null,
-          score: h.score == null ? null : Number(h.score),
-          // Snippet carries the platform's <b> highlight markup and embedded
-          // newlines; passed through as-is so each consumer renders it its own way.
-          snippet: h.snippet ?? null,
-          updated_at: h.updated_at ?? null,
-        }))
+        const titles = await titlesForHits(ns, hits, key)
+        return {
+          // null (not false) when the platform predates the signal — absence of
+          // evidence, which must not be reported as a matched filter (CASE-811).
+          unmatched: r.unmatched_template === undefined ? null : r.unmatched_template != null,
+          items: hits.map((h) => ({
+            document_id: h.id,
+            template_value: h.value ?? null,
+            namespace: ns,
+            title: titles.get(String(h.id)) ?? null,
+            score: h.score == null ? null : Number(h.score),
+            // Snippet carries the platform's <b> highlight markup and embedded
+            // newlines; passed through as-is so each consumer renders it its own way.
+            snippet: h.snippet ?? null,
+            updated_at: h.updated_at ?? null,
+          })),
+        }
       } catch {
-        return [] // a namespace with no FTS data must not sink the whole search
+        // A namespace with no FTS data must not sink the whole search — and it
+        // reports no verdict on the filter, rather than a negative one.
+        return { unmatched: null, items: [] as AnyObj[] }
       }
     }),
   )
-  const all = perNs.flat().sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+  const all = perNs.flatMap((p) => p.items).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+  // Search spans namespaces, so a type is only "unmatched" when EVERY namespace
+  // that answered said so — matching in one is enough to make the filter valid.
+  // Namespaces that errored or gave no verdict abstain; if none gave a verdict,
+  // the answer is null (unknown), never a false negative.
+  const verdicts = perNs.map((p) => p.unmatched).filter((v): v is boolean => v !== null)
+  const unmatchedTemplate =
+    typeFilter && verdicts.length > 0 && verdicts.every(Boolean) ? typeFilter : null
   // Report the cap rather than silently truncating: the per-namespace page_size
   // above is itself a window, so `truncated` means "there is more", not a total.
   res.json({
     query: q, mode, namespaces, type: typeFilter,
+    // Echoes the requested type when it matched no reporting table in any
+    // namespace searched — so a caller can tell a bad type name from a genuine
+    // zero-result instead of reading silence as an answer (CASE-811).
+    unmatched_template: unmatchedTemplate,
     returned: Math.min(all.length, limit), truncated: all.length > limit,
     items: all.slice(0, limit),
   })

@@ -16,6 +16,8 @@ Exit codes:
     0 = success (body / table printed to stdout)
     1 = not found
     2 = transport failure on the final-attempted target
+    3 = search only: the --type filter matched no reporting table, so the empty
+        result is a bad/retired type name rather than a genuine zero-result
 
 Usage:
     case-fetch.py case <N>
@@ -339,6 +341,18 @@ def _format_search_table(payload: dict) -> str:
     head = (f"{payload.get('query')!r} — {payload.get('returned', len(items))} hit(s) "
             f"[{', '.join(payload.get('namespaces') or [])}] mode={payload.get('mode')}"
             + ("  (truncated — raise --limit for more)" if payload.get("truncated") else ""))
+    # An unmatched --type must not read as a legitimate zero-result. That silence
+    # is what let CASE-810 run unnoticed on two live instances: a type-filtered
+    # search returned nothing and was taken as "the corpus has nothing" rather
+    # than "your type name matched no reporting table" (CASE-811).
+    unmatched = payload.get("unmatched_template")
+    if unmatched:
+        return (f"{head}\n"
+                f"!! --type {unmatched!r} matched no reporting table in "
+                f"{', '.join(payload.get('namespaces') or [])} — this is NOT a zero-result.\n"
+                f"   The type name may be wrong or retired, or its documents may not be "
+                f"synced to reporting.\n"
+                f"   Re-run without --type to search every type.\n")
     if not items:
         return f"{head}\n_(no matches)_\n"
     out = [head, "", "| Type | Score | Title | Snippet | Document ID |", "|---|---|---|---|---|"]
@@ -484,6 +498,14 @@ def main() -> None:
                 sys.stdout.write(json.dumps(payload, indent=2) + "\n")
             else:
                 sys.stdout.write(_format_search_table(payload))
+            # Exit 3 = the --type filter matched nothing that exists, which is a
+            # different fact from "no document matched" (exit 1). Collapsing the
+            # two is what made CASE-810 invisible; a caller branching on 1 must
+            # not silently absorb a bad type name (CASE-811).
+            if payload.get("unmatched_template"):
+                print(f"search: --type {payload['unmatched_template']!r} matched no reporting "
+                      f"table — not a zero-result", file=sys.stderr)
+                sys.exit(3)
             sys.exit(0 if payload.get("items") else 1)
 
         elif args.mode == "read":
