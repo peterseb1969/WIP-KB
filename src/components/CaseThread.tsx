@@ -1,5 +1,6 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { formatWipDateTime } from '../lib/datetime'
 
 // CASE-506 (UI half): render a case's responses inline as collapsible sections,
 // so the full thread reads on the case page with no separate navigation.
@@ -46,7 +47,7 @@ export function CaseThread({ responses }: { responses: ResponseDoc[] }) {
           const style = KIND_STYLE[kind] ?? DEFAULT_KIND
           const seq = r.data?.response_seq
           const author = r.data?.author || 'unknown'
-          const when = r.created_at ? new Date(r.created_at).toLocaleString() : ''
+          const when = formatWipDateTime(r.created_at)
           const body = r.data?.body || ''
           const isLast = i === responses.length - 1 // auto-expand the most recent
           return (

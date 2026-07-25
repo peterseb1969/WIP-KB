@@ -10,6 +10,7 @@ import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
 import { CaseStats } from '../components/CaseStats'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
+import { parseWipDate, formatWipDateTime } from '../lib/datetime'
 
 // Search renders header fields only (title/case/status/facets/snippet), so a doc
 // here is the reporting-sourced HeaderDoc — no body is ever fetched (CASE-687).
@@ -107,10 +108,7 @@ async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
 // the legacy per-transition metadata.custom stamps, which are empty on gateway-era
 // cases regardless — CASE-687.)
 function statusModifiedAt(doc: DocItem): Date | null {
-  if (typeof doc.data.case_number === 'number') {
-    const d = new Date(doc.updated_at)
-    if (!isNaN(d.getTime())) return d
-  }
+  if (typeof doc.data.case_number === 'number') return parseWipDate(doc.updated_at)
   return null
 }
 
@@ -1106,7 +1104,7 @@ export default function SearchPage() {
                       )}
                       <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-text-muted">
                         {doc.data.authored_by && <span>{doc.data.authored_by}</span>}
-                        <span>{new Date(doc.updated_at).toLocaleString()}</span>
+                        <span>{formatWipDateTime(doc.updated_at)}</span>
                         {score !== null && score !== undefined && (
                           <span className="ml-auto">score {score.toFixed(2)}</span>
                         )}

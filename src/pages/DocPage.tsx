@@ -14,6 +14,7 @@ import { CaseThread, type ResponseDoc } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
 import { fetchDocTitlesByIds, fetchFlagTargets, fetchPeerDegrees } from '../lib/reporting'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
+import { formatWipDateTime } from '../lib/datetime'
 
 const COMMON_FIELDS = new Set(['title', 'authored_by', 'doc_status', 'tags', 'root', 'body'])
 
@@ -506,10 +507,10 @@ export default function DocPage() {
             {[
               typeof data.authored_by === 'string' && data.authored_by,
               typeof data.doc_status === 'string' && data.doc_status,
-              createdAt && `created ${new Date(createdAt).toLocaleString()}`,
+              createdAt && `created ${formatWipDateTime(createdAt)}`,
               doc.updated_at &&
                 doc.updated_at !== createdAt &&
-                `updated ${new Date(doc.updated_at).toLocaleString()}`,
+                `updated ${formatWipDateTime(doc.updated_at)}`,
             ]
               .filter(Boolean)
               .join(' · ')}

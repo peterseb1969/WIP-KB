@@ -6,6 +6,7 @@ import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
 import { CaseStats } from '../components/CaseStats'
 import { NAMESPACES } from '../lib/namespaces'
+import { formatWipDate, formatWipDateTime } from '../lib/datetime'
 
 // Structural / config doc types — not KB content, hidden from the start page.
 // (Edge types are filtered separately via the template usage flag.)
@@ -134,7 +135,7 @@ function DocGroupBox({ group }: { group: SummaryGroup }) {
           </span>
         )}
         <span className="ml-auto text-xs text-text-muted">
-          latest {group.newest ? new Date(group.newest).toLocaleDateString() : '—'}
+          latest {formatWipDate(group.newest) || '—'}
         </span>
       </summary>
 
@@ -194,7 +195,7 @@ function DocGroupBox({ group }: { group: SummaryGroup }) {
                 <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-text-muted">
                   {d.data.authored_by && <span>{d.data.authored_by}</span>}
                   {workflowStatus(d) && <span>{workflowStatus(d)}</span>}
-                  <span className="ml-auto">{new Date(d.updated_at).toLocaleString()}</span>
+                  <span className="ml-auto">{formatWipDateTime(d.updated_at)}</span>
                 </div>
               </Link>
             </li>
