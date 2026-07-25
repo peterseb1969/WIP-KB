@@ -43,12 +43,27 @@ def post(path, payload):
         return json.load(r)
 
 
+OK_STATUSES = ("created", "updated", "unchanged", "skipped")
+
+
 def assert_ok(resp, what):
+    """Bulk-first check: per-item status is the authority, not the envelope count.
+
+    The def-store term-relations endpoint counts an already-exists `skipped` item
+    as FAILED, not succeeded (verified against a live instance: re-posting two
+    existing edges returns total=2 succeeded=0 failed=2, with both items
+    status='skipped', error_code='already_exists'). That is exactly what an
+    idempotent re-run produces, so trusting `failed` would abort every re-run
+    against an instance that already carries the taxonomy. Abort on a genuinely
+    bad item, or on a failure count with no per-item detail to explain it.
+    """
     results = resp.get("results", [])
-    bad = [r for r in results if r.get("status") not in ("created", "updated", "unchanged", "skipped")]
-    if bad or resp.get("failed", 0):
-        sys.exit(f"ABORT {what}: {json.dumps(bad[:3], indent=1)}")
-    print(f"OK {what}: {resp.get('succeeded', len(results))}/{resp.get('total', len(results))}")
+    bad = [r for r in results if r.get("status") not in OK_STATUSES]
+    if bad or (resp.get("failed") and not results):
+        sys.exit(f"ABORT {what}: {json.dumps(bad[:3] or resp, indent=1)[:600]}")
+    skipped = sum(1 for r in results if r.get("status") == "skipped")
+    note = f"  ({skipped} already present)" if skipped else ""
+    print(f"OK {what}: {len(results) - len(bad)}/{len(results)}{note}")
     return results
 
 
