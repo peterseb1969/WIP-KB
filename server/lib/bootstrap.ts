@@ -323,15 +323,45 @@ async function seedNamespace(
   }
   progress('terms', `Created ${totalTerms} terms across ${terminologies.length} terminologies`)
 
-  // Step 4: Create ontology term-relations (none in v1, but keep the
-  // loop in place for forward-compat if a future seed adds them).
+  // Step 4: Create ontology term-relations (KB_TOPIC's hierarchy, CASE-760).
+  //
+  // Seeds address the endpoints by TERM VALUE — stable, readable, and what a
+  // human writes — but the API takes term_ids. The 2-part "TERMINOLOGY:VALUE"
+  // shorthand is NOT an alternative: def-store rejects it with 422 on every term
+  // endpoint, reads and writes alike. So resolve values to ids here, by reading
+  // back the terminology's terms (rather than trusting ids in the bulk-create
+  // response, which lets a re-run over existing terms resolve identically).
+  // Only fetched for terminologies that actually declare relationships.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   const allRelations: AnyObj[] = []
   for (const termData of terminologies) {
     const rels = termData.ontology?.relationships || []
+    if (!rels.length) continue
+
+    const terminologyId = termIdMap.get(termData.value)
+    if (!terminologyId) continue
+    const listed = (await wipGet(
+      `/api/def-store/terminologies/${terminologyId}/terms?namespace=${namespace}&page_size=100`,
+    )) as { items?: Array<{ term_id: string; value: string }> }
+    const idByValue = new Map((listed.items ?? []).map((t) => [t.value, t.term_id]))
+
+    // An unresolvable ref is fatal, not skippable: dropping it would bootstrap a
+    // taxonomy silently missing an edge, and nothing downstream would notice.
+    const resolve = (ref: string, side: string): string => {
+      if (UUID_RE.test(ref)) return ref
+      const id = idByValue.get(ref)
+      if (!id) {
+        throw new Error(
+          `ontology relation ${side} "${ref}" matches no term in ${termData.value} [${plan.label}]`,
+        )
+      }
+      return id
+    }
+
     for (const rel of rels) {
       allRelations.push({
-        source_term_id: rel.source,
-        target_term_id: rel.target,
+        source_term_id: resolve(rel.source, 'source'),
+        target_term_id: resolve(rel.target, 'target'),
         relation_type: rel.type,
       })
     }

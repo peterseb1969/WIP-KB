@@ -1,0 +1,484 @@
+{
+  "value": "KB_TOPIC",
+  "label": "KB Topic",
+  "description": "Subject-matter taxonomy for the KB corpus (CASE-760). Hierarchical via ontology term-relations: part_of expresses area containment (reporting part_of platform-services), is_a expresses kind-of (fresh-restore is_a restore). Navigation is by topic across all doc types; a doc may carry multiple topics. Curated vocabulary: immutable, deprecate-don't-delete.",
+  "terms": [
+    {
+      "value": "platform",
+      "label": "Platform",
+      "sort_order": 10,
+      "description": "WIP platform engine: services, identity, data lifecycle, tooling."
+    },
+    {
+      "value": "platform-services",
+      "label": "Platform Services",
+      "sort_order": 11,
+      "description": "The individual backend services that make up WIP."
+    },
+    {
+      "value": "document-store",
+      "label": "Document Store",
+      "sort_order": 12,
+      "description": "Document storage, validation, versioning, relationships, backup engine."
+    },
+    {
+      "value": "template-store",
+      "label": "Template Store",
+      "sort_order": 13,
+      "description": "Template schemas, versioning, edge-type definitions."
+    },
+    {
+      "value": "def-store",
+      "label": "Def Store",
+      "sort_order": 14,
+      "description": "Terminologies, terms, aliases, ontology relations."
+    },
+    {
+      "value": "registry",
+      "label": "Registry",
+      "sort_order": 15,
+      "description": "Canonical IDs, composite keys, namespaces service, grants, API keys."
+    },
+    {
+      "value": "reporting",
+      "label": "Reporting",
+      "sort_order": 16,
+      "description": "The PostgreSQL reporting layer as a whole."
+    },
+    {
+      "value": "reporting-sync",
+      "label": "Reporting Sync",
+      "sort_order": 17,
+      "description": "MongoDB-to-PostgreSQL sync service, per-version tables, entity views."
+    },
+    {
+      "value": "search-fts",
+      "label": "Search / FTS",
+      "sort_order": 18,
+      "description": "Full-text search: tsvector columns, ranked search endpoint, snippets, substring fallback."
+    },
+    {
+      "value": "identity",
+      "label": "Identity",
+      "sort_order": 20,
+      "description": "Identity as a concept: canonical IDs, identity hashing, resolution."
+    },
+    {
+      "value": "synonyms",
+      "label": "Synonyms",
+      "sort_order": 21,
+      "description": "Registry synonyms: external IDs, minted handles (CASE-n), resolution paths."
+    },
+    {
+      "value": "namespaces",
+      "label": "Namespaces",
+      "sort_order": 22,
+      "description": "Namespace scoping, isolation modes, deletion modes, cross-namespace refs."
+    },
+    {
+      "value": "identity-hashing",
+      "label": "Identity Hashing",
+      "sort_order": 23,
+      "description": "identity_fields, dedup hashing, upsert semantics, append-only templates."
+    },
+    {
+      "value": "canonical-ids",
+      "label": "Canonical IDs",
+      "sort_order": 24,
+      "description": "Canonical identity: UUID7/prefixed ID formats, the Registry as identity authority, synonym-to-canonical resolution, entry merges."
+    },
+    {
+      "value": "backup-restore",
+      "label": "Backup & Restore",
+      "sort_order": 30,
+      "description": "Data lifecycle: archives, restore modes, merge semantics."
+    },
+    {
+      "value": "backup",
+      "label": "Backup",
+      "sort_order": 31,
+      "description": "Backup jobs, archive creation, export."
+    },
+    {
+      "value": "restore",
+      "label": "Restore",
+      "sort_order": 32,
+      "description": "Restore operations of any mode."
+    },
+    {
+      "value": "fresh-restore",
+      "label": "Fresh Restore",
+      "sort_order": 33,
+      "description": "Restore into a new namespace with re-minted IDs (import --mode fresh)."
+    },
+    {
+      "value": "merge-restore",
+      "label": "Merge Restore",
+      "sort_order": 34,
+      "description": "Restore that merges an archive into an existing populated namespace."
+    },
+    {
+      "value": "archive-format",
+      "label": "Archive Format",
+      "sort_order": 35,
+      "description": "Archive layout, manifests, export collectors."
+    },
+    {
+      "value": "plain-restore",
+      "label": "Plain Restore",
+      "sort_order": 36,
+      "description": "Restore with original IDs preserved (wip-toolkit import --mode restore) — disaster recovery into the same namespace identity.",
+      "aliases": [
+        "mode-restore",
+        "original-id-restore"
+      ]
+    },
+    {
+      "value": "deployment",
+      "label": "Deployment",
+      "sort_order": 40,
+      "description": "Installing and operating WIP and its apps."
+    },
+    {
+      "value": "wip-deploy",
+      "label": "wip-deploy",
+      "sort_order": 41,
+      "description": "The deployer: install targets, manifests, app-source hotwiring, secrets."
+    },
+    {
+      "value": "containers",
+      "label": "Containers",
+      "sort_order": 42,
+      "description": "Images, Dockerfiles, healthchecks, registries, multi-arch builds."
+    },
+    {
+      "value": "ci",
+      "label": "CI",
+      "sort_order": 43,
+      "description": "CI pipelines: gitea Actions, GitHub workflows, test gates."
+    },
+    {
+      "value": "client-libs",
+      "label": "Client Libraries",
+      "sort_order": 50,
+      "description": "The TypeScript client libraries apps build on."
+    },
+    {
+      "value": "wip-client",
+      "label": "@wip/client",
+      "sort_order": 51,
+      "description": "Typed TS client: services, bulk envelope, error hierarchy."
+    },
+    {
+      "value": "wip-react",
+      "label": "@wip/react",
+      "sort_order": 52,
+      "description": "React hooks over the client (TanStack Query)."
+    },
+    {
+      "value": "wip-proxy",
+      "label": "@wip/proxy",
+      "sort_order": 53,
+      "description": "Express middleware: auth injection, API proxying, app-config."
+    },
+    {
+      "value": "mcp",
+      "label": "MCP",
+      "sort_order": 60,
+      "description": "The MCP server: tools, resources, agent-facing API ingress."
+    },
+    {
+      "value": "auth",
+      "label": "Auth",
+      "sort_order": 61,
+      "description": "OIDC, Dex, auth-gateway, API keys, session handling."
+    },
+    {
+      "value": "scaffold",
+      "label": "Scaffold",
+      "sort_order": 62,
+      "description": "App generation: create-app-project, presets, gene-pool templates, refresh."
+    },
+    {
+      "value": "testing",
+      "label": "Testing",
+      "sort_order": 63,
+      "description": "Test infrastructure: matrices, fixtures, golden tests, harnesses."
+    },
+    {
+      "value": "apps",
+      "label": "Apps",
+      "sort_order": 70,
+      "description": "Applications built on WIP."
+    },
+    {
+      "value": "kb-app",
+      "label": "KB App",
+      "sort_order": 71,
+      "description": "The Knowledge Base app: UI, gateway, bootstrap, served client."
+    },
+    {
+      "value": "kb-client",
+      "label": "KB Client",
+      "sort_order": 72,
+      "description": "The served kb client bundle: kbc, case-fetch, kb-write, playbooks."
+    },
+    {
+      "value": "react-console",
+      "label": "React Console",
+      "sort_order": 73,
+      "description": "The ReactConsole admin app."
+    },
+    {
+      "value": "clintrial",
+      "label": "ClinTrial Explorer",
+      "sort_order": 74,
+      "description": "The Clinical Trials Explorer app."
+    },
+    {
+      "value": "author-assist",
+      "label": "AuthorAssist",
+      "sort_order": 75,
+      "description": "The AuthorAssist app."
+    },
+    {
+      "value": "agent-practice",
+      "label": "Agent Practice",
+      "sort_order": 80,
+      "description": "How YACs work: process, discipline, cross-agent workflow."
+    },
+    {
+      "value": "sessions",
+      "label": "Sessions",
+      "sort_order": 81,
+      "description": "Session identity, wake/rollover, reports, continuity."
+    },
+    {
+      "value": "case-workflow",
+      "label": "Case Workflow",
+      "sort_order": 82,
+      "description": "Cross-agent cases: filing, responding, implementing, status machine."
+    },
+    {
+      "value": "verification",
+      "label": "Verification",
+      "sort_order": 83,
+      "description": "Verify-before-assert discipline, fabrication classes, evidence standards."
+    },
+    {
+      "value": "documentation",
+      "label": "Documentation",
+      "sort_order": 84,
+      "description": "Docs as a practice: papers, playbooks, doc drift, parity guards."
+    }
+  ],
+  "ontology": {
+    "relationships": [
+      {
+        "source": "platform-services",
+        "target": "platform",
+        "type": "part_of"
+      },
+      {
+        "source": "identity",
+        "target": "platform",
+        "type": "part_of"
+      },
+      {
+        "source": "backup-restore",
+        "target": "platform",
+        "type": "part_of"
+      },
+      {
+        "source": "deployment",
+        "target": "platform",
+        "type": "part_of"
+      },
+      {
+        "source": "client-libs",
+        "target": "platform",
+        "type": "part_of"
+      },
+      {
+        "source": "mcp",
+        "target": "platform",
+        "type": "part_of"
+      },
+      {
+        "source": "auth",
+        "target": "platform",
+        "type": "part_of"
+      },
+      {
+        "source": "scaffold",
+        "target": "platform",
+        "type": "part_of"
+      },
+      {
+        "source": "testing",
+        "target": "platform",
+        "type": "part_of"
+      },
+      {
+        "source": "document-store",
+        "target": "platform-services",
+        "type": "part_of"
+      },
+      {
+        "source": "template-store",
+        "target": "platform-services",
+        "type": "part_of"
+      },
+      {
+        "source": "def-store",
+        "target": "platform-services",
+        "type": "part_of"
+      },
+      {
+        "source": "registry",
+        "target": "platform-services",
+        "type": "part_of"
+      },
+      {
+        "source": "reporting",
+        "target": "platform-services",
+        "type": "part_of"
+      },
+      {
+        "source": "reporting-sync",
+        "target": "reporting",
+        "type": "part_of"
+      },
+      {
+        "source": "search-fts",
+        "target": "reporting",
+        "type": "part_of"
+      },
+      {
+        "source": "synonyms",
+        "target": "identity",
+        "type": "part_of"
+      },
+      {
+        "source": "namespaces",
+        "target": "identity",
+        "type": "part_of"
+      },
+      {
+        "source": "identity-hashing",
+        "target": "identity",
+        "type": "part_of"
+      },
+      {
+        "source": "canonical-ids",
+        "target": "identity",
+        "type": "part_of"
+      },
+      {
+        "source": "backup",
+        "target": "backup-restore",
+        "type": "part_of"
+      },
+      {
+        "source": "restore",
+        "target": "backup-restore",
+        "type": "part_of"
+      },
+      {
+        "source": "archive-format",
+        "target": "backup-restore",
+        "type": "part_of"
+      },
+      {
+        "source": "fresh-restore",
+        "target": "restore",
+        "type": "is_a"
+      },
+      {
+        "source": "merge-restore",
+        "target": "restore",
+        "type": "is_a"
+      },
+      {
+        "source": "plain-restore",
+        "target": "restore",
+        "type": "is_a"
+      },
+      {
+        "source": "wip-deploy",
+        "target": "deployment",
+        "type": "part_of"
+      },
+      {
+        "source": "containers",
+        "target": "deployment",
+        "type": "part_of"
+      },
+      {
+        "source": "ci",
+        "target": "deployment",
+        "type": "part_of"
+      },
+      {
+        "source": "wip-client",
+        "target": "client-libs",
+        "type": "part_of"
+      },
+      {
+        "source": "wip-react",
+        "target": "client-libs",
+        "type": "part_of"
+      },
+      {
+        "source": "wip-proxy",
+        "target": "client-libs",
+        "type": "part_of"
+      },
+      {
+        "source": "kb-app",
+        "target": "apps",
+        "type": "part_of"
+      },
+      {
+        "source": "react-console",
+        "target": "apps",
+        "type": "part_of"
+      },
+      {
+        "source": "clintrial",
+        "target": "apps",
+        "type": "part_of"
+      },
+      {
+        "source": "author-assist",
+        "target": "apps",
+        "type": "part_of"
+      },
+      {
+        "source": "kb-client",
+        "target": "kb-app",
+        "type": "part_of"
+      },
+      {
+        "source": "sessions",
+        "target": "agent-practice",
+        "type": "part_of"
+      },
+      {
+        "source": "case-workflow",
+        "target": "agent-practice",
+        "type": "part_of"
+      },
+      {
+        "source": "verification",
+        "target": "agent-practice",
+        "type": "part_of"
+      },
+      {
+        "source": "documentation",
+        "target": "agent-practice",
+        "type": "part_of"
+      }
+    ]
+  }
+}

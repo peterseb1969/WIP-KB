@@ -13,6 +13,7 @@
     { "name": "tags",        "label": "Tags",        "type": "array",   "array_item_type": "string" },
     { "name": "root",        "label": "Root",        "type": "boolean", "default_value": false },
     { "name": "topic",       "label": "Topic",       "type": "string",  "full_text_indexed": true },
-    { "name": "chat_date",   "label": "Chat Date",   "type": "date" }
+    { "name": "chat_date",   "label": "Chat Date",   "type": "date" },
+    { "name": "topics",      "label": "Topics",      "type": "array",   "mandatory": false, "array_item_type": "term", "array_terminology_ref": "KB_TOPIC" }
   ]
 }
