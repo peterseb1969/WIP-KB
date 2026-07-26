@@ -81,6 +81,32 @@ export function writeCaseResponse(
 }
 
 /**
+ * Replace a document's `topics` via `/write/<type>` (patch mode, matched on
+ * document_id). Sending the whole array rather than a delta is deliberate: JSON
+ * Merge Patch replaces arrays wholesale, so a full list is what the wire format
+ * actually means, and add and remove become the same call.
+ *
+ * Values are term VALUES, not ids — document validation resolves them against
+ * the template's terminology, which is also what rejects anything that is not a
+ * real topic. The picker offers selection only, so the vocabulary stays the
+ * authority rather than whatever a user could type.
+ *
+ * The type is passed because the gateway routes a write to the type's home
+ * namespace: LIBRARY_DOC lands in the Library namespace, everything else in the
+ * corpus, and the caller does not have to know which.
+ */
+export function patchDocTopics(
+  templateValue: string,
+  documentId: string,
+  topics: string[],
+): Promise<{ document_id: string; result: string }> {
+  return gwPost(`/write/${templateValue}`, {
+    patch: { topics },
+    match: { document_id: documentId },
+  })
+}
+
+/**
  * Patch a case's status via `/write/CASE_RECORD` (patch mode, matched on
  * case_number — CASE_RECORD's identity field). Used for the close/reopen
  * lifecycle transitions; the gateway applies an optimistic-concurrency merge patch.

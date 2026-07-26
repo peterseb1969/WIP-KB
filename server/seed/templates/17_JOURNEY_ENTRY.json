@@ -12,6 +12,7 @@
     { "name": "tags",         "label": "Tags",          "type": "array",   "array_item_type": "string" },
     { "name": "root",         "label": "Root",          "type": "boolean", "default_value": false },
     { "name": "journey_date", "label": "Journey Date",  "type": "date",    "mandatory": true },
-    { "name": "day_number",   "label": "Day Number",    "type": "number",  "mandatory": true }
+    { "name": "day_number",   "label": "Day Number",    "type": "number",  "mandatory": true },
+    { "name": "topics",       "label": "Topics",        "type": "array",   "array_item_type": "term", "array_terminology_ref": "KB_TOPIC" }
   ]
 }

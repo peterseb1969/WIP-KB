@@ -226,8 +226,13 @@ def migrate(template, frm, to, apply, ns="kb"):
 def main():
     ap = argparse.ArgumentParser(description="CASE-760/764 topic-tag backfill")
     ap.add_argument("--apply", action="store_true", help="migrate and PATCH for real (default: dry-run)")
+    ap.add_argument("--retag", action="store_true",
+                    help="also re-derive documents that ALREADY have topics, overwriting them. "
+                         "Off by default because it destroys human tagging; use only after a "
+                         "deliberate rules change, and preferably dry-run it first.")
     args = ap.parse_args()
-    print(f"target: {BASE}  mode: {'APPLY' if args.apply else 'DRY-RUN'}")
+    mode = "APPLY" if args.apply else "DRY-RUN"
+    print(f"target: {BASE}  mode: {mode}{'  RETAG (overwrites existing topics)' if args.retag else ''}")
 
     vocab = vocabulary()
 
@@ -245,26 +250,35 @@ def main():
     coverage = []
 
     def add(ns, rows, label, fn):
-        hit = 0
+        hit = held = 0
         for r in rows:
+            # Never overwrite an existing tag set. A document with topics has
+            # been tagged by SOMEONE — a person who read it, or an earlier run —
+            # and replacing that with a fresh derivation would silently delete a
+            # human judgement the rules cannot reproduce. Only empty documents
+            # are candidates; --retag is the explicit way to say otherwise.
+            if r.get("topics") and not args.retag:
+                held += 1
+                continue
             tps = fn(r)
             if tps:
                 plans[ns][r["document_id"]] = tps
                 hit += 1
-        coverage.append(f"{label} {hit}/{len(rows)}")
+        note = f" ({held} already tagged, left alone)" if held else ""
+        coverage.append(f"{label} {hit}/{len(rows)}{note}")
 
-    add("kb", report("SELECT document_id, title, component, app FROM doc_case_record WHERE status = 'active'"),
+    add("kb", report("SELECT document_id, title, component, app, topics FROM doc_case_record WHERE status = 'active'"),
         "cases", lambda r: topics_for(r["title"], r.get("component"), r.get("app")))
-    add("kb", report("SELECT document_id, title FROM doc_fireside WHERE status = 'active'"),
+    add("kb", report("SELECT document_id, title, topics FROM doc_fireside WHERE status = 'active'"),
         "firesides", lambda r: topics_for(r["title"]))
     # LESSON and LIBRARY_DOC carry neither component nor app, so the gateway's
     # write-time fallback can never reach them — this sweep is their only path
     # to a tag. LIBRARY_DOC at least has source_scope, which is deterministic;
     # LESSON has the title alone.
-    add("kb", report("SELECT document_id, title FROM doc_lesson WHERE status = 'active'"),
+    add("kb", report("SELECT document_id, title, topics FROM doc_lesson WHERE status = 'active'"),
         "lessons", lambda r: topics_for(r["title"]))
     add(NS_LIBRARY, report(
-        f"SELECT document_id, title, source_scope FROM {NS_LIBRARY}.doc_library_doc WHERE status = 'active'",
+        f"SELECT document_id, title, source_scope, topics FROM {NS_LIBRARY}.doc_library_doc WHERE status = 'active'",
         NS_LIBRARY),
         "library docs", lambda r: topics_for(r["title"], scope=r.get("source_scope"), vocab=vocab))
 

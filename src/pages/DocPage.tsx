@@ -10,6 +10,7 @@ import { FlagModal, QuickFlagButton } from '../components/FlagModal'
 import { RelationshipGraph } from '../components/RelationshipGraph'
 import { RelationshipPicker } from '../components/RelationshipPicker'
 import { CaseActions } from '../components/CaseActions'
+import { TopicPicker } from '../components/TopicPicker'
 import { CaseThread, type ResponseDoc } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
 import { fetchDocTitlesByIds, fetchFlagTargets, fetchPeerDegrees } from '../lib/reporting'
@@ -577,6 +578,12 @@ export default function DocPage() {
             {isCase && caseNumber !== null && caseStatus && (
               <CaseActions docId={id} caseNumber={caseNumber} status={caseStatus} />
             )}
+            <TopicPicker
+              docId={id}
+              templateValue={doc?.template_value ?? ''}
+              namespace={doc?.namespace ?? CORPUS_NS}
+              current={Array.isArray(data.topics) ? (data.topics as string[]) : []}
+            />
           </div>
         )}
 

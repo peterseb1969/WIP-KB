@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """add-topics-field.py — add the optional `topics` array field (CASE-760/764 Phase 2/A).
 
-Adds `topics` (array of KB_TOPIC terms, optional) to CASE_RECORD / FIRESIDE /
-LESSON in the kb namespace and LIBRARY_DOC in the library namespace, and folds
-a cross_version_view over all versions into the same version event so the
+Adds `topics` (array of KB_TOPIC terms, optional) to the corpus types a human
+navigates by subject — CASE_RECORD, FIRESIDE, LESSON, DESIGN_DECISION,
+JOURNEY_ENTRY and DOCUMENT in the kb namespace, LIBRARY_DOC in library — and
+folds a cross_version_view over all versions into the same version event so the
 reporting entity view exposes the new column immediately (default views do not
 widen on their own — cross_version_view is the knob).
 
@@ -67,7 +68,14 @@ TOPICS_FIELD = {
 }
 
 print(f"target: {BASE}")
-for ns, value in [("kb", "CASE_RECORD"), ("kb", "FIRESIDE"), ("kb", "LESSON"), ("library", "LIBRARY_DOC")]:
+# The types a human navigates by subject. Deliberately not every type: SESSION
+# and CASE_RESPONSE are reached through their parent, and FLAG_RECORD /
+# BOOTSTRAP_RECORD / GIT_STATS_SNAPSHOT / WRITE_POLICY are machine records nobody
+# browses by topic. Adding the field to those would cost a version event and a
+# reporting column each, to sit permanently empty.
+for ns, value in [("kb", "CASE_RECORD"), ("kb", "FIRESIDE"), ("kb", "LESSON"),
+                  ("kb", "DESIGN_DECISION"), ("kb", "JOURNEY_ENTRY"), ("kb", "DOCUMENT"),
+                  ("library", "LIBRARY_DOC")]:
     cur = req("GET", f"/api/template-store/templates/by-value/{value}?namespace={ns}")
     if any(f["name"] == "topics" for f in cur["fields"]):
         print(f"SKIP {ns}/{value}: topics already present (v{cur['version']})")
