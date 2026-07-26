@@ -239,8 +239,16 @@ def main():
     # ---- 1. migrate cohorts to the topics-bearing version ----
     # A cohort already on the topics version reports total=0 and is a no-op, so
     # this stays correct on an instance where some types were migrated by hand.
-    for tpl, ns in (("CASE_RECORD", "kb"), ("FIRESIDE", "kb"),
-                    ("LESSON", "kb"), ("LIBRARY_DOC", NS_LIBRARY)):
+    #
+    # Every type carrying the field is migrated, including the three this script
+    # has no tagging rules for. Migration is not only about tagging: a PATCH
+    # validates against the document's PINNED version, so a doc left on v1 rejects
+    # `topics` with "Unknown field" — which is what the human picker in the UI
+    # sends. Add the field without migrating and the button appears and then
+    # fails, which is worse than not offering it.
+    for tpl, ns in (("CASE_RECORD", "kb"), ("FIRESIDE", "kb"), ("LESSON", "kb"),
+                    ("DESIGN_DECISION", "kb"), ("JOURNEY_ENTRY", "kb"), ("DOCUMENT", "kb"),
+                    ("LIBRARY_DOC", NS_LIBRARY)):
         migrate(tpl, FROM_V, TO_V, args.apply, ns)
 
     # ---- 2. derive tags ----
