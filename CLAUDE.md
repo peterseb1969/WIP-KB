@@ -18,6 +18,15 @@ WIP is the backend. This app is a frontend that maps the knowledgebase domain on
 
 **Verify before asserting any factual claim.** Any factual claim a cheap check could falsify — a file's contents, a function's location, a date, a count, a previous case's content — must be checked, not asserted from memory. "I'm pretty sure" is fabrication if you haven't run the check. The pattern has been observed across BE-YAC and FRanC; it is agent-agnostic.
 
+- **Wake-up reading has a quality bar and a ceiling.** A wake-load reading must describe behavior that is **present, current, generally-scoped, and enforced**, with a **reconciliation path** for when reality moves. Five ways it drifts, each with its own fix — name the mode before choosing the fix:
+  - **MISSING** — the reading isn't in the wake-load → add it.
+  - **STALE** — the reading contradicts reality, with no way to notice → give it a reconciliation path.
+  - **TOO-NARROW** — the rule is present but phrased to miss the case → re-scope the wording.
+  - **ASPIRATIONAL** — the contract describes intended, not enforced, behavior → back it with a real check.
+  - **NOT-RETAINED** — the reading is present, current, scoped, and enforced, and still gets lost to mid-session salience decay under delivery pressure.
+
+  The first four are reading-list fixes. **The fifth is not** — no wake-load change reaches a rule that decays mid-session. It needs an **action-triggered gate**: a check that fires on the risky action itself (the write, the model change), not at the session boundary. When a drift instance appears in the wild, classify it against these five first; if it's NOT-RETAINED, do not reach for a reading-list patch.
+
 **Case numbers in code comments are provenance, never substance.** A comment must state the constraint or invariant in full prose; a `CASE-NNN` token may prefix it as history, but the comment must survive the deletion test: remove the token — does it still explain the code? "See CASE-NNN" as the whole explanation is a dead link to every reader without KB access, and case-pointer comments rot because the pointer never gets re-verified against the code around it. Anything user-facing or generated (UI copy, served API descriptions, docs your app publishes) carries no case tokens at all — those readers have no KB.
 
 ---
@@ -202,6 +211,13 @@ Two gotchas:
 
 Companion canonical docs for UI/stack decisions: `docs/technology-stack.md` (v1 stack + forbidden choices) and `docs/ui-guidance.md` (palette tokens, typography, component shapes) — read before any architecture or visual call.
 
+Also bundled in `docs/`, and easy to miss because nothing else here points at them:
+- `docs/AI-Assisted-Development.md` — 4-phase process, data model design guide, PoNIFs quick reference
+- `docs/WIP_PoNIFs.md` — full guide to WIP's 8 non-intuitive behaviours
+- `docs/WIP_DevGuardrails.md` — UI stack, app skeleton, testing conventions
+- `docs/wip-guide.md` — operator-facing guide: install, deploy, harden, run alongside an app
+- `docs/ontology-support.md` — term relations, polyhierarchy, typed relations, traversal queries
+
 ---
 
 ## WIP Toolkit
@@ -247,6 +263,7 @@ After Phase 4: `/wip-improve`, `/wip-document`.
 - `/wip-status` — Check WIP service health and data state
 - `/wip-export-model` — Save data model to git as seed files
 - `/wip-bootstrap` — Recreate data model from seed files
+- `/wip-add-app` — Add a second app that cross-references the first
 - `/wip-setup` — Fresh-session mint + environment check + mandatory context loading
 - `/wip-wake` — Recover context after compaction or `/clear` (continues the prior session's lineage)
 - `/wip-report` — Capture fireside chat, running-log update, or session summary
@@ -361,7 +378,7 @@ For session-meaningful work that is **neither a change, an end-state, nor a fire
 2. **Scope-trim decisions mid-session** — why you're doing less than originally pitched, when the rationale matters for reading the resulting commit but isn't architectural enough for a fireside.
 3. **Block/unblock state and pre-`/compact` snapshots** — written when context is filling so the post-compaction self has more than the last commit message and a stale session.md.
 
-**`/compact` vs `/clear`:** before `/compact` (same agent continues) write a running-log entry. Before `/clear` or end-of-day (next agent starts cold) run `/wip-report session-end`. Similar-looking events, different recovery semantics.
+**`/compact` vs `/clear`:** before `/compact` (same agent continues) write a running-log entry. Before `/clear` (next agent starts cold) run `/wip-report session-end`. Similar-looking events, different recovery semantics. A session is bounded by context usage, not by the calendar: it does not end because a day ended or because the human stopped for the night — a session ID several days old means the context lasted, which is the good outcome. `/clear` is the human's call, made when the window nears full; never propose it on a schedule.
 
 Append-only — distinct from `session.md` (overwritten at end) and `report-<slug>.md` (per-decision). Each entry is **timestamp + short headline + one paragraph**. Discipline test before writing: *"Would future-me, after a compaction, want to know this in 6 hours?"* If yes, write; if "just thinking out loud," don't.
 
