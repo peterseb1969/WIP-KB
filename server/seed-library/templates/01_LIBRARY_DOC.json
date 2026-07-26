@@ -19,6 +19,7 @@
     { "name": "authored_by",        "label": "Authored By",        "type": "string" },
     { "name": "doc_status",         "label": "Doc Status",         "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "LIBRARY_STATUS", "default_value": "published" },
     { "name": "tags",               "label": "Tags",               "type": "array",   "array_item_type": "string" },
-    { "name": "root",               "label": "Root",               "type": "boolean", "default_value": false }
+    { "name": "root",               "label": "Root",               "type": "boolean", "default_value": false },
+    { "name": "topics",             "label": "Topics",             "type": "array",   "mandatory": false, "array_item_type": "term", "array_terminology_ref": "${CORPUS_NS}:KB_TOPIC" }
   ]
 }

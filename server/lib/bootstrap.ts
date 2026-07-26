@@ -46,6 +46,35 @@ interface NamespacePlan {
   writePolicies: boolean
   audit: boolean
   label: string
+  /**
+   * `${NAME}` tokens substituted into this plan's seed files before parsing.
+   *
+   * Exists because a reference to a terminology in ANOTHER namespace must name
+   * that namespace explicitly — bare values resolve own-namespace only, by
+   * deliberate platform contract (CASE-813). A literal `kb:KB_TOPIC` in a seed
+   * would be as unportable as a hardcoded UUID, since the corpus namespace is
+   * deployment-configurable, so seeds write `${CORPUS_NS}:KB_TOPIC` and the
+   * deployment's own configured name is filled in here.
+   */
+  placeholders: Record<string, string>
+}
+
+/**
+ * Read a seed file, substitute `${NAME}` placeholders, then parse.
+ *
+ * An unsubstituted placeholder is fatal: it would otherwise reach the API as a
+ * literal `${…}` and fail far from its cause, or worse, be stored verbatim.
+ */
+function readSeedJson(path: string, placeholders: Record<string, string>): AnyObj {
+  let text = readFileSync(path, 'utf-8')
+  for (const [name, value] of Object.entries(placeholders)) {
+    text = text.split(`\${${name}}`).join(value)
+  }
+  const leftover = text.match(/\$\{[A-Z_][A-Z0-9_]*\}/)
+  if (leftover) {
+    throw new Error(`${path}: unsubstituted placeholder ${leftover[0]} (known: ${Object.keys(placeholders).join(', ') || 'none'})`)
+  }
+  return JSON.parse(text)
 }
 
 // The bootstrap provenance template's value is namespace-prefixed
@@ -88,6 +117,7 @@ function buildPlans(): NamespacePlan[] {
       writePolicies: true,
       audit: true,
       label: 'corpus',
+      placeholders: { CORPUS_NS: corpus },
     },
   ]
 
@@ -110,6 +140,7 @@ function buildPlans(): NamespacePlan[] {
       writePolicies: false,
       audit: false,
       label: 'library',
+      placeholders: { CORPUS_NS: corpus, LIBRARY_NS: libraryNs },
     })
   }
 
@@ -280,7 +311,7 @@ async function seedNamespace(
 
   const terminologies: AnyObj[] = []
   for (const file of termFiles) {
-    const data = JSON.parse(readFileSync(join(seedDir, 'terminologies', file), 'utf-8'))
+    const data = readSeedJson(join(seedDir, 'terminologies', file), plan.placeholders)
     terminologies.push(data)
   }
 
@@ -383,7 +414,7 @@ async function seedNamespace(
 
   progress('templates', `Creating ${templateFiles.length} templates...`)
   for (const file of templateFiles) {
-    const data = JSON.parse(readFileSync(join(seedDir, 'templates', file), 'utf-8'))
+    const data = readSeedJson(join(seedDir, 'templates', file), plan.placeholders)
     progress('templates', `Creating ${data.value}...`)
 
     const template: AnyObj = {
