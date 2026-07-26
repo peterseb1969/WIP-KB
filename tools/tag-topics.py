@@ -129,7 +129,11 @@ TITLE_RULES = [  # (topic, regex) — checked case-insensitively against title
     ("containers", r"\bcontainer|docker|podman|healthcheck|\bimage\b"),
     ("wip-deploy", r"wip-deploy|\bdeploy"),
     ("mcp", r"\bmcp\b"),
-    ("auth", r"\bauth\b|\boidc\b|\bdex\b|api[- ]?key"),
+    # `\bauth\b` alone misses "authentication" and "authorization" — the two
+    # words most likely to appear in a doc that is actually about auth. The
+    # suffix group keeps the deliberate narrowness (it will not fire on
+    # "author"/"authored_by", which are all over this corpus).
+    ("auth", r"\bauth(entication|ori[sz]ation)?\b|\boidc\b|\bdex\b|api[- ]?key"),
     ("scaffold", r"\bscaffold|create-app-project|gene[- ]pool"),
     ("testing", r"\btests?\b|\btest[- ]|fixture|golden"),
     ("search-fts", r"\bsearch\b|\bfts\b|tsvector|full[- ]text"),
@@ -289,6 +293,18 @@ def main():
         f"SELECT document_id, title, source_scope, topics FROM {NS_LIBRARY}.doc_library_doc WHERE status = 'active'",
         NS_LIBRARY),
         "library docs", lambda r: topics_for(r["title"], scope=r.get("source_scope"), vocab=vocab))
+    # Papers get their repo path fed through the TITLE rules alongside the title:
+    # a path like ".../backup-restore-test-matrix.md" carries as much subject as
+    # the title does, and often more when the title is terse ("Restore Modes").
+    #
+    # NOT through topics_from_scope, deliberately. That resolves path segments
+    # against the vocabulary, and every paper lives under a "docs/" directory
+    # which the vocabulary knows as an alias of `documentation` — so every one of
+    # them would come back tagged `documentation` and nothing else, which is
+    # noise dressed as coverage. The title rules are regexes over prose and match
+    # the path's meaningful stems without firing on its directory scaffolding.
+    add("kb", report("SELECT document_id, title, path, topics FROM doc_document WHERE status = 'active'"),
+        "papers", lambda r: topics_for(f"{r['title']} {r.get('path') or ''}"))
 
     print("tagging plan: " + ", ".join(coverage))
     cnt = Counter(t for p in plans.values() for tps in p.values() for t in tps)
