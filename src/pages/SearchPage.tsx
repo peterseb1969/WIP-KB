@@ -95,13 +95,23 @@ async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
   }
 }
 
-// "Filed" sort: ordered by case_number, NOT by a timestamp. `created_at` cannot
-// serve here — it carries the current VERSION's creation time, so it advances on
-// every status transition and a "filed" sort over it silently degrades into a
-// last-modified sort (CASE-802). The gateway allocates case_number monotonically
-// at filing time, so ascending case_number IS filing order — exact, though it
-// yields an order rather than a date. Scoped to cases; everything else sorts to
-// the end via compareCaseNumber's null handling.
+// "Filed" sort: when the document was created, from `created_at`.
+//
+// This briefly sorted by case_number instead, because `created_at` used to carry
+// the current VERSION's creation time — it advanced on every status transition,
+// so a "filed" sort over it silently degraded into a last-modified sort. The
+// platform now defines `created_at` as the entity's creation time and the stored
+// data has been corrected, so the field means what it says and the substitution
+// is no longer needed. Sorting by the date also applies to every doc type rather
+// than only to things that have a case number.
+//
+// The dependency is on the DATA being corrected, not just the platform version:
+// a restore from an archive predating the fix reintroduces documents whose
+// created_at advances per version, and this sort degrades again on that instance
+// until the remediation is re-run.
+function filedAt(doc: DocItem): Date | null {
+  return parseWipDate(doc.created_at)
+}
 
 // "Modified" sort: when the case last moved. A gateway status transition PATCHes
 // the case doc, so updated_at tracks the last transition. (Reporting does not carry
@@ -706,9 +716,9 @@ export default function SearchPage() {
         case 'case_desc':
           return compareCaseNumber(a.doc, b.doc, 'desc')
         case 'filed_desc':
-          return compareCaseNumber(a.doc, b.doc, 'desc')
+          return compareDate(filedAt(a.doc), filedAt(b.doc), 'desc')
         case 'filed_asc':
-          return compareCaseNumber(a.doc, b.doc, 'asc')
+          return compareDate(filedAt(a.doc), filedAt(b.doc), 'asc')
         case 'modified_desc':
           return compareDate(statusModifiedAt(a.doc), statusModifiedAt(b.doc), 'desc')
         case 'modified_asc':
@@ -982,12 +992,11 @@ export default function SearchPage() {
             className="rounded-md border border-gray-200 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
           >
             {SORT_OPTIONS.map((o) => {
-              // Filed is case_number-ordered too (see filedAt's removal note),
-              // so it needs a case in scope exactly like the Case # options.
+              // Filed sorts by a date every doc type has, so unlike the Case #
+              // options it stays available whatever is in scope.
               const isDisabled =
                 (o.key === 'relevance' && !query.trim()) ||
-                (['case_asc', 'case_desc', 'filed_asc', 'filed_desc'].includes(o.key) &&
-                  !hasCaseInScope)
+                (['case_asc', 'case_desc'].includes(o.key) && !hasCaseInScope)
               return (
                 <option key={o.key} value={o.key} disabled={isDisabled}>
                   {o.label}
