@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""tag-topics.py — assisted topic-tagging pass over CASE_RECORD + FIRESIDE (CASE-760/764).
+"""tag-topics.py — assisted topic-tagging pass over the tagged corpus (CASE-760/764).
+
+Covers CASE_RECORD, FIRESIDE and LESSON in the corpus namespace and LIBRARY_DOC
+in the Library namespace. The last two matter most: neither carries `component`
+or `app`, so the gateway's write-time fallback can never tag them and this sweep
+is the ONLY thing that will.
+
+Signals differ by type, strongest first: CASE_RECORD has component/app;
+LIBRARY_DOC has source_scope (the source paths it was generated from, whose
+segments the topic vocabulary already names); FIRESIDE and LESSON have the title
+alone. source_scope is resolved THROUGH the vocabulary's values and aliases
+rather than a map kept here, so it agrees with the gateway by construction.
 
 Backfills `topics` tags onto the existing corpus after add-topics-field.py has
 versioned the templates. Three steps:
@@ -43,6 +54,7 @@ KEY = Path(os.environ.get(
 CTX = ssl._create_unverified_context()
 FROM_V = int(os.environ.get("KB_FROM_VERSION", "1"))
 TO_V = int(os.environ.get("KB_TO_VERSION", "2"))
+NS_LIBRARY = os.environ.get("KB_LIBRARY_NAMESPACE", "library")
 
 
 def req(method, path, payload=None):
@@ -53,9 +65,31 @@ def req(method, path, payload=None):
         return json.load(resp)
 
 
-def report(sql):
-    return req("POST", "/api/reporting-sync/query?namespace=kb",
-               {"namespace": "kb", "sql": sql, "max_rows": 5000})["rows"]
+def report(sql, ns="kb"):
+    return req("POST", f"/api/reporting-sync/query?namespace={ns}",
+               {"namespace": ns, "sql": sql, "max_rows": 5000})["rows"]
+
+
+def vocabulary(ns="kb"):
+    """lowercased term value OR alias -> canonical term value, from KB_TOPIC.
+
+    The same resolution the gateway does on write. Reading the vocabulary
+    instead of restating it here means an added alias teaches this sweep and
+    the write path at once — the two cannot drift into disagreeing about what
+    'mcp-server' means.
+    """
+    t = req("GET", f"/api/def-store/terminologies/by-value/KB_TOPIC?namespace={ns}")
+    tid = t.get("terminology_id") or t.get("id")
+    d = req("GET", f"/api/def-store/terminologies/{tid}/terms?namespace={ns}&page_size=1000")
+    m = {}
+    for term in d.get("items", []):
+        v = term["value"]
+        m[v.lower()] = v
+        for a in term.get("aliases") or []:
+            m[a.lower()] = v
+    if not m:
+        sys.exit(f"ABORT: KB_TOPIC resolved to 0 terms in {ns}")
+    return m
 
 
 COMPONENT_MAP = {
@@ -122,13 +156,48 @@ DROP_PARENT_IF_CHILD = {
 MAX_TOPICS = 6
 
 
-def topics_for(title, component=None, app=None):
+def topics_from_scope(scope, vocab):
+    """LIBRARY_DOC's source_scope paths -> topics, resolved through the vocabulary.
+
+    A library doc records which source it was generated from
+    ("components/mcp-server/...", "libs/wip-react", "deployer/src"), and those
+    path segments are already the names the topic vocabulary knows — directly
+    as term values, or via the aliases that also let the gateway turn a case's
+    component into a topic. So the strongest signal this type has needs no map
+    of its own: split the path and ask the vocabulary.
+
+    Deterministic, unlike the title rules — a path segment naming a component
+    IS what the doc is about, where a word in a title only suggests it.
+    """
+    # The reporting layer hands array columns back as a JSON STRING, not a list.
+    # Iterating one directly walks it character by character and matches nothing
+    # — no error, just no tags, which reads exactly like "this doc had no usable
+    # scope". Parse before trusting the shape.
+    if isinstance(scope, str):
+        try:
+            scope = json.loads(scope)
+        except ValueError:
+            scope = [scope]
+    if not isinstance(scope, (list, tuple)):
+        return []
+    out = []
+    for path in scope:
+        for seg in re.split(r"[/\\.]", str(path)):
+            hit = vocab.get(seg.strip().lower())
+            if hit:
+                out.append(hit)
+    return out
+
+
+def topics_for(title, component=None, app=None, scope=None, vocab=None):
     out = []
     for c in (component or "").split(","):
         out += COMPONENT_MAP.get(c.strip().lower(), [])
     a = APP_MAP.get((app or "").strip().lower())
     if a:
         out.append(a)
+    if scope and vocab:
+        out += topics_from_scope(scope, vocab)
     t = title or ""
     for topic, rx in TITLE_RULES:
         if re.search(rx, t, re.IGNORECASE):
@@ -138,8 +207,8 @@ def topics_for(title, component=None, app=None):
     return keep[:MAX_TOPICS]
 
 
-def migrate(template, frm, to, apply):
-    dry = req("POST", "/api/document-store/documents/migrate?namespace=kb",
+def migrate(template, frm, to, apply, ns="kb"):
+    dry = req("POST", f"/api/document-store/documents/migrate?namespace={ns}",
               {"template_id": template, "from_version": frm, "to_version": to, "dry_run": True})
     print(f"migrate {template} v{frm}->v{to} DRY: total={dry.get('total')} ready={dry.get('ready')} failed={dry.get('failed')}")
     if dry.get("failed"):
@@ -147,7 +216,7 @@ def migrate(template, frm, to, apply):
         sys.exit(f"ABORT migrate {template}: failures {json.dumps(fails)[:500]}")
     if not dry.get("total") or not apply:
         return
-    res = req("POST", "/api/document-store/documents/migrate?namespace=kb",
+    res = req("POST", f"/api/document-store/documents/migrate?namespace={ns}",
               {"template_id": template, "from_version": frm, "to_version": to, "dry_run": False})
     print(f"migrate {template} APPLY: total={res.get('total')} migrated={res.get('migrated', res.get('succeeded'))} failed={res.get('failed')}")
     if res.get("failed"):
@@ -160,44 +229,67 @@ def main():
     args = ap.parse_args()
     print(f"target: {BASE}  mode: {'APPLY' if args.apply else 'DRY-RUN'}")
 
+    vocab = vocabulary()
+
     # ---- 1. migrate cohorts to the topics-bearing version ----
-    migrate("CASE_RECORD", FROM_V, TO_V, args.apply)
-    migrate("FIRESIDE", FROM_V, TO_V, args.apply)
+    # A cohort already on the topics version reports total=0 and is a no-op, so
+    # this stays correct on an instance where some types were migrated by hand.
+    for tpl, ns in (("CASE_RECORD", "kb"), ("FIRESIDE", "kb"),
+                    ("LESSON", "kb"), ("LIBRARY_DOC", NS_LIBRARY)):
+        migrate(tpl, FROM_V, TO_V, args.apply, ns)
 
     # ---- 2. derive tags ----
-    cases = report("SELECT document_id, title, component, app FROM doc_case_record WHERE status = 'active'")
-    fires = report("SELECT document_id, title FROM doc_fireside WHERE status = 'active'")
-    plan = {}
-    for r in cases:
-        tps = topics_for(r["title"], r.get("component"), r.get("app"))
-        if tps:
-            plan[r["document_id"]] = tps
-    n_cases = len(plan)
-    for r in fires:
-        tps = topics_for(r["title"])
-        if tps:
-            plan[r["document_id"]] = tps
-    print(f"tagging plan: {n_cases}/{len(cases)} cases, {len(plan) - n_cases}/{len(fires)} firesides")
-    cnt = Counter(t for tps in plan.values() for t in tps)
+    # Plans are per-namespace because the PATCH endpoint is namespace-scoped:
+    # LIBRARY_DOC lives in the Library namespace, the other three in the corpus.
+    plans = {"kb": {}, NS_LIBRARY: {}}
+    coverage = []
+
+    def add(ns, rows, label, fn):
+        hit = 0
+        for r in rows:
+            tps = fn(r)
+            if tps:
+                plans[ns][r["document_id"]] = tps
+                hit += 1
+        coverage.append(f"{label} {hit}/{len(rows)}")
+
+    add("kb", report("SELECT document_id, title, component, app FROM doc_case_record WHERE status = 'active'"),
+        "cases", lambda r: topics_for(r["title"], r.get("component"), r.get("app")))
+    add("kb", report("SELECT document_id, title FROM doc_fireside WHERE status = 'active'"),
+        "firesides", lambda r: topics_for(r["title"]))
+    # LESSON and LIBRARY_DOC carry neither component nor app, so the gateway's
+    # write-time fallback can never reach them — this sweep is their only path
+    # to a tag. LIBRARY_DOC at least has source_scope, which is deterministic;
+    # LESSON has the title alone.
+    add("kb", report("SELECT document_id, title FROM doc_lesson WHERE status = 'active'"),
+        "lessons", lambda r: topics_for(r["title"]))
+    add(NS_LIBRARY, report(
+        f"SELECT document_id, title, source_scope FROM {NS_LIBRARY}.doc_library_doc WHERE status = 'active'",
+        NS_LIBRARY),
+        "library docs", lambda r: topics_for(r["title"], scope=r.get("source_scope"), vocab=vocab))
+
+    print("tagging plan: " + ", ".join(coverage))
+    cnt = Counter(t for p in plans.values() for tps in p.values() for t in tps)
     print("top topics:", cnt.most_common(12))
 
     if not args.apply:
         print("(dry-run: no writes — re-run with --apply to migrate and PATCH)")
         return
 
-    # ---- 3. bulk PATCH in batches ----
-    ids = list(plan.items())
+    # ---- 3. bulk PATCH in batches, per namespace ----
     patched = failed = 0
-    for i in range(0, len(ids), 100):
-        batch = [{"document_id": did, "patch": {"topics": tps}} for did, tps in ids[i:i + 100]]
-        resp = req("PATCH", "/api/document-store/documents?namespace=kb", batch)
-        for r in resp.get("results", []):
-            if r.get("status") in ("updated", "unchanged"):
-                patched += 1
-            else:
-                failed += 1
-                if failed <= 3:
-                    print("PATCH FAIL:", json.dumps(r)[:300])
+    for ns, plan in plans.items():
+        ids = list(plan.items())
+        for i in range(0, len(ids), 100):
+            batch = [{"document_id": did, "patch": {"topics": tps}} for did, tps in ids[i:i + 100]]
+            resp = req("PATCH", f"/api/document-store/documents?namespace={ns}", batch)
+            for r in resp.get("results", []):
+                if r.get("status") in ("updated", "unchanged"):
+                    patched += 1
+                else:
+                    failed += 1
+                    if failed <= 3:
+                        print(f"PATCH FAIL [{ns}]:", json.dumps(r)[:300])
     print(f"patched={patched} failed={failed}")
     if failed:
         sys.exit(1)
