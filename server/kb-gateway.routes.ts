@@ -266,12 +266,108 @@ async function writeConfig(type: string, ns: string, key: string): Promise<MintC
   return (await loadPolicies(ns, key)).get(type) || null
 }
 
+// --- topic fallback -------------------------------------------------------
+// A doc whose template offers a topic field but whose author left it empty is
+// invisible to topic navigation, and the facet is only as good as its coverage.
+// So a write with no topics gets a baseline derived from the facets the doc
+// already carries.
+//
+// The component/app -> topic mapping is NOT held here. It lives in the topic
+// vocabulary itself, as term aliases: the term `mcp` carries the alias
+// `mcp-server`, so a case filed against component `mcp-server` resolves to it.
+// That keeps one statement of the mapping — adding an alias to the vocabulary
+// teaches every writer at once, and there is no second copy in this file to
+// drift out of step with it.
+//
+// Which vocabulary is likewise read off the template's own field definition
+// rather than named here, so this code carries no knowledge of a specific
+// terminology, only of the shape "an array-of-terms field called topics".
+const TOPIC_FIELD = 'topics'
+// Deliberately a short, closed list rather than "every field that happens to
+// resolve": a facet not meant as a subject would tag documents silently and
+// wrongly, and a wrong topic is worse than a missing one because it surfaces
+// the doc under a subject it has nothing to do with.
+const TOPIC_SOURCE_FIELDS = ['component', 'app']
+const TOPIC_MAX = 6
+
+// value-or-alias (lowercased) -> canonical term value, per terminology.
+// `null` caches "this template has no topic field", so the common case costs
+// nothing after the first write.
+const topicVocabCache = new Map<string, Map<string, string> | null>()
+
+async function topicVocab(tpl: AnyObj, ns: string, key: string): Promise<Map<string, string> | null> {
+  const field = (tpl.fields || []).find((f: AnyObj) => f.name === TOPIC_FIELD && f.array_item_type === 'term')
+  const ref = field?.array_terminology_ref
+  if (!ref) return null
+  const ck = `${ns}/${ref}`
+  if (topicVocabCache.has(ck)) return topicVocabCache.get(ck) || null
+  try {
+    // Terms must be listed from the namespace that OWNS the terminology. A
+    // cross-namespace list (library asking for a kb vocabulary) answers 200
+    // with zero items rather than an error, which would read as "no aliases
+    // are configured" and silently disable the fallback. The terminology
+    // resolves from any namespace and reports its home, so ask it first.
+    const term = await wipReq('GET', `/api/def-store/terminologies/${ref}?namespace=${ns}`, key)
+    const homeNs = term.namespace || ns
+    const d = await wipReq('GET',
+      `/api/def-store/terminologies/${ref}/terms?namespace=${homeNs}&page_size=1000`, key)
+    const items: AnyObj[] = d.items || []
+    if (!items.length) {
+      // Distinguish "vocabulary is empty" from "every doc happens to be
+      // untaggable" — the two look identical downstream.
+      console.warn(`[kb-gateway] topic vocabulary ${ref} resolved to 0 terms in ${homeNs}; topic fallback disabled`)
+      topicVocabCache.set(ck, null)
+      return null
+    }
+    const m = new Map<string, string>()
+    for (const t of items) {
+      const v = String(t.value)
+      m.set(v.toLowerCase(), v)
+      for (const a of (t.aliases || [])) m.set(String(a).toLowerCase(), v)
+    }
+    topicVocabCache.set(ck, m)
+    return m
+  } catch (e) {
+    // A transient def-store failure must not fail the write — the doc is still
+    // correct without topics, and the sweep re-tags it later. Not cached, so
+    // the next write retries.
+    console.warn(`[kb-gateway] topic vocabulary ${ref} unreadable; writing without topics: ${(e as Error).message}`)
+    return null
+  }
+}
+
+// Returns the topics to write, or null to leave the field alone. An explicit
+// value always wins: the author said what the doc is about, and a derived
+// baseline must never overwrite that.
+async function derivedTopics(tpl: AnyObj, data: AnyObj, ns: string, key: string): Promise<string[] | null> {
+  const supplied = data[TOPIC_FIELD]
+  if (Array.isArray(supplied) ? supplied.length : supplied != null) return null
+  const vocab = await topicVocab(tpl, ns, key)
+  if (!vocab) return null
+  const out: string[] = []
+  for (const f of TOPIC_SOURCE_FIELDS) {
+    const raw = data[f]
+    if (typeof raw !== 'string') continue
+    // component is a comma list on some types and a single value on others.
+    for (const part of raw.split(',')) {
+      const hit = vocab.get(part.trim().toLowerCase())
+      if (hit && !out.includes(hit)) out.push(hit)
+    }
+  }
+  return out.length ? out.slice(0, TOPIC_MAX) : null
+}
+
 // The single generic write seam (CASE-482): mint a per-type number when the type
 // has write config (resolve-then-mint by its search key), else upsert by the
 // template's natural identity. Every write verb routes through here — no bespoke
 // per-type mint/upsert logic survives in the handlers.
 async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyObj; ns: string; key: string }): Promise<{ document_id: string; result: string; number?: number; synonym?: string }> {
   const { ns, key, metadata } = opts
+  // Derive here rather than in the route handler so every writer gets the same
+  // baseline — the served client, the browser bridge, and anything added later
+  // — instead of each having to remember to tag.
+  const topics = await derivedTopics(await getTemplate(type, ns, key), data, ns, key)
+  if (topics) data = { ...data, [TOPIC_FIELD]: topics }
   const cfg = await writeConfig(type, ns, key)
   if (cfg) {
     const searchFilters = cfg.searchKey.map((f) => ({ field: `data.${f}`, operator: 'eq', value: data[f] }))

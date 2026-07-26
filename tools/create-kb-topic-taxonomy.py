@@ -35,12 +35,20 @@ NS = os.environ.get("KB_NAMESPACE", "kb")
 CTX = ssl._create_unverified_context()
 
 
-def post(path, payload):
+def _send(path, payload, method):
     req = urllib.request.Request(
         BASE + path, data=json.dumps(payload).encode(),
-        headers={"X-API-Key": KEY, "Content-Type": "application/json"}, method="POST")
+        headers={"X-API-Key": KEY, "Content-Type": "application/json"}, method=method)
     with urllib.request.urlopen(req, context=CTX, timeout=30) as r:
         return json.load(r)
+
+
+def post(path, payload):
+    return _send(path, payload, "POST")
+
+
+def put(path, payload):
+    return _send(path, payload, "PUT")
 
 
 OK_STATUSES = ("created", "updated", "unchanged", "skipped")
@@ -83,7 +91,7 @@ TERMS = [
     ("namespaces", "Namespaces", "Namespace scoping, isolation modes, deletion modes, cross-namespace refs.", 22, None),
     ("identity-hashing", "Identity Hashing", "identity_fields, dedup hashing, upsert semantics, append-only templates.", 23, None),
     ("canonical-ids", "Canonical IDs", "Canonical identity: UUID7/prefixed ID formats, the Registry as identity authority, synonym-to-canonical resolution, entry merges.", 24, None),
-    ("backup-restore", "Backup & Restore", "Data lifecycle: archives, restore modes, merge semantics.", 30, None),
+    ("backup-restore", "Backup & Restore", "Data lifecycle: archives, restore modes, merge semantics.", 30, ["wip-toolkit"]),
     ("backup", "Backup", "Backup jobs, archive creation, export.", 31, None),
     ("restore", "Restore", "Restore operations of any mode.", 32, None),
     ("fresh-restore", "Fresh Restore", "Restore into a new namespace with re-minted IDs (import --mode fresh).", 33, None),
@@ -91,28 +99,28 @@ TERMS = [
     ("archive-format", "Archive Format", "Archive layout, manifests, export collectors.", 35, None),
     ("plain-restore", "Plain Restore", "Restore with original IDs preserved (wip-toolkit import --mode restore) — disaster recovery into the same namespace identity.", 36, ["mode-restore", "original-id-restore"]),
     ("deployment", "Deployment", "Installing and operating WIP and its apps.", 40, None),
-    ("wip-deploy", "wip-deploy", "The deployer: install targets, manifests, app-source hotwiring, secrets.", 41, None),
+    ("wip-deploy", "wip-deploy", "The deployer: install targets, manifests, app-source hotwiring, secrets.", 41, ["deployer"]),
     ("containers", "Containers", "Images, Dockerfiles, healthchecks, registries, multi-arch builds.", 42, None),
     ("ci", "CI", "CI pipelines: gitea Actions, GitHub workflows, test gates.", 43, None),
     ("client-libs", "Client Libraries", "The TypeScript client libraries apps build on.", 50, None),
     ("wip-client", "@wip/client", "Typed TS client: services, bulk envelope, error hierarchy.", 51, None),
     ("wip-react", "@wip/react", "React hooks over the client (TanStack Query).", 52, None),
     ("wip-proxy", "@wip/proxy", "Express middleware: auth injection, API proxying, app-config.", 53, None),
-    ("mcp", "MCP", "The MCP server: tools, resources, agent-facing API ingress.", 60, None),
-    ("auth", "Auth", "OIDC, Dex, auth-gateway, API keys, session handling.", 61, None),
+    ("mcp", "MCP", "The MCP server: tools, resources, agent-facing API ingress.", 60, ["mcp-server"]),
+    ("auth", "Auth", "OIDC, Dex, auth-gateway, API keys, session handling.", 61, ["wip-auth", "auth-gateway"]),
     ("scaffold", "Scaffold", "App generation: create-app-project, presets, gene-pool templates, refresh.", 62, None),
     ("testing", "Testing", "Test infrastructure: matrices, fixtures, golden tests, harnesses.", 63, None),
     ("apps", "Apps", "Applications built on WIP.", 70, None),
-    ("kb-app", "KB App", "The Knowledge Base app: UI, gateway, bootstrap, served client.", 71, None),
+    ("kb-app", "KB App", "The Knowledge Base app: UI, gateway, bootstrap, served client.", 71, ["kb", "wip-kb"]),
     ("kb-client", "KB Client", "The served kb client bundle: kbc, case-fetch, kb-write, playbooks.", 72, None),
-    ("react-console", "React Console", "The ReactConsole admin app.", 73, None),
+    ("react-console", "React Console", "The ReactConsole admin app.", 73, ["reactconsole"]),
     ("clintrial", "ClinTrial Explorer", "The Clinical Trials Explorer app.", 74, None),
-    ("author-assist", "AuthorAssist", "The AuthorAssist app.", 75, None),
+    ("author-assist", "AuthorAssist", "The AuthorAssist app.", 75, ["authorassist"]),
     ("agent-practice", "Agent Practice", "How YACs work: process, discipline, cross-agent workflow.", 80, None),
     ("sessions", "Sessions", "Session identity, wake/rollover, reports, continuity.", 81, None),
     ("case-workflow", "Case Workflow", "Cross-agent cases: filing, responding, implementing, status machine.", 82, None),
     ("verification", "Verification", "Verify-before-assert discipline, fabrication classes, evidence standards.", 83, None),
-    ("documentation", "Documentation", "Docs as a practice: papers, playbooks, doc drift, parity guards.", 84, None),
+    ("documentation", "Documentation", "Docs as a practice: papers, playbooks, doc drift, parity guards.", 84, ["docs"]),
 ]
 
 RELATIONS = [  # (child, parent, type)
@@ -171,6 +179,23 @@ res = assert_ok(post(f"/api/def-store/terminologies/{tid}/terms", payload), "44 
 ids = {TERMS[i][0]: r["id"] for i, r in enumerate(res)}
 if len(ids) != 44:
     sys.exit(f"ABORT: expected 44 term ids, got {len(ids)}")
+
+# 2b. Aliases, applied as an explicit update rather than left to step 2.
+#     A bulk term create SKIPS values that already exist, so on any instance
+#     already carrying the taxonomy the aliases declared above would never
+#     land — the create returns 'skipped' and the existing term keeps whatever
+#     aliases it had. Re-declaring them here is what makes an added alias
+#     reach an existing instance instead of only a fresh one.
+#
+#     Aliases carry behaviour, not just spelling: the KB gateway resolves a
+#     case's component/app string to a topic through this vocabulary, so
+#     "mcp-server" reaching the term "mcp" is the mapping itself. The update
+#     REPLACES the alias list, which is intended — the declaration above is
+#     the desired state, so a removed alias is removed on the next run.
+alias_payload = [{"term_id": ids[value], "aliases": aliases}
+                 for value, _, _, _, aliases in TERMS if aliases]
+assert_ok(put(f"/api/def-store/terms?namespace={NS}", alias_payload),
+          f"{len(alias_payload)} alias sets")
 
 # 3. Relations (duplicates are skipped; inactive duplicates are reactivated)
 rel_payload = [{"source_term_id": ids[c], "target_term_id": ids[p], "relation_type": t}

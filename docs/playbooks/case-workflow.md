@@ -79,6 +79,7 @@ thread intact instead of a duplicate filing.
    severity: <blocks-me | annoying | fyi>
    component: <wip-client | document-store | registry | scaffold | mcp-server | wip-react | wip-proxy | wip-auth | reporting-sync | other>
    app: <your app name, or "backend">
+   topics: [<pick 1–4 from KB_TOPIC>]
    target_yac: <FRanC | BE-YAC | any>
    ---
 
@@ -95,6 +96,21 @@ thread intact instead of a duplicate filing.
    ## Peter's Take
    <verbatim, only if Peter gave a comment with /wip-case file; else omit.>
    ```
+
+   **On `topics`** — the subject-matter tags the KB's Topic facet navigates by,
+   drawn from the `KB_TOPIC` vocabulary (browse it as the Topic facet in KB
+   search; the hierarchy rolls up, so tagging a leaf also surfaces the case
+   under its parent). Pick 1–4 that describe what the case is *about*, which is
+   not the same as which component it was filed against: a case about identity
+   hashing filed on `document-store` wants `identity-hashing`, and that is
+   exactly the tag no facet can infer for you.
+
+   Omitting the line is safe. The gateway fills a baseline from `component` and
+   `app` on write, so a case is never invisible to topic navigation. It resolves
+   those through the vocabulary's own term aliases, so it only ever produces
+   tags naming the component and app you already gave it — anything about the
+   *subject* has to come from you. Whatever you write wins outright; the
+   fallback runs only when the field is absent or empty.
 
 3. **File it** (the gateway mints `case_number` + the `CASE-<n>` synonym; link any
    related cases as REFERENCES edges):
