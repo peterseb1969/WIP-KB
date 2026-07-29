@@ -21,6 +21,7 @@
 //   server-side machine when the per-case verbs retired into /write/:type.
 // - Mounted PUBLIC (before requireAuth) like kb-client.routes; the gateway
 //   browser-auth exemption is the manifest route line (CASE-439 pattern).
+import { createHash } from 'node:crypto'
 import { Router, type Request, type Response } from 'express'
 
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
@@ -46,6 +47,24 @@ type AnyObj = Record<string, any>
 
 class WipError extends Error {
   constructor(public status: number, message: string) { super(message) }
+}
+
+/**
+ * HTTP status for an error escaping a route handler.
+ *
+ * `WipError` has always carried a status and the handlers used to discard it,
+ * answering a flat 502 for everything. That made a rejection the CALLER must fix
+ * indistinguishable from a transient upstream blip — so a client retried it, got
+ * the identical refusal, and retried again. A 4xx the write path chose
+ * deliberately now survives to the wire.
+ *
+ * Anything else from a WipError is an upstream failure and stays 502 rather than
+ * passing the platform's own status through: a 500 from document-store is not
+ * this gateway failing, and answering 500 would claim it was.
+ */
+function errStatus(e: unknown): number {
+  if (!(e instanceof WipError)) return 500
+  return e.status >= 400 && e.status < 500 ? e.status : 502
 }
 
 // Map document-store per-item error_codes to a precise client status (CASE-490
@@ -183,6 +202,51 @@ function buildSynonym(cfg: { prefix?: string; synonymTemplate?: string; numberFi
 // <PREFIX>-<n> synonym atomically (retry on conflict = the uniqueness guard). On
 // re-contact → reuse the existing number → versions in place (idempotent). The
 // minted number is THE identity field; searchFilters is only the dedup key.
+// --- content identity -------------------------------------------------------
+// A content hash and an identity are different keys and neither can do the
+// other's job. Identity must survive an edit (it is what makes the edit a new
+// VERSION rather than a new document); a content hash must change on every edit,
+// which is the property identity must not have. Using a hash as identity would
+// fork a document on every save — PoNIF #3's "never put changing data in
+// identity fields" wearing a different hat.
+//
+// So this hash never touches identity. It answers one question the address
+// cannot: are two records holding the same bytes under two different
+// identities? That is the shape a mis-derived address produces, and it is
+// invisible to a search key that is itself derived from the bad address.
+//
+// Computed here, over the body the KB actually stores, rather than requiring
+// writers to send one — every writer gets the guard, including the browser, and
+// nothing has to be rolled out first. A git blob id (`git hash-object`) is the
+// better key for comparing against a file ON DISK and belongs in
+// `synced_from_sha`, which is a separate question from this one.
+const CONTENT_HASHED_TYPES = new Set(['DOCUMENT'])
+
+function contentHash(body: unknown): string | null {
+  if (typeof body !== 'string' || !body) return null
+  return createHash('sha256').update(body, 'utf8').digest('hex')
+}
+
+/**
+ * Refuse to mint a NEW identity for content that already exists under another
+ * one. Returns the offending doc when the write should be rejected.
+ *
+ * Deliberately scoped to the mint-a-new-number path: re-writing the same content
+ * to the SAME identity is an upsert and must stay one. Only the branch that is
+ * about to allocate a fresh number asks this question.
+ */
+async function findContentTwin(
+  templateValue: string, hash: string, numberField: string, ns: string, key: string,
+): Promise<AnyObj | null> {
+  const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key, {
+    template_id: templateValue,
+    filters: [{ field: 'data.content_hash', operator: 'eq', value: hash }],
+    page: 1, page_size: 1,
+  }).catch(() => null)
+  const hit = (q?.items || [])[0]
+  return hit && typeof hit.data?.[numberField] === 'number' ? hit : null
+}
+
 async function mintNumberedDoc(opts: {
   templateValue: string; numberField: string; synonymPrefix: string;
   searchFilters: AnyObj[]; data: AnyObj; metadata?: AnyObj; ns: string; key: string;
@@ -207,6 +271,26 @@ async function mintNumberedDoc(opts: {
       if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
         throw new WipError(502, `${templateValue} re-mint failed: ${r.error || JSON.stringify(r)}`)
       return { number: num, synonym: buildSynonym(synCfg, num, data), document_id: r.document_id, result: r.status }
+    }
+  }
+
+  // About to allocate a NEW identity. If these exact bytes already live under a
+  // different one, that is a fork — almost always a mis-derived address (a
+  // second clone, a rename) rather than a genuinely new document. Reject with
+  // the existing handle so the writer can correct the address instead of the
+  // corpus growing a second answer to the same question. CASE-825: eighteen
+  // papers were minted this way, silently, and each clone's own gate then read
+  // its own set as clean.
+  const twinHash = data.content_hash
+  if (typeof twinHash === 'string' && twinHash) {
+    const twin = await findContentTwin(templateValue, twinHash, numberField, ns, key)
+    if (twin) {
+      const handle = buildSynonym(synCfg, twin.data[numberField], twin.data)
+      throw new WipError(409,
+        `${templateValue} refused: identical content already exists as ${handle} `
+        + `(${Object.entries(searchFilters.reduce((a: AnyObj, f: AnyObj) => (a[String(f.field).replace(/^data\./, '')] = f.value, a), {}))
+            .map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')} did not match it). `
+        + `Writing the same content under a second identity forks the corpus; correct the address, or PATCH ${handle}.`)
     }
   }
 
@@ -368,6 +452,12 @@ async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyOb
   // — instead of each having to remember to tag.
   const topics = await derivedTopics(await getTemplate(type, ns, key), data, ns, key)
   if (topics) data = { ...data, [TOPIC_FIELD]: topics }
+  // Stamp the content hash before the write so the value stored and the value
+  // the fork guard compares are the same one, always, for every writer.
+  if (CONTENT_HASHED_TYPES.has(type) && data.content_hash === undefined) {
+    const h = contentHash(data.body)
+    if (h) data = { ...data, content_hash: h }
+  }
   const cfg = await writeConfig(type, ns, key)
   if (cfg) {
     const searchFilters = cfg.searchKey.map((f) => ({ field: `data.${f}`, operator: 'eq', value: data[f] }))
@@ -523,7 +613,7 @@ router.post('/write/:type', async (req, res) => {
       }
       res.status(409).json({ error: `${type} patch still conflicting after ${PATCH_MAX_RETRIES} retries` })
     } catch (e) {
-      res.status(e instanceof WipError ? e.status : 500).json({ error: (e as Error).message })
+      res.status(errStatus(e)).json({ error: (e as Error).message })
     }
     return
   }
@@ -540,7 +630,7 @@ router.post('/write/:type', async (req, res) => {
     const edgeResults = edges.length ? await applyEdges(w.document_id, edges, ns, key) : []
     res.json({ type, ...w, ...(edges.length ? { edges: edgeResults } : {}) })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -604,7 +694,7 @@ router.get('/read/:type', async (req, res) => {
       })),
     })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -679,7 +769,7 @@ router.get('/edges/:handle', async (req, res) => {
     const d = await wipReq('GET', `/api/document-store/documents/${id}/relationships?namespace=${ns}`, key)
     res.json({ handle: req.params.handle, document_id: id, relationships: d })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -728,7 +818,7 @@ router.get('/cases', async (req, res) => {
       { template_id: 'CASE_RECORD', filters, page, page_size: pageSize })
     res.json({ total: d.total, page: d.page, pages: d.pages, items: (d.items || []).map(caseProjection) })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -778,7 +868,7 @@ router.get('/flags', async (req, res) => {
     }
     res.json({ total: d.total, page: d.page, pages: d.pages, items })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -868,7 +958,7 @@ router.get('/cases/:n', async (req, res) => {
     }
     res.json(out)
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -898,7 +988,7 @@ router.get('/sessions', async (req, res) => {
     })
     res.json({ total: d.total, page: d.page, pages: d.pages, items })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -926,7 +1016,7 @@ router.get('/journeys/:day', async (req, res) => {
       body: j.body || '', document_id: it.document_id, doc_version: it.version,
     })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -958,7 +1048,7 @@ router.get('/firesides', async (req, res) => {
       { template_id: 'FIRESIDE', filters, page, page_size: pageSize })
     res.json({ total: d.total, page: d.page, pages: d.pages, items: (d.items || []).map(firesideProjection) })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -988,7 +1078,7 @@ router.get('/firesides/:id', async (req, res) => {
       res.status(404).json({ error: `fireside ${req.params.id} not found in ${ns}` })
       return
     }
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -1028,7 +1118,7 @@ router.get('/library-docs', async (req, res) => {
       { template_id: 'LIBRARY_DOC', filters, page, page_size: pageSize })
     res.json({ total: d.total, page: d.page, pages: d.pages, items: (d.items || []).map(libraryDocProjection) })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -1064,7 +1154,7 @@ router.get('/library-docs/:slug', async (req, res) => {
     }
     res.json({ ...libraryDocProjection(it), body: it.data?.body || '' })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
@@ -1113,7 +1203,7 @@ router.get('/types', async (req, res) => {
     // (CASE-518 review #6) — a consumer reading the old top-level field still works.
     res.json({ namespace: namespaces[0], namespaces, total: types.length, types })
   } catch (e) {
-    res.status(e instanceof WipError ? 502 : 500).json({ error: (e as Error).message })
+    res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 
