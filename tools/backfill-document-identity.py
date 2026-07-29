@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
-"""backfill-repo-id.py — stamp each DOCUMENT with its source repository's identity (CASE-825).
+"""backfill-document-identity.py — stamp DOCUMENT with repo_id and content_hash (CASE-825).
+
+Renamed from backfill-repo-id.py, which stamped only the first. A script called
+"backfill-repo-id" that also writes content hashes is the kind of name that makes
+someone trust the wrong thing — the failure this whole case is about.
+
+**content_hash matters as much as repo_id, and for a non-obvious reason.** The
+gateway stamps a hash on every write and refuses to mint a NEW paper_number for
+content that already exists under a different one. Without this backfill the guard
+arms with an empty table: it protects content written AFTER the deploy and sails
+straight past the papers already in the corpus — which is the exact scenario
+CASE-825 is about. A guard that only defends what has not been attacked yet is not
+a guard.
+
+The hash MUST be computed the same way the gateway computes it — sha256 over the
+stored body, hex — or a legitimate re-mirror hashes differently, misses, and mints
+a duplicate: the bug, reintroduced by its own fix. Verify equivalence after
+running (write a known body through the gateway and compare the two hashes), do
+not assume it.
 
 `repo_origin` is a NAME someone assigns; `repo_id` is what the repository itself
 says it is — its root-commit SHA, or all roots sorted and comma-joined when a
@@ -34,6 +52,7 @@ Env:
   KB_TO_VERSION target template version (default: current active DOCUMENT version)
 """
 import argparse
+import hashlib
 import json
 import os
 import ssl
@@ -124,11 +143,24 @@ def main():
             if res.get("failed"):
                 sys.exit("ABORT: migrate failed")
 
-    # 2. plan the stamp — only documents that lack one
-    rows = report("SELECT document_id, repo_origin, repo_id FROM kb.doc_document WHERE status='active'")
-    plan = {r["document_id"]: fps[r["repo_origin"]] for r in rows
-            if not r.get("repo_id") and r["repo_origin"] in fps}
-    print(f"backfill plan: {len(plan)}/{len(rows)} documents ({len(rows) - len(plan)} already stamped or skipped)")
+    # 2. plan the stamp — per field, since a document may already carry one and
+    #    not the other (repo_id was backfilled before content_hash existed).
+    rows = report("SELECT document_id, repo_origin, repo_id, content_hash, body "
+                  "FROM kb.doc_document WHERE status='active'")
+    plan, n_repo, n_hash = {}, 0, 0
+    for r in rows:
+        patch = {}
+        if not r.get("repo_id") and r["repo_origin"] in fps:
+            patch["repo_id"] = fps[r["repo_origin"]]
+            n_repo += 1
+        # Same computation as the gateway: sha256 over the stored body, hex.
+        if not r.get("content_hash") and r.get("body"):
+            patch["content_hash"] = hashlib.sha256(r["body"].encode("utf-8")).hexdigest()
+            n_hash += 1
+        if patch:
+            plan[r["document_id"]] = patch
+    print(f"backfill plan: {len(plan)}/{len(rows)} documents "
+          f"(repo_id {n_repo}, content_hash {n_hash}; {len(rows) - len(plan)} already complete)")
     if not args.apply:
         print("(dry-run: no writes — re-run with --apply)")
         return
@@ -136,7 +168,7 @@ def main():
     patched = failed = 0
     ids = list(plan.items())
     for i in range(0, len(ids), 100):
-        batch = [{"document_id": d, "patch": {"repo_id": fp}} for d, fp in ids[i:i + 100]]
+        batch = [{"document_id": d, "patch": p} for d, p in ids[i:i + 100]]
         resp = req("PATCH", "/api/document-store/documents?namespace=kb", batch)
         for r in resp.get("results", []):
             if r.get("status") in ("updated", "unchanged"):
