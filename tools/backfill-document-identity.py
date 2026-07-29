@@ -145,9 +145,9 @@ def main():
 
     # 2. plan the stamp — per field, since a document may already carry one and
     #    not the other (repo_id was backfilled before content_hash existed).
-    rows = report("SELECT document_id, repo_origin, repo_id, content_hash, body "
+    rows = report("SELECT document_id, repo_origin, repo_id, content_hash, path_tail, path, body "
                   "FROM kb.doc_document WHERE status='active'")
-    plan, n_repo, n_hash = {}, 0, 0
+    plan, n_repo, n_hash, n_tail = {}, 0, 0, 0
     for r in rows:
         patch = {}
         if not r.get("repo_id") and r["repo_origin"] in fps:
@@ -157,10 +157,17 @@ def main():
         if not r.get("content_hash") and r.get("body"):
             patch["content_hash"] = hashlib.sha256(r["body"].encode("utf-8")).hexdigest()
             n_hash += 1
+        # Same derivation as the gateway's pathTail(): strip the origin prefix
+        # ONLY when it is actually there. PAPER-1 is already repo-relative, and an
+        # unconditional strip would give it a path no document has.
+        if not r.get("path_tail") and r.get("path"):
+            pre = f"{r['repo_origin']}/"
+            patch["path_tail"] = r["path"][len(pre):] if r["path"].startswith(pre) else r["path"]
+            n_tail += 1
         if patch:
             plan[r["document_id"]] = patch
     print(f"backfill plan: {len(plan)}/{len(rows)} documents "
-          f"(repo_id {n_repo}, content_hash {n_hash}; {len(rows) - len(plan)} already complete)")
+          f"(repo_id {n_repo}, content_hash {n_hash}, path_tail {n_tail}; {len(rows) - len(plan)} complete)")
     if not args.apply:
         print("(dry-run: no writes — re-run with --apply)")
         return

@@ -53,6 +53,7 @@ CTX = ssl._create_unverified_context()
 WANT = [
     {"name": "content_hash", "label": "Content Hash", "type": "string", "mandatory": False},
     {"name": "repo_id",      "label": "Repo ID",      "type": "string", "mandatory": False},
+    {"name": "path_tail",    "label": "Path (repo-relative)", "type": "string", "mandatory": False},
 ]
 FIELD_KEYS = ["name", "label", "type", "mandatory", "default_value", "terminology_ref",
               "template_ref", "template_ref_version", "reference_type", "target_templates",
@@ -83,10 +84,18 @@ fields = [{k: f[k] for k in FIELD_KEYS if f.get(k) is not None} for f in cur["fi
 fields.extend(missing)
 rep = cur.get("reporting") or {}
 rep["sync_enabled"] = True
-# Without cross_version_view the DEFAULT reporting view keeps the old shape and the
-# new columns are invisible to every query that does not name a version explicitly.
-rep["cross_version_view"] = {"versions": "all",
-                             "columns": {f["name"]: {} for f in WANT}}
+# cross_version_view.columns is the DECLARATION the entity view is generated from,
+# so it must be MERGED, never assigned. Assigning it silently un-projects every
+# column not relisted: doing exactly that on canonical removed `topics` from
+# kb.doc_document while leaving the data untouched in the per-version tables —
+# invisible to the Topic facet and to any SQL over the view, with nothing failing.
+# Read the current declaration, add to it, keep everything already there.
+cvv = rep.get("cross_version_view") or {}
+cols = dict(cvv.get("columns") or {})
+for f in WANT:
+    cols.setdefault(f["name"], {})
+rep["cross_version_view"] = {"versions": cvv.get("versions", "all"), "columns": cols}
+print(f"  cross_version_view.columns: {sorted((cvv.get('columns') or {}).keys())} -> {sorted(cols)}")
 resp = req("POST", "/api/template-store/templates", [{
     "value": cur["value"], "label": cur["label"], "namespace": NS,
     "description": cur.get("description") or "",

@@ -228,6 +228,27 @@ function contentHash(body: unknown): string | null {
 }
 
 /**
+ * The repo-relative path — a document's address WITHIN its repository, once
+ * `repo_id` says which repository that is.
+ *
+ * Mirrors prefix the path with the repo directory name, which is the same
+ * checkout-dependent string that forked this corpus. Deriving the tail here
+ * means a writer can send either form and land on the same address, so the
+ * store's key and the writer's paths never have to change in step.
+ *
+ * Conditional on purpose. PAPER-1 predates the prefixing convention and is
+ * already repo-relative ("papers/…" under origin FR-YAC): an unconditional
+ * "strip the first segment" would turn it into a path no document has. Strip
+ * only when the prefix is actually the origin, which also makes this idempotent.
+ */
+function pathTail(path: unknown, repoOrigin: unknown): string | null {
+  if (typeof path !== 'string' || !path) return null
+  if (typeof repoOrigin !== 'string' || !repoOrigin) return path
+  const prefix = `${repoOrigin}/`
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path
+}
+
+/**
  * Refuse to mint a NEW identity for content that already exists under another
  * one. Returns the offending doc when the write should be rejected.
  *
@@ -321,7 +342,7 @@ async function mintNumberedDoc(opts: {
 // case_number. synonymTemplate: when set, the synonym is the template with {field}
 // placeholders filled from the doc ({<numberField>} = the minted n) — e.g.
 // "CASE-{case_number}#{response_seq}"; else it is "<prefix>-<n>".
-type MintCfg = { numberField: string; prefix: string; searchKey: string[]; scopeField?: string; synonymTemplate?: string }
+type MintCfg = { numberField: string; prefix: string; searchKey: string[]; searchKeyFallback?: string[]; scopeField?: string; synonymTemplate?: string }
 const policyCache = new Map<string, Map<string, MintCfg>>()
 async function loadPolicies(ns: string, key: string): Promise<Map<string, MintCfg>> {
   const hit = policyCache.get(ns)
@@ -335,6 +356,7 @@ async function loadPolicies(ns: string, key: string): Promise<Map<string, MintCf
       if (p.doc_type && p.write_mode === 'mint' && p.number_field)
         m.set(p.doc_type, {
           numberField: p.number_field, prefix: p.synonym_prefix, searchKey: p.search_key || [],
+          searchKeyFallback: p.search_key_fallback || undefined,
           scopeField: p.scope_field || undefined, synonymTemplate: p.synonym_template || undefined,
         })
     }
@@ -458,9 +480,29 @@ async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyOb
     const h = contentHash(data.body)
     if (h) data = { ...data, content_hash: h }
   }
+  // Derive the repo-relative path. Both the prefixed form a mirror sends today
+  // and a bare repo-relative one land on the same value, so writers never have
+  // to change in step with the store — the coordination this would otherwise
+  // need is deleted rather than scheduled.
+  if (CONTENT_HASHED_TYPES.has(type) && data.path_tail === undefined) {
+    const t = pathTail(data.path, data.repo_origin)
+    if (t) data = { ...data, path_tail: t }
+  }
   const cfg = await writeConfig(type, ns, key)
   if (cfg) {
-    const searchFilters = cfg.searchKey.map((f) => ({ field: `data.${f}`, operator: 'eq', value: data[f] }))
+    // A search key is only usable if the incoming write carries every component.
+    // When it does not — an older writer that has not started sending repo_id —
+    // fall back to the key the policy declares for that case rather than
+    // filtering on undefined, which matches nothing and mints a duplicate. That
+    // is the CASE-825 failure re-created by the fix meant to prevent it.
+    const complete = (k: string[]) => k.length > 0 && k.every((f) => data[f] !== undefined && data[f] !== null && data[f] !== '')
+    const effectiveKey = complete(cfg.searchKey) ? cfg.searchKey
+      : (complete(cfg.searchKeyFallback || []) ? cfg.searchKeyFallback! : cfg.searchKey)
+    if (effectiveKey !== cfg.searchKey) {
+      console.warn(`[kb-gateway] ${type}: search key ${JSON.stringify(cfg.searchKey)} incomplete on this write; `
+        + `falling back to ${JSON.stringify(effectiveKey)}`)
+    }
+    const searchFilters = effectiveKey.map((f) => ({ field: `data.${f}`, operator: 'eq', value: data[f] }))
     const m = await mintNumberedDoc({
       templateValue: type, numberField: cfg.numberField, synonymPrefix: cfg.prefix,
       searchFilters, data, metadata, ns, key,

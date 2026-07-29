@@ -17,6 +17,7 @@
     { "name": "synced_from_sha", "label": "Synced From SHA", "type": "string",  "mandatory": false },
     { "name": "content_hash",    "label": "Content Hash",    "type": "string",  "mandatory": false },
     { "name": "repo_id",         "label": "Repo ID",         "type": "string",  "mandatory": false },
+    { "name": "path_tail",       "label": "Path (repo-relative)", "type": "string", "mandatory": false },
     { "name": "doc_status",      "label": "Doc Status",      "type": "term",    "mandatory": true,  "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "published" },
     { "name": "topics",          "label": "Topics",          "type": "array",   "array_item_type": "term", "array_terminology_ref": "KB_TOPIC" }
   ]
