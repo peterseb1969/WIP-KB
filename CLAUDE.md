@@ -54,17 +54,24 @@ The spec is authoritative. If FRanC's papers and this CLAUDE.md disagree on anyt
 
 ---
 
-## Backend Target — kb
+## Backend Target — three instances, and the ladder between them
 
-This app talks to the **`kb` instance** on the Pi cluster, not local-dev. Concretely:
+**Verify which instance you are on before every write. `cat .mcp.json` is the check — not this file, not memory.** This section has been wrong before, and an agent that trusted it believed it was reading production while pointed at a sandbox.
 
-- **Base URL:** `https://kb.internal` (port 443; self-signed cert). *(Canonical since the 2026-06-19 cutover; was `wip-kb.local`.)* The single source of truth for the instance is `.claude/kb.json` (`kb_app_url` + `kb_api_key_file`) — the served KB client reads it, so a future rename is one edit there. Runtime/ops key: `~/.wip-deploy/kb/secrets/api-key`.
-- **Two MCP servers** in `.mcp.json` (local/gitignored), so destructive/dev work targets the right instance — Peter toggles which is active:
-  - **`wip`** → canonical **kb.internal** (tools surface as `mcp__wip__<tool>`). The default; gene-pool docs that say `mcp__wip__*` mean this one.
-  - **`wip-local`** → dev sandbox **localhost:8443** (prod restore; key `~/.wip-deploy/wip-local/secrets/api-key`). Tools surface as `mcp__wip-local__<tool>`.
-  - **Discipline:** schema/data iteration and any destructive op (delete/create namespace, template churn) go through **`wip-local`**; `wip` is read-mostly against canonical. Never run a namespace/template mutation without confirming which server you're on — a wrong-target `delete_namespace` against `wip` hits production. (This app once used a `wip-kb`-named server; ignore that — it's `wip` + `wip-local` now.)
-- **`.mcp.json`** uses `WIP_API_KEY_FILE` pointing at `~/.wip-deploy/kb/secrets/api-key` (privileged admin key). Key rotation is one file write; do not paste literal keys into `.mcp.json`.
-- **`.env`** carries `WIP_API_KEY_FILE` pointing at the live wip-deploy secrets file (currently `~/.wip-deploy/wip-local/secrets/api-key` — the dev sandbox's admin key; no plaintext key is baked in). Resolve the key from the file at startup (the `@wip/proxy` `apiKeyFile` option does this), so a key rotation or target-redeploy is picked up on restart instead of stranding a stale `.env`. This deploy key spans all namespaces — pass `namespace` explicitly on calls that need scoping. A least-privilege single-namespace key (which gets automatic namespace derivation) is an optional opt-in via `POST /api/registry/api-keys` with `namespaces` + `grant_permission`.
+Three live WIP installs carry a `kb` namespace. They are near-identical in size, so **a document count will not tell you which one you are talking to**:
+
+| Instance | URL | Key file | What it is |
+|---|---|---|---|
+| **sandbox** | `https://localhost:8443` | `~/.wip-deploy/default/secrets/api-key` | Compose install, hotwired to the working tree via `--app-source`. Destructive work goes here. |
+| **prod-test** | `https://prod-test.internal` | `~/.wip-deploy/prod-test/secrets/api-key` | k8s, runs *deployed images*. The rehearsal instance. |
+| **canonical** | `https://kb.internal` | `~/.wip-deploy/kb/secrets/api-key` | Production. `deletion_mode: retain` — see below. |
+
+- **One MCP server** in `.mcp.json` (local/gitignored): **`wip` → the sandbox at `localhost:8443`**. Tools surface as `mcp__wip__<tool>`. There is no `wip-local` server and no `wip-kb` server; older docs and gene-pool material that say otherwise are stale. If you need canonical or prod-test, use `kbc` or an explicit `curl` with that instance's key file — not MCP.
+- **Peter will restore any instance to canonical's state on request — just ask.** This is the single most under-used piece of tooling in this project; an APP-KB-YAC has already been called out for not reaching for it. A restored prod-test is the correct place to rehearse anything whose blast radius you cannot fully predict, and it costs one sentence to get.
+- **The ladder, in order, no steps skipped:** sandbox (does it work at all?) → prod-test restored to canonical (does it work against *real* data, on the *deployed* image?) → canonical. A change that has not survived a restored prod-test has not been tested, however green the sandbox looked.
+- **Canonical is `deletion_mode: retain`, so nothing written there is ever removed** — a "revert" only marks the row inactive, and a minted `CASE-n` / `PAPER-n` number is consumed permanently. **Reversible is not the same as safe; on canonical the revert does not exist.** Never write to canonical to *test* anything. `.claude/hooks/block-canonical-writes.sh` (PreToolUse, tracked) enforces this: it refuses write-method calls naming `kb.internal` unless prefixed `ALLOW_CANONICAL_WRITE=1`. Reads, `kbc`, query-endpoint POSTs and dry-runs stay free. Origin: LESSON-44 — the rule was in this file and had been read that morning; it still did not reach the moment of the write, which is why the gate fires on the action instead.
+- **`.claude/kb.json`** (`kb_app_url` + `kb_api_key_file`) is the single source of truth for *canonical* — the served KB client reads it, so a rename is one edit there. It does **not** describe the MCP target.
+- **`.env`** carries `WIP_API_KEY_FILE` pointing at the live wip-deploy secrets file (currently `~/.wip-deploy/default/secrets/api-key` — the sandbox's admin key; no plaintext key is baked in). Resolve the key from the file at startup (the `@wip/proxy` `apiKeyFile` option does this), so a key rotation or target-redeploy is picked up on restart instead of stranding a stale `.env`. This deploy key spans all namespaces — pass `namespace` explicitly on calls that need scoping. A least-privilege single-namespace key (which gets automatic namespace derivation) is an optional opt-in via `POST /api/registry/api-keys` with `namespaces` + `grant_permission`.
 
 ### TLS gotcha for the Node server
 
@@ -76,7 +83,7 @@ This app talks to the **`kb` instance** on the Pi cluster, not local-dev. Concre
 
 | Namespace | Purpose | Scope of work |
 |---|---|---|
-| `dev-kb` / `dev-*` | APP-KB-YAC's iteration sandbox namespaces | Schema/data iteration on **wip-local**. Created on demand when needed — **a missing dev namespace is never a setup failure**; its absence at session start is expected and non-blocking. |
+| `dev-kb` / `dev-*` | APP-KB-YAC's iteration sandbox namespaces | Schema/data iteration on the **localhost sandbox**. Created on demand when needed — **a missing dev namespace is never a setup failure**; its absence at session start is expected and non-blocking. |
 | `kb` | The live Knowledge Base | **Created by the app's offer-on-empty BootstrapGate at runtime, not by you.** Production templates land here once Peter approves them. |
 
 **Never bootstrap `kb` from your dev workflow.** That's BootstrapGate's job. `kb` exists only when a user (Peter) confirms the bootstrap offer in the running app.
@@ -166,7 +173,7 @@ Read each template's header comment, fill in the TODOs (namespace = `kb`, app ti
 
 ## MCP
 
-WIP is accessed exclusively via MCP tools (94 tools, 5 resources) under the **`wip`** server (canonical kb.internal) or **`wip-local`** server (dev localhost:8443) — see "Backend Target" for the toggle/discipline. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
+WIP's dev sandbox is accessed via MCP tools (94 tools, 5 resources) under the **`wip`** server, which points at **localhost:8443** — see "Backend Target" for the full three-instance ladder. prod-test and canonical are *not* on MCP; reach them with `kbc` or an explicit `curl`. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
 
 Required reads before writing any code:
 - `wip://conventions` — bulk-first API, identity hashing, versioning

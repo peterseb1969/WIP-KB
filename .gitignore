@@ -24,6 +24,9 @@ __pycache__/
 # KB data exports / backups — data lives in the kb namespace, never the app repo
 backup-files/
 
-# Local-only: machine-specific session hooks + scratch evidence (screenshots etc.)
-.claude/hooks/
+# Scratch evidence (screenshots etc.) — never durable, never shared
 evidence/
+
+# NOTE: .claude/hooks/ is deliberately TRACKED. settings.json (tracked) wires both
+# hooks by path, so ignoring the scripts left a fresh clone referencing gates that
+# were not there — a guard that silently is not installed is worse than none.
