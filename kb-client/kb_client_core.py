@@ -164,8 +164,18 @@ def _gw_url(base_url: str, path: str) -> str:
 
 def _request(base_url: str, key_file: Path, path: str,
              method: str, body: dict | None) -> dict | None:
-    """One gateway HTTP call. Returns parsed JSON (None on 404). Raises
-    RuntimeError on transport / non-404 HTTP error (so callers can fail over)."""
+    """One gateway HTTP call. Returns parsed JSON, or None when the route is not
+    present on this instance. Raises RuntimeError on transport / real HTTP error
+    (so callers can fail over).
+
+    "Not present" is TWO shapes, and the second is the common one. A gateway route
+    that does not exist is not answered with 404: the Express SPA fallback catches
+    the path and serves `index.html` with 200, so the client receives a page of
+    HTML where it expected JSON. Parsing that raised an uncaught JSONDecodeError
+    and every caller's "unavailable on this instance" branch was unreachable —
+    dead code behind a traceback. A client newer than the gateway it is pointed at
+    is the normal state during a rollout, so this path has to degrade rather than
+    crash."""
     data = json.dumps(body).encode("utf-8") if body is not None else None
     headers = {"X-API-Key": read_key(key_file)}
     if data is not None:
@@ -182,7 +192,20 @@ def _request(base_url: str, key_file: Path, path: str,
     except (urllib.error.URLError, OSError) as e:
         raise RuntimeError(f"{base_url} unreachable: {e}") from e
     raw = resp.read()
-    return json.loads(raw) if raw else {}
+    if not raw:
+        return {}
+    # The SPA fallback answering instead of the gateway. Decided on content-type,
+    # not on a parse failure: malformed JSON from a route that DOES exist is a real
+    # error and must stay loud, not be flattened into "route missing".
+    ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    if ctype and not (ctype == "application/json" or ctype.endswith("+json")):
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"{base_url} returned unparseable JSON for {path} "
+            f"(content-type {ctype or 'unset'}): {raw[:200].decode('utf-8', 'replace')}") from e
 
 
 def gw_get(path: str) -> dict | None:
