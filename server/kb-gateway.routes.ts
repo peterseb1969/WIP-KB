@@ -268,6 +268,37 @@ async function findContentTwin(
   return hit && typeof hit.data?.[numberField] === 'number' ? hit : null
 }
 
+// Fields the KB CURATES and no source repo knows about. A write is a full
+// replace of `data`, so any such field the writer omits is destroyed — and the
+// writers that omit them are exactly the ones that cannot know them.
+//
+// `topics` is the case that bit: the drift gate mirrors a paper with
+//   kbc kb-write.py DOCUMENT <file> --field path= --field repo_origin= \
+//                                   --field repo_id= --field kind=
+// and the paper's own frontmatter carries no `topics:` line, so every re-mirror
+// of a changed paper silently cleared its tags. derivedTopics() could not save
+// them: it derives from the INCOMING data's component/app, which DOCUMENT does
+// not have, and never reads the document already in the store.
+//
+// This is the loss that was blamed on migrate-then-PATCH and went undiagnosed
+// through two sessions. Neither of those drops anything — measured across 103
+// papers, every data key preserved. The mirror upsert did, quietly, on every run.
+const CURATED_FIELDS = ['topics']
+
+function carryCurated(data: AnyObj, existing: AnyObj | undefined): AnyObj {
+  if (!existing?.data) return data
+  let out = data
+  for (const f of CURATED_FIELDS) {
+    const incoming = out[f]
+    const has = Array.isArray(incoming) ? incoming.length > 0 : incoming !== undefined && incoming !== null && incoming !== ''
+    if (has) continue                      // an explicit value always wins
+    const prior = existing.data[f]
+    const priorHas = Array.isArray(prior) ? prior.length > 0 : prior !== undefined && prior !== null && prior !== ''
+    if (priorHas) out = { ...out, [f]: prior }
+  }
+  return out
+}
+
 async function mintNumberedDoc(opts: {
   templateValue: string; numberField: string; synonymPrefix: string;
   searchFilters: AnyObj[]; data: AnyObj; metadata?: AnyObj; ns: string; key: string;
@@ -316,7 +347,8 @@ async function mintNumberedDoc(opts: {
         + `Omit ${numberField} to have the next one assigned.`)
     }
     const d = await wipReq('POST', '/api/document-store/documents', key, [{
-      template_id: tid, namespace: ns, created_by: 'kb-gateway', data, ...meta,
+      template_id: tid, namespace: ns, created_by: 'kb-gateway',
+      data: carryCurated(data, target), ...meta,
     }])
     const r = (d.results || [])[0] || {}
     if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
@@ -334,7 +366,8 @@ async function mintNumberedDoc(opts: {
     if (existing && typeof existing.data?.[numberField] === 'number') {
       const num = existing.data[numberField]
       const d = await wipReq('POST', '/api/document-store/documents', key, [{
-        template_id: tid, namespace: ns, created_by: 'kb-gateway', data: { ...data, [numberField]: num }, ...meta,
+        template_id: tid, namespace: ns, created_by: 'kb-gateway',
+        data: { ...carryCurated(data, existing), [numberField]: num }, ...meta,
       }])
       const r = (d.results || [])[0] || {}
       if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
