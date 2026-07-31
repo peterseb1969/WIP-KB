@@ -1249,6 +1249,105 @@ router.get('/types', async (req, res) => {
   }
 })
 
+// GET /topics?type=CASE_RECORD — the topic vocabulary a writer must pick from.
+//
+// The write path VALIDATES `topics` against this vocabulary and rejects unknown
+// values, and the playbook instructs writers to "pick 1–4 from KB_TOPIC" — but the
+// only way to see it was the Topic facet in the browser, which an agent filing
+// through the served client does not have. A required, validated field with no
+// machine-readable domain leaves guess-and-retry against a live gateway as the
+// only discovery path; on canonical that mints real case numbers to learn a
+// vocabulary. Reported by a BE-YAC whose write was rejected on two invented tags.
+//
+// Which vocabulary is read off the template's own `topics` field, exactly as the
+// write-time fallback does — this route names no terminology, so a type pointed at
+// a different vocabulary is answered correctly without touching this code.
+//
+// The hierarchy is part of the answer, not decoration: tagging a leaf surfaces the
+// doc under its ancestors, so a writer choosing between a parent and its child is
+// making a real choice and needs to see the shape. Aliases likewise — they are
+// accepted spellings, and hiding them makes a valid tag look invalid.
+router.get('/topics', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const enumKey = GATEWAY_KEY || key
+  const type = String(req.query.type || 'CASE_RECORD').toUpperCase()
+  const ns = req.query.namespace ? String(req.query.namespace) : NS_DEFAULT
+  try {
+    const tpl = await wipReq('GET',
+      `/api/template-store/templates/by-value/${encodeURIComponent(type)}?namespace=${ns}`, enumKey)
+    const field = (tpl.fields || []).find(
+      (f: AnyObj) => f.name === TOPIC_FIELD && f.array_item_type === 'term')
+    const ref = field?.array_terminology_ref
+    if (!ref) {
+      return res.status(404).json({
+        error: `${type} has no '${TOPIC_FIELD}' term-array field — it carries no topic vocabulary`,
+      })
+    }
+    // Terms list from the namespace that OWNS the terminology; a cross-namespace
+    // list answers 200 with zero items rather than erroring, which would read as
+    // "the vocabulary is empty" and quietly hand back nothing to pick from.
+    const term = await wipReq('GET', `/api/def-store/terminologies/${ref}?namespace=${ns}`, enumKey)
+    const homeNs = term.namespace || ns
+    const [termsResp, relResp] = await Promise.all([
+      wipReq('GET', `/api/def-store/terminologies/${ref}/terms?namespace=${homeNs}&page_size=1000`, enumKey),
+      wipReq('GET', `/api/def-store/ontology/term-relations/all?namespace=${homeNs}&page_size=1000`, enumKey),
+    ])
+    const terms: AnyObj[] = (termsResp.items || []).filter((t: AnyObj) => t.status === 'active')
+    // child value -> {parent, relation}. The relations listing is namespace-wide,
+    // so restrict to relations whose BOTH ends live in this terminology.
+    const parentOf = new Map<string, { parent: string; relation: string }>()
+    const children = new Map<string, string[]>()
+    for (const r of (relResp.items || []) as AnyObj[]) {
+      if (r.status !== 'active') continue
+      if (r.source_terminology_id !== ref || r.target_terminology_id !== ref) continue
+      const child = String(r.source_term_value), parent = String(r.target_term_value)
+      if (parentOf.has(child)) continue
+      parentOf.set(child, { parent, relation: String(r.relation_type) })
+      children.set(parent, [...(children.get(parent) ?? []), child])
+    }
+    const byValue = new Map(terms.map((t) => [String(t.value), t]))
+    const sortVals = (vals: string[]) =>
+      [...new Set(vals)].sort((a, b) =>
+        (byValue.get(a)?.sort_order ?? 0) - (byValue.get(b)?.sort_order ?? 0) || a.localeCompare(b))
+    // Depth-first from the roots so the flat list PRINTS as the tree it is.
+    const out: AnyObj[] = []
+    const walk = (value: string, depth: number, seen: Set<string>) => {
+      const t = byValue.get(value)
+      if (!t || seen.has(value)) return
+      const link = parentOf.get(value)
+      out.push({
+        value,
+        label: t.label || value,
+        aliases: t.aliases || [],
+        parent: link?.parent ?? null,
+        relation: link?.relation ?? null,
+        depth,
+      })
+      for (const c of sortVals(children.get(value) ?? [])) walk(c, depth + 1, new Set([...seen, value]))
+    }
+    for (const v of sortVals([...byValue.keys()].filter((v) => !parentOf.has(v)))) walk(v, 0, new Set())
+    // A term whose parent is missing or cycles would never be reached by the walk.
+    // Emit it flat rather than dropping it: an unreachable term is still a legal
+    // tag, and silently omitting it recreates this route's own bug one level down.
+    for (const v of sortVals([...byValue.keys()])) {
+      if (out.some((o) => o.value === v)) continue
+      const link = parentOf.get(v)
+      const t = byValue.get(v) as AnyObj
+      out.push({
+        value: v, label: t.label || v, aliases: t.aliases || [],
+        parent: link?.parent ?? null, relation: link?.relation ?? null, depth: 0, orphaned: true,
+      })
+    }
+    res.json({
+      type, terminology: term.value || String(ref), namespace: homeNs,
+      total: out.length, topics: out,
+    })
+  } catch (e) {
+    res.status(errStatus(e)).json({ error: (e as Error).message })
+  }
+})
+
 // ---------------------------------------------------------------------------
 // Full-text search (CASE-707). The structured verbs above filter on values you
 // already know; this is the "which docs mention X" surface. Without it an agent's

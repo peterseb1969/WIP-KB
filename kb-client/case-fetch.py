@@ -323,6 +323,43 @@ def search_docs(q: str, type_: str | None, mode: str, limit: int) -> dict | None
     return gw_get("/search?" + urllib.parse.urlencode(params))
 
 
+def fetch_topics(type_: str, namespace: str | None) -> dict | None:
+    """GET /topics — the vocabulary the `topics:` frontmatter field must draw from.
+
+    The field is validated on write and rejects unknown values, but until this verb
+    existed the only way to see the domain was the Topic facet in the browser — no
+    use to an agent filing through this client, whose only remaining option was
+    guess-and-retry against a live gateway."""
+    params = {"type": type_}
+    if namespace:
+        params["namespace"] = namespace
+    return gw_get("/topics?" + urllib.parse.urlencode(params))
+
+
+def _format_topics(payload: dict) -> str:
+    topics = payload.get("topics") or []
+    head = (f"{payload.get('terminology')} — {payload.get('total', len(topics))} topic(s) "
+            f"for {payload.get('type')} [{payload.get('namespace')}]")
+    lines = [head, "=" * len(head), ""]
+    for t in topics:
+        # Indent by depth so the flat list reads as the tree it is: a writer
+        # choosing between a parent and its child is making a real choice, since
+        # tagging a leaf also surfaces the doc under its ancestors.
+        bullet = "  " * int(t.get("depth") or 0) + "- " + str(t.get("value"))
+        notes = []
+        if t.get("label") and t["label"] != t.get("value"):
+            notes.append(str(t["label"]))
+        if t.get("aliases"):
+            notes.append("aka " + ", ".join(str(a) for a in t["aliases"]))
+        if t.get("orphaned"):
+            notes.append("!! unreachable from any root — still a legal tag")
+        lines.append(bullet + (f"   ({'; '.join(notes)})" if notes else ""))
+    lines.append("")
+    lines.append("Pick 1-4 that describe what the document is ABOUT — not which "
+                 "component it was filed against.")
+    return "\n".join(lines) + "\n"
+
+
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -453,6 +490,13 @@ def main() -> None:
     search_sp.add_argument("--limit", type=int, default=25, help="max hits (default 25, cap 100)")
     search_sp.add_argument("--format", choices=["table", "json"], default="table")
 
+    topics_sp = sub.add_parser("topics", help="the KB_TOPIC vocabulary the `topics:` "
+                                              "frontmatter field must be drawn from")
+    topics_sp.add_argument("--type", dest="type_", default="CASE_RECORD",
+                           help="which type's topic vocabulary (default CASE_RECORD)")
+    topics_sp.add_argument("--namespace", help="namespace override (default: gateway corpus)")
+    topics_sp.add_argument("--format", choices=["tree", "json"], default="tree")
+
     read_sp = sub.add_parser("read", help="generic typed read (CASE-683) — every type "
                                           "kb-write.py can write is readable here, via GET /read/:type")
     read_sp.add_argument("type_", metavar="TYPE",
@@ -487,6 +531,18 @@ def main() -> None:
                 sys.stdout.write(json.dumps(payload, indent=2) + "\n")
             else:
                 sys.stdout.write(render_case(payload, view))
+            sys.exit(0)
+
+        elif args.mode == "topics":
+            payload = fetch_topics(args.type_, args.namespace)
+            if payload is None:
+                print(f"no topic vocabulary for {args.type_} on this instance "
+                      "(older gateway, or the type carries no topics field)", file=sys.stderr)
+                sys.exit(1)
+            if args.format == "json":
+                sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+            else:
+                sys.stdout.write(_format_topics(payload))
             sys.exit(0)
 
         elif args.mode == "search":

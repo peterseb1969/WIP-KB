@@ -98,9 +98,16 @@ thread intact instead of a duplicate filing.
    ```
 
    **On `topics`** — the subject-matter tags the KB's Topic facet navigates by,
-   drawn from the `KB_TOPIC` vocabulary (browse it as the Topic facet in KB
-   search; the hierarchy rolls up, so tagging a leaf also surfaces the case
-   under its parent). Pick 1–4 that describe what the case is *about*, which is
+   drawn from the `KB_TOPIC` vocabulary. **List it before you write:**
+
+   ```bash
+   kbc case-fetch.py topics          # the whole vocabulary, indented as its hierarchy
+   ```
+
+   The field is validated and an unknown value is REJECTED, so read the list
+   rather than inventing a tag — the vocabulary is smaller than the concepts you
+   might name for it. The hierarchy rolls up, so tagging a leaf also surfaces the
+   case under its parent. Pick 1–4 that describe what the case is *about*, which is
    not the same as which component it was filed against: a case about identity
    hashing filed on `document-store` wants `identity-hashing`, and that is
    exactly the tag no facet can infer for you.
