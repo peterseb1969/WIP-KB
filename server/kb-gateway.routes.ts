@@ -283,7 +283,14 @@ async function findContentTwin(
 // This is the loss that was blamed on migrate-then-PATCH and went undiagnosed
 // through two sessions. Neither of those drops anything — measured across 103
 // papers, every data key preserved. The mirror upsert did, quietly, on every run.
-const CURATED_FIELDS = ['topics']
+// `repo_id` belongs here for a different reason than `topics`, and it is the more
+// dangerous of the two. It is NOT re-derived — genericWrite stamps content_hash and
+// path_tail, but repo_id can only come from the writer. So a writer that predates it
+// STRIPS it, the document drops out of the (repo_id, path_tail) search key, every
+// later write falls back to the legacy key, and the state is self-perpetuating:
+// the field that would repair it is exactly the one no longer present. Measured on
+// prod-test — one write from a repo_id-less writer took it off PAPER-1.
+const CURATED_FIELDS = ['topics', 'repo_id']
 
 function carryCurated(data: AnyObj, existing: AnyObj | undefined): AnyObj {
   if (!existing?.data) return data
