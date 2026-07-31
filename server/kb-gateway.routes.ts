@@ -279,6 +279,54 @@ async function mintNumberedDoc(opts: {
   const synCfg = { prefix: synonymPrefix, synonymTemplate, numberField }
   const scope = scopeField ? { field: scopeField, value: data[scopeField] } : undefined
 
+  // An explicit number is a CORRECTION, not an allocation.
+  //
+  // Without this branch the gateway decides the number solely from search_key, on
+  // both paths — match reuses the FOUND document's number, no-match allocates a
+  // fresh one — so a caller-supplied number is discarded either way. That is what
+  // makes an address change impossible: move a paper between repositories and the
+  // probe misses, so naming the document you meant to update gets you a NEW one
+  // instead. The corpus grows a duplicate at precisely the moment someone was
+  // trying to correct it.
+  //
+  // The platform has no such difficulty. identity_fields is [numberField], so a
+  // write carrying that number is an ordinary identity upsert — same hash, new
+  // version, same document_id, existing Registry synonym still resolving. The
+  // gateway was the only thing in the way.
+  //
+  // Only an EXISTING number is honoured. Accepting any number would let a caller
+  // invent one and leave a gap behind it, which is the "never reason about the
+  // next number" rule the mint exists to enforce: allocation stays the gateway's
+  // job, correction becomes the caller's.
+  //
+  // The content-twin guard below is deliberately NOT applied here. It defends the
+  // allocation of a new identity; re-writing content to the address it already
+  // occupies is an upsert, not a fork.
+  const explicit = data[numberField]
+  if (explicit !== undefined && explicit !== null && explicit !== '') {
+    const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: templateValue, page: 1, page_size: 1,
+        filters: [{ field: `data.${numberField}`, operator: 'eq', value: explicit }] })
+    const target = (q.items || [])[0]
+    if (!target) {
+      throw new WipError(422,
+        `${templateValue} refused: ${numberField}=${JSON.stringify(explicit)} does not exist. `
+        + `An explicit ${numberField} UPDATES the document that already carries it — it cannot allocate a `
+        + `new one, because allocation is the gateway's job and a caller-chosen number leaves a gap. `
+        + `Omit ${numberField} to have the next one assigned.`)
+    }
+    const d = await wipReq('POST', '/api/document-store/documents', key, [{
+      template_id: tid, namespace: ns, created_by: 'kb-gateway', data, ...meta,
+    }])
+    const r = (d.results || [])[0] || {}
+    if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
+      throw new WipError(502, `${templateValue} update at ${numberField}=${explicit} failed: ${r.error || JSON.stringify(r)}`)
+    return {
+      number: Number(explicit), synonym: buildSynonym(synCfg, Number(explicit), data),
+      document_id: r.document_id, result: r.status,
+    }
+  }
+
   if (searchFilters.length) {
     const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
       { template_id: templateValue, filters: searchFilters, page: 1, page_size: 1 })
