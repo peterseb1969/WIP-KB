@@ -621,7 +621,15 @@ def main() -> None:
                 sys.stdout.write(json.dumps(payload, indent=2) + "\n")
             else:
                 rels = payload.get("relationships")
-                items = rels.get("items") or rels.get("relationships") if isinstance(rels, dict) else rels
+                # A present-but-empty items list must stay []: `or` treats it as
+                # missing and falls through, and the envelope-wrapping guard below
+                # then renders the pagination envelope itself as one "? <- ?" row.
+                if isinstance(rels, dict):
+                    items = rels.get("items")
+                    if items is None:
+                        items = rels.get("relationships")
+                else:
+                    items = rels
                 items = items if isinstance(items, list) else ([rels] if rels else [])
                 doc_id = payload.get("document_id", "")
                 sys.stdout.write(f"{args.handle} ({doc_id}) — {len(items)} edge(s)\n")
