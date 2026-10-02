@@ -16,6 +16,7 @@
     { "value": "DnD",          "label": "DnD",          "sort_order": 100, "aliases": ["dnd", "dnd-compendium"] },
     { "value": "Validator",    "label": "Validator",    "sort_order": 110, "aliases": ["validator", "wip-val"] },
     { "value": "all-apps",     "label": "all-apps",     "sort_order": 120 },
-    { "value": "FR-YAC",       "label": "FR-YAC",       "sort_order": 130 }
+    { "value": "FR-YAC",       "label": "FR-YAC",       "sort_order": 130 },
+    { "value": "pbs-clintrial", "label": "pbs-clintrial", "sort_order": 140 }
   ]
 }
