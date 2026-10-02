@@ -3,6 +3,23 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-02 — Create a new knowledge domain from the CLI
+
+- **Added:** `kbc kb-namespace.py create <ns> [--description …]` and gateway
+  `POST /namespaces`: creates a namespace seeded with the full corpus model
+  (vocabularies, templates, edge types, write policies) plus a bootstrap record — the
+  same seeding BootstrapGate does, now reusable for any namespace name. Option two of
+  DECISION-1 (a project that wants its own walled-off domain). Runs with the caller's
+  key; an existing namespace answers 409 and is never re-seeded; the library namespace
+  is not touched. The WIP helpers and seeding functions take an optional key so the
+  gateway path never runs with the server's own key.
+- **Retry after a failure:** an existing but completely empty namespace (what a refused
+  or interrupted attempt leaves behind — the namespace is created first) is seeded
+  rather than refused, and a failed attempt's error says whether it left a namespace
+  behind, or that the refused key cannot see it. A partly seeded namespace still
+  answers 409. Found while testing: CASE-844 (registry admin checks never run) lets a
+  namespace-scoped key create the namespace before def-store refuses it.
+
 ## 2026-07-03 — `/types` discovers Library types for any caller
 
 - **Fixed:** `kb-write.py --list` (`GET /types`) omitted `LIBRARY_DOC`/`library` for a

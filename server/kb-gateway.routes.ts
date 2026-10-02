@@ -23,6 +23,7 @@
 //   browser-auth exemption is the manifest route line (CASE-439 pattern).
 import { createHash } from 'node:crypto'
 import { Router, type Request, type Response } from 'express'
+import { createCorpusNamespace } from './lib/bootstrap.js'
 
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
 // The gateway's default namespace is the KB corpus (cases, decisions, …).
@@ -1334,6 +1335,41 @@ router.get('/types', async (req, res) => {
     res.json({ namespace: namespaces[0], namespaces, total: types.length, types })
   } catch (e) {
     res.status(errStatus(e)).json({ error: (e as Error).message })
+  }
+})
+
+// POST /namespaces — create a new knowledge domain: a namespace seeded with the
+// full corpus model (vocabularies, templates, edge types, write policies) plus a
+// bootstrap record, exactly as BootstrapGate seeds one. Body {namespace,
+// description?}. Runs with the CALLER's key like every gateway route, so whether
+// the caller may create namespaces is WIP's decision, not ours. Never re-seeds:
+// an existing namespace with content answers 409 and is left untouched; an empty
+// one (a failed earlier attempt) is seeded. A failure says whether it left a
+// namespace behind. Library is not touched.
+router.post('/namespaces', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const b: AnyObj = req.body || {}
+  const ns = typeof b.namespace === 'string' ? b.namespace.trim() : ''
+  // A namespace prefix lands in URL paths and Postgres schema names; reject
+  // anything but a lowercase slug here rather than at the far end of a half-seed.
+  if (!/^[a-z][a-z0-9-]{0,62}$/.test(ns)) {
+    return res.status(400).json({ error: 'namespace must be a lowercase slug: a-z, 0-9, "-", starting with a letter' })
+  }
+  const steps: string[] = []
+  try {
+    const out = await createCorpusNamespace(ns, key,
+      typeof b.description === 'string' ? b.description : undefined,
+      (p) => { steps.push(p.detail) })
+    if (!out) {
+      return res.status(409).json({ error: `namespace '${ns}' already exists and has content — used as-is, not re-seeded` })
+    }
+    return res.status(201).json({ ...out, steps })
+  } catch (e) {
+    // wip-api errors carry the upstream status in their message ("WIP PUT …: 403 …").
+    const m = /: (\d{3}) /.exec((e as Error).message)
+    const status = m && Number(m[1]) >= 400 && Number(m[1]) < 500 ? Number(m[1]) : 502
+    return res.status(status).json({ error: (e as Error).message, namespace: ns, steps })
   }
 })
 

@@ -57,6 +57,8 @@ interface NamespacePlan {
    * deployment's own configured name is filled in here.
    */
   placeholders: Record<string, string>
+  /** Key every WIP call runs with; absent = the server's own key (BootstrapGate). */
+  apiKey?: string
 }
 
 /**
@@ -281,6 +283,104 @@ export async function runBootstrap(
   }
 }
 
+/** What a corpus-namespace creation produced, for the caller's report. */
+export interface CorpusCreated extends Created {
+  namespace: string
+  auditWritten: boolean
+  /** True when an existing but completely empty namespace was seeded (a retry). */
+  resumed: boolean
+}
+
+/** Does the namespace hold nothing at all — no terminologies, templates, terms or documents? */
+async function isEmptyNamespace(namespace: string, key: string): Promise<boolean> {
+  const stats = (await wipGet(`/api/registry/namespaces/${namespace}/stats`, key)) as {
+    entity_counts?: Record<string, number>
+  }
+  return Object.values(stats.entity_counts ?? {}).every((n) => n === 0)
+}
+
+/**
+ * Create and seed ONE new corpus namespace — a separate knowledge domain — from
+ * the corpus seed, with the caller's key (gateway `POST /namespaces`).
+ *
+ * Same seeding as BootstrapGate, so a domain created from the CLI is identical
+ * to one bootstrapped from the UI. Never touches the library namespace, and never
+ * re-seeds: an existing namespace with anything in it is reported, not modified
+ * (use-on-exists). Returns null in that case.
+ *
+ * One exception: an existing namespace that is completely EMPTY is seeded. That is
+ * what a failed earlier attempt leaves behind (the namespace is created first, so a
+ * refusal at any later step strands it), and with nothing in it there is nothing to
+ * overwrite. Without this, one failed attempt would make the name unusable.
+ */
+export async function createCorpusNamespace(
+  namespace: string,
+  key: string,
+  description: string | undefined,
+  onProgress: (p: BootstrapProgress) => void,
+): Promise<CorpusCreated | null> {
+  const exists = async () =>
+    ((await wipGet('/api/registry/namespaces', key)) as Array<{ prefix: string }>)
+      .some((n) => n.prefix === namespace)
+  const resumed = await exists()
+  if (resumed && !(await isEmptyNamespace(namespace, key))) return null
+
+  const startedAt = new Date().toISOString()
+  const created: Created = { templatesCreated: [], edgeTypesCreated: [], terminologiesCreated: [] }
+  let lastStep = 'start'
+  let lastStepId = ''
+  const track = (p: BootstrapProgress) => { lastStep = p.detail; lastStepId = p.step; onProgress(p) }
+  try {
+    await seedNamespace(
+      {
+        namespace,
+        seedDir: SEED_DIR,
+        nsCreate: { description: description || `${namespace} knowledge base (created via kb gateway)` },
+        writePolicies: true,
+        audit: true,
+        label: 'corpus',
+        placeholders: { CORPUS_NS: namespace },
+        apiKey: key,
+      },
+      track,
+      created,
+    )
+  } catch (err) {
+    // Say plainly whether the failure left a namespace behind, so the caller is not
+    // left guessing why the next attempt behaves differently. The upstream message
+    // is kept whole: the gateway reads the HTTP status out of it.
+    // A key refused partway may not be able to SEE the namespace its own earlier call
+    // created (no grant on it → hidden), so "not visible" must not be reported as
+    // "not created".
+    const msg = (err as Error).message
+    // Failing on the namespace step itself means the namespace call was refused:
+    // nothing was created (the normal shape for a caller without admin rights).
+    if (lastStepId === 'namespace' && !resumed) {
+      throw new Error(`creating '${namespace}' was refused — no namespace was created. Cause: ${msg}`)
+    }
+    let left = `no namespace '${namespace}' is visible to this key — it may still have been created before the refusal; an admin can check`
+    try {
+      if (await exists()) {
+        left = (await isEmptyNamespace(namespace, key))
+          ? `namespace '${namespace}' exists but is empty; re-running continues into it`
+          : `namespace '${namespace}' exists and is PARTLY seeded; clear or delete it before re-running`
+      }
+    } catch {
+      left = `could not check whether namespace '${namespace}' was left behind`
+    }
+    throw new Error(`seeding '${namespace}' failed at "${lastStep}" — ${left}. Cause: ${msg}`)
+  }
+  // Provenance is best-effort, as in runBootstrap: it must not fail a seed that succeeded.
+  let auditWritten = true
+  try {
+    await writeBootstrapRecord(namespace, { startedAt, ...created }, key)
+  } catch (err) {
+    auditWritten = false
+    onProgress({ step: 'audit', detail: `BOOTSTRAP_RECORD skipped (${(err as Error).message})`, done: false })
+  }
+  return { namespace, auditWritten, resumed, ...created }
+}
+
 /**
  * Seed a single namespace from its seed dir: namespace upsert → terminologies
  * (with terms) → ontology term-relations → templates → (optional) write-policies.
@@ -294,14 +394,14 @@ async function seedNamespace(
   onProgress: (p: BootstrapProgress) => void,
   created: Created,
 ): Promise<void> {
-  const { namespace, seedDir } = plan
+  const { namespace, seedDir, apiKey: key } = plan
   const progress = (step: string, detail: string) =>
     onProgress({ step, detail: `[${plan.label}] ${detail}`, done: false })
 
   // Step 1: Create namespace (idempotent upsert via PUT) with its config
   // (description, and for the library: isolation_mode + allowed_external_refs).
   progress('namespace', `Creating ${namespace} namespace...`)
-  await wipPut(`/api/registry/namespaces/${namespace}`, plan.nsCreate)
+  await wipPut(`/api/registry/namespaces/${namespace}`, plan.nsCreate, key)
 
   // Step 2: Load and create terminologies
   progress('terminologies', 'Loading seed data...')
@@ -323,7 +423,7 @@ async function seedNamespace(
     namespace,
     ...(t.mutable ? { mutable: true } : {}),
   }))
-  const termResult = (await wipPost('/api/def-store/terminologies', termBulk)) as {
+  const termResult = (await wipPost('/api/def-store/terminologies', termBulk, key)) as {
     results: Array<{ status: string; id: string; error?: string }>
   }
   assertBulkSuccess(termResult, `terminologies create [${plan.label}]`)
@@ -348,7 +448,7 @@ async function seedNamespace(
     if (!termId) continue
 
     progress('terms', `Creating ${terms.length} terms for ${termData.value}...`)
-    const termsResult = await wipPost(`/api/def-store/terminologies/${termId}/terms`, terms)
+    const termsResult = await wipPost(`/api/def-store/terminologies/${termId}/terms`, terms, key)
     assertBulkSuccess(termsResult, `terms for ${termData.value} [${plan.label}]`)
     totalTerms += terms.length
   }
@@ -373,6 +473,7 @@ async function seedNamespace(
     if (!terminologyId) continue
     const listed = (await wipGet(
       `/api/def-store/terminologies/${terminologyId}/terms?namespace=${namespace}&page_size=100`,
+      key,
     )) as { items?: Array<{ term_id: string; value: string }> }
     const idByValue = new Map((listed.items ?? []).map((t) => [t.value, t.term_id]))
 
@@ -403,6 +504,7 @@ async function seedNamespace(
     const relResult = await wipPost(
       `/api/def-store/ontology/term-relations?namespace=${namespace}`,
       allRelations,
+      key,
     )
     assertBulkSuccess(relResult, `ontology term-relations [${plan.label}]`)
   }
@@ -438,6 +540,7 @@ async function seedNamespace(
     const tmplResult = await wipPost(
       '/api/template-store/templates?on_conflict=validate',
       [template],
+      key,
     )
     assertBulkSuccess(tmplResult, `template ${data.value} [${plan.label}]`)
 
@@ -454,7 +557,7 @@ async function seedNamespace(
   // has no mint policies (LIBRARY_DOC is natural-upsert).
   if (plan.writePolicies) {
     progress('write-policies', 'Seeding WRITE_POLICY config docs...')
-    await writeWritePolicies(namespace, seedDir)
+    await writeWritePolicies(namespace, seedDir, key)
   }
 }
 
@@ -468,13 +571,14 @@ async function seedNamespace(
  * in place. Types absent here write by natural identity. No-op if the file is
  * absent (e.g. the library seed has no write-policies).
  */
-async function writeWritePolicies(namespace: string, seedDir: string): Promise<void> {
+async function writeWritePolicies(namespace: string, seedDir: string, key?: string): Promise<void> {
   const policiesPath = join(seedDir, 'write-policies.json')
   if (!existsSync(policiesPath)) return
   const policies: AnyObj[] = JSON.parse(readFileSync(policiesPath, 'utf-8'))
   if (!policies.length) return
   const tmpl = (await wipGet(
     `/api/template-store/templates/by-value/WRITE_POLICY?namespace=${namespace}`,
+    key,
   )) as { template_id: string; version: number }
   const docs = policies.map((p) => ({
     template_id: tmpl.template_id,
@@ -482,7 +586,7 @@ async function writeWritePolicies(namespace: string, seedDir: string): Promise<v
     namespace,
     data: p,
   }))
-  const result = await wipPost('/api/document-store/documents', docs)
+  const result = await wipPost('/api/document-store/documents', docs, key)
   assertBulkSuccess(result, 'WRITE_POLICY docs')
 }
 
@@ -508,6 +612,7 @@ async function writeBootstrapRecord(
     edgeTypesCreated: string[]
     terminologiesCreated: string[]
   },
+  key?: string,
 ): Promise<void> {
   // Resolve the bootstrap-record template_id (and version) first — by the
   // namespace-prefixed value the seed just created (BOOTSTRAP_RECORD_VALUE).
@@ -517,6 +622,7 @@ async function writeBootstrapRecord(
   // the version we just created, not "latest" from cache.
   const tmpl = (await wipGet(
     `/api/template-store/templates/by-value/${BOOTSTRAP_RECORD_VALUE}?namespace=${namespace}`,
+    key,
   )) as { template_id: string; version: number }
 
   const bootstrapId = `bootstrap-${meta.startedAt.replace(/[:.]/g, '-')}`
@@ -537,7 +643,7 @@ async function writeBootstrapRecord(
       terminologies_created: meta.terminologiesCreated,
     },
   }
-  const result = await wipPost('/api/document-store/documents', [doc])
+  const result = await wipPost('/api/document-store/documents', [doc], key)
   assertBulkSuccess(result, 'BOOTSTRAP_RECORD write')
 }
 

@@ -14,33 +14,36 @@
 const WIP_BASE_URL = process.env.WIP_BASE_URL || 'https://wip-kb.local'
 const WIP_API_KEY = process.env.WIP_API_KEY || ''
 
-function headers(): Record<string, string> {
+// `key` overrides the server's own key. The gateway passes the caller's key so a
+// namespace created from the CLI is created with the caller's authority, never
+// the server's; BootstrapGate passes none and keeps using the server key.
+function headers(key?: string): Record<string, string> {
   return {
     'Content-Type': 'application/json',
-    'X-API-Key': WIP_API_KEY,
+    'X-API-Key': key || WIP_API_KEY,
   }
 }
 
-export async function wipGet(path: string): Promise<unknown> {
-  const res = await fetch(`${WIP_BASE_URL}${path}`, { headers: headers() })
+export async function wipGet(path: string, key?: string): Promise<unknown> {
+  const res = await fetch(`${WIP_BASE_URL}${path}`, { headers: headers(key) })
   if (!res.ok) throw new Error(`WIP GET ${path}: ${res.status} ${res.statusText}`)
   return res.json()
 }
 
-export async function wipPost(path: string, body: unknown): Promise<unknown> {
+export async function wipPost(path: string, body: unknown, key?: string): Promise<unknown> {
   const res = await fetch(`${WIP_BASE_URL}${path}`, {
     method: 'POST',
-    headers: headers(),
+    headers: headers(key),
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`WIP POST ${path}: ${res.status} ${res.statusText}`)
   return res.json()
 }
 
-export async function wipPut(path: string, body: unknown): Promise<unknown> {
+export async function wipPut(path: string, body: unknown, key?: string): Promise<unknown> {
   const res = await fetch(`${WIP_BASE_URL}${path}`, {
     method: 'PUT',
-    headers: headers(),
+    headers: headers(key),
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`WIP PUT ${path}: ${res.status} ${res.statusText}`)

@@ -39,6 +39,13 @@ The gateway routes a write to its type's home namespace (a `LIBRARY_DOC` → `li
 Cross-namespace **relationships** are unsupported; Library→corpus links are plain
 **reference fields** (`LIBRARY_DOC.kb_refs`, resolved via `allowed_external_refs → kb`).
 
+**More knowledge domains (DECISION-1).** A namespace is a knowledge domain; a project
+inside a domain is a `KB_APP` term, not a namespace. A new domain is created from the
+CLI — `kbc kb-namespace.py create <ns>` → gateway `POST /namespaces` →
+`createCorpusNamespace()` — which seeds the corpus model exactly as BootstrapGate does,
+with the **caller's** key (WIP decides who may create namespaces), never re-seeds an
+existing namespace (409), and leaves the library alone.
+
 ## Pages & routes (`src/App.tsx`, `src/pages/`)
 
 | Route | Component | Notes |

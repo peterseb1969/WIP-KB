@@ -163,7 +163,7 @@ def _gw_url(base_url: str, path: str) -> str:
 
 
 def _request(base_url: str, key_file: Path, path: str,
-             method: str, body: dict | None) -> dict | None:
+             method: str, body: dict | None, timeout: float = 20) -> dict | None:
     """One gateway HTTP call. Returns parsed JSON, or None when the route is not
     present on this instance. Raises RuntimeError on transport / real HTTP error
     (so callers can fail over).
@@ -183,7 +183,7 @@ def _request(base_url: str, key_file: Path, path: str,
     req = urllib.request.Request(_gw_url(base_url, path), data=data,
                                  method=method, headers=headers)
     try:
-        resp = urllib.request.urlopen(req, context=_ssl_ctx(), timeout=20)
+        resp = urllib.request.urlopen(req, context=_ssl_ctx(), timeout=timeout)
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
@@ -229,11 +229,12 @@ def gw_get(path: str) -> dict | None:
     return None
 
 
-def gw_post(path: str, body: dict) -> dict:
+def gw_post(path: str, body: dict, timeout: float = 20) -> dict:
     """POST a gateway endpoint. A write lands on ONE authority — the primary
     target (local iff KB_PREFER_LOCAL, else the canonical remote) — with no
     failover, so a write is never double-applied across instances. Raises
-    RuntimeError on transport / HTTP error."""
+    RuntimeError on transport / HTTP error. `timeout` is for the rare long write
+    (seeding a whole namespace); everything else keeps the 20s default."""
     name, url, key = targets()[0]
-    result = _request(url, key, path, "POST", body)
+    result = _request(url, key, path, "POST", body, timeout)
     return result or {}

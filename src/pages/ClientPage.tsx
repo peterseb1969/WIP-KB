@@ -32,6 +32,7 @@ const FILE_ROLES: Record<string, Role> = {
   'install.sh': { role: 'Bootstrap — `curl | sh` materializes the bundle', extra: true },
   'kb_client_core.py': { role: 'Shared core — kb.json/API-key resolution + gateway transport (gw_get/gw_post, failover)' },
   'case-fetch.py': { role: 'Read — case (body + response thread) / journey / list / fireside / library / edges / flags / read <TYPE> (generic typed read) / search (full-text across kb + library) / topics (the topic vocabulary writes are validated against), all via the gateway' },
+  'kb-namespace.py': { role: 'Create a new knowledge domain — a namespace seeded with the full corpus model, via POST /namespaces' },
   'kb-write.py': { role: 'The write client — any doc type via POST /write/:type (file/dir/json sources, edges, patch, and git-stats via --git-repo)' },
   'case-workflow.md': { role: 'Playbook — authoritative case how-to (rendered below)', extra: true },
   'README.md': { role: 'Bundle readme', extra: true },
@@ -89,6 +90,7 @@ const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb/topics?type=&namespace=', 'the topic vocabulary a type\'s validated `topics` field draws from, as a hierarchy with aliases'],
   ['POST', 'kb/write/:type', 'THE write path — {data, edges[]} or {patch, match}. Routes to the type’s home namespace (LIBRARY_DOC → library)'],
   ['POST', 'kb/edges', 'attach an edge between two EXISTING docs — the sanctioned retry for a failed edge intent'],
+  ['POST', 'kb/namespaces', 'create a new knowledge domain — a namespace seeded with the full corpus model; 409 if it exists (never re-seeds)'],
 ]
 
 function Copyable({ text, label }: { text: string; label?: string }) {
