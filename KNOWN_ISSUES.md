@@ -5,6 +5,20 @@ re-investigate solved problems, "fix" intentional choices, or miss real gaps.
 
 ## Open / deferred
 
+### Term-valued identity fields hash the submitted spelling (CASE-847)
+**Status:** worked around in the gateway · **Severity:** medium (direct writers)
+WIP builds a document's identity from the text submitted, not from the term it
+resolves to, so aliases of one term create separate documents. The gateway's
+`canonicalTermIdentity()` rewrites term identity values to the canonical term value
+before every write, which covers all KB writes. Direct API/MCP writes are not
+covered until the platform decides (CASE-847).
+
+### Existing documents cannot take `app` until migrated
+**Status:** deferred · **Severity:** low
+`app` exists only on the new template versions; PATCH validates against a document's
+pinned version, so tagging existing documents needs `migrate_documents` to the new
+version first. Planned as its own backfill step.
+
 ### `kb_refs` cross-namespace references are not existence-validated
 **Status:** known (BE-YAC) · **Severity:** low
 A field with `array_item_type: reference` (e.g. `LIBRARY_DOC.kb_refs` → corpus docs)
