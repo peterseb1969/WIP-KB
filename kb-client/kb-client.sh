@@ -61,6 +61,12 @@ if [ -r "$KBJSON" ]; then
     _kbj_key="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_api_key_file",""))' "$KBJSON" 2>/dev/null || true)"
     [ -n "$_kbj_key" ] && KB_API_KEY_FILE="$_kbj_key"
   fi
+  # Optional: the knowledge domain (namespace) this repo works in. Absent = the
+  # instance's default corpus. An explicit KB_NAMESPACE in the env still wins.
+  if [ -z "${KB_NAMESPACE:-}" ]; then
+    _kbj_ns="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("namespace",""))' "$KBJSON" 2>/dev/null || true)"
+    [ -n "$_kbj_ns" ] && export KB_NAMESPACE="$_kbj_ns"
+  fi
 fi
 
 KB_APP_URL="${KB_APP_URL:-https://kb.internal}"

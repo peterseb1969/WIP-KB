@@ -314,12 +314,16 @@ def read_type(type_: str, filters: list[str], namespace: str | None,
     return gw_get(f"/read/{urllib.parse.quote(type_, safe='')}?" + urllib.parse.urlencode(params))
 
 
-def search_docs(q: str, type_: str | None, mode: str, limit: int) -> dict | None:
-    """GET /search — full-text search across the whole corpus (kb + library), the
-    content-search counterpart to the structured verbs (CASE-707)."""
+def search_docs(q: str, type_: str | None, mode: str, limit: int,
+                namespace: str | None = None) -> dict | None:
+    """GET /search — full-text search across a knowledge domain plus the library,
+    the content-search counterpart to the structured verbs (CASE-707). The domain is
+    `namespace`, else the client's configured one (KB_NAMESPACE / kb.json)."""
     params = {"q": q, "mode": mode, "limit": str(limit)}
     if type_:
         params["type"] = type_
+    if namespace:
+        params["namespace"] = namespace
     return gw_get("/search?" + urllib.parse.urlencode(params))
 
 
@@ -488,6 +492,8 @@ def main() -> None:
                            default="auto",
                            help="auto (default) falls back to substring when FTS finds nothing")
     search_sp.add_argument("--limit", type=int, default=25, help="max hits (default 25, cap 100)")
+    search_sp.add_argument("--namespace", help="knowledge domain to search (default: the "
+                                               "configured one); the library is always included")
     search_sp.add_argument("--format", choices=["table", "json"], default="table")
 
     topics_sp = sub.add_parser("topics", help="the KB_TOPIC vocabulary the `topics:` "
@@ -546,7 +552,7 @@ def main() -> None:
             sys.exit(0)
 
         elif args.mode == "search":
-            payload = search_docs(args.q, args.type_, args.mode_, args.limit)
+            payload = search_docs(args.q, args.type_, args.mode_, args.limit, args.namespace)
             if payload is None:
                 print("search unavailable on this instance (no /search route)", file=sys.stderr)
                 sys.exit(1)

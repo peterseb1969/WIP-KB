@@ -46,6 +46,15 @@ CLI — `kbc kb-namespace.py create <ns>` → gateway `POST /namespaces` →
 with the **caller's** key (WIP decides who may create namespaces), never re-seeds an
 existing namespace (409), and leaves the library alone.
 
+**Showing a domain.** The UI shows one corpus at a time, chosen in the URL path:
+`<base>ns/<namespace>/…` (no prefix = the server-configured corpus). `namespaces.ts`
+parses it at import, sets `CORPUS_NS`, and puts the prefix into the router basename,
+so every in-app link stays inside the domain without carrying it. The sidebar's
+**Knowledge base** switcher lists every namespace holding a corpus (found by its
+`WRITE_POLICY` template, not a config list) and switches with a full page load, so
+no cached data crosses domains. The CLI picks a domain with `KB_NAMESPACE` or the
+`namespace` key in `.claude/kb.json`; gateway `/search` honours `?namespace=`.
+
 ## Pages & routes (`src/App.tsx`, `src/pages/`)
 
 | Route | Component | Notes |

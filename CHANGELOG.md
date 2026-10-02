@@ -3,6 +3,21 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-02 — Choose the knowledge domain per request
+
+- **Added:** the UI shows any knowledge domain (KB namespace) via a URL prefix,
+  `/apps/kb/ns/<namespace>/…`; plain URLs keep showing the configured corpus. A
+  sidebar **Knowledge base** switcher lists the domains it finds (namespaces carrying
+  the KB's `WRITE_POLICY` template) and appears only when there is more than one.
+  Links stay inside the chosen domain; switching is a full page load.
+- **Added:** `kbc case-fetch.py search --namespace <ns>`, and an optional `namespace`
+  key in `.claude/kb.json` that sets the CLI's domain (env `KB_NAMESPACE` still wins).
+- **Fixed:** gateway `/search` ignored `?namespace=` and always searched the configured
+  corpus, so a client pointed at another domain silently searched the default one.
+- **Fixed:** namespaces containing a hyphen were silently dropped from search (gateway)
+  and refused as "invalid namespace" (UI reporting reads): both guards allowed only
+  `[a-z0-9_]`. They now allow a lowercase slug with hyphens, and still never a quote.
+
 ## 2026-10-02 — Create a new knowledge domain from the CLI
 
 - **Added:** `kbc kb-namespace.py create <ns> [--description …]` and gateway

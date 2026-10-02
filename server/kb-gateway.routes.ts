@@ -1482,9 +1482,14 @@ router.get('/topics', async (req, res) => {
 // per-namespace catch, because a namespace with no FTS data yet must not sink the
 // whole search.
 
-// Namespaces reach SQL as identifiers; they come from env, not callers, but are
-// validated anyway. Document ids are interpolated into IN-lists — guard likewise.
+// Template stems reach SQL as identifiers. Document ids are interpolated into
+// IN-lists — guard likewise.
 const SQL_NAME_RE = /^[a-z0-9_]+$/
+// Namespaces reach SQL inside quotes (a '…' literal and a "…" schema identifier)
+// and the search domain comes from the CALLER, so the shape is enforced: a
+// namespace slug, hyphens included (DECISION-1 domains like `dev-proj-a`), and
+// never a quote.
+const NS_NAME_RE = /^[a-z][a-z0-9_-]*$/
 const SQL_ID_RE = /^[0-9a-f][0-9a-f-]{15,}$/i
 
 // FTS hits carry the template value but NO title, and a title is what makes a
@@ -1536,7 +1541,11 @@ router.get('/search', async (req, res) => {
   const mode = ['auto', 'fts', 'substring'].includes(raw) ? raw : 'auto'
   const typeFilter = req.query.type ? String(req.query.type).toUpperCase() : null
   const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100)
-  const namespaces = [...new Set([NS_DEFAULT, NS_LIBRARY])].filter((n) => SQL_NAME_RE.test(n))
+  // The requested knowledge domain plus the library. ?namespace= selects the domain
+  // as on every other route; it used to be ignored here, so a client pointed at
+  // another domain silently searched the default one.
+  const corpus = req.query.namespace ? String(req.query.namespace) : NS_DEFAULT
+  const namespaces = [...new Set([corpus, NS_LIBRARY])].filter((n) => NS_NAME_RE.test(n))
 
   const perNs = await Promise.all(
     namespaces.map(async (ns) => {

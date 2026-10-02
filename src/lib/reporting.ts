@@ -91,9 +91,11 @@ export interface KbSummary {
   caseStats: { open: number; responded: number }
 }
 
-// Namespaces come from app config (NAMESPACES), never user input — but they are
-// interpolated into SQL identifiers, so validate the shape defensively.
-const NS_RE = /^[a-z0-9_]+$/
+// Namespaces are interpolated into SQL, always inside quotes ('…' literals and
+// "…" schema identifiers). The shown domain can come from the URL (DECISION-1), so
+// the shape is enforced: a namespace slug, hyphens included (`dev-proj-a`), and
+// never a quote.
+const NS_RE = /^[a-z][a-z0-9_-]*$/
 
 // Reporting retains soft-deleted documents as rows (the kb namespace runs
 // deletion_mode: retain), flagged with the platform lifecycle column

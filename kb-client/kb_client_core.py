@@ -53,6 +53,10 @@ def _load_kbjson_into_env() -> None:
         os.environ["KB_BASE_URL"] = cfg["kb_app_url"]
     if cfg.get("kb_api_key_file") and not os.environ.get("KB_API_KEY_FILE"):
         os.environ["KB_API_KEY_FILE"] = cfg["kb_api_key_file"]
+    # Optional: the knowledge domain this repo works in (DECISION-1). Becomes the
+    # client's namespace exactly as if KB_NAMESPACE had been set; env still wins.
+    if cfg.get("namespace") and not os.environ.get("KB_NAMESPACE"):
+        os.environ["KB_NAMESPACE"] = cfg["namespace"]
 
 
 _load_kbjson_into_env()

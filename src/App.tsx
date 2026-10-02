@@ -7,13 +7,12 @@ import SearchPage from './pages/SearchPage'
 import ClientPage from './pages/ClientPage'
 import SettingsPage from './pages/SettingsPage'
 import AskBar from './components/AskBar'
-
-const BASENAME = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
+import { ROUTER_BASENAME } from './lib/namespaces'
 
 export default function App() {
   return (
     <BootstrapGate>
-      <BrowserRouter basename={BASENAME}>
+      <BrowserRouter basename={ROUTER_BASENAME}>
         <Layout>
           <Routes>
             <Route path="/" element={<HomePage />} />
