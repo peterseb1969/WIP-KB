@@ -16,10 +16,15 @@ Two schema steps, both idempotent:
    what this script rebuilds, and versioning it would codify the drift, so it
    aborts. Templates already carrying `app` are skipped.
 
-   `app` is also added to reporting.cross_version_view.columns, MERGED into the
-   columns already declared there: that declaration is what the entity view is
-   generated from, and assigning it once un-projected `topics` on canonical
-   (see repair-document-cross-version-view.py).
+   `app` and `app_term_id` (the resolved term, which project filtering compares)
+   are also added to reporting.cross_version_view.columns, MERGED into the columns
+   already declared there: that declaration is what the entity view is generated
+   from — a column absent from it is absent from the view even when every new
+   version's table has it — and assigning it once un-projected `topics` on
+   canonical (see repair-document-cross-version-view.py). A template that already
+   has `app` but lacks either column gets the declaration updated IN PLACE
+   (PUT, no new version: a template upsert treats a reporting-only change as
+   'unchanged') and then a batch sync, which is what rebuilds the view.
 
 The OLD versions stay active. Writes resolve to the latest active version, so new
 documents land on the new one anyway, and deactivating a doc-bearing version has
@@ -98,11 +103,14 @@ for value in ["DESIGN_DECISION", "LESSON", "FIRESIDE", "SESSION", "YAC_MEMORY", 
     cur = get_template(value)
     if cur is None:
         sys.exit(f"ABORT {value}: template not found in {NS}")
-    if any(f["name"] == "app" for f in cur["fields"]):
-        print(f"SKIP {value}: app already present (v{cur['version']})")
+    has_app = any(f["name"] == "app" for f in cur["fields"])
+    declared = ((cur.get("reporting") or {}).get("cross_version_view") or {}).get("columns") or {}
+    if has_app and {"app", "app_term_id"} <= set(declared):
+        print(f"SKIP {value}: app present and projected (v{cur['version']})")
         continue
     fields = [{k: f[k] for k in FIELD_KEYS if f.get(k) is not None} for f in cur["fields"]]
-    fields.append(APP_FIELD)
+    if not has_app:
+        fields.append(APP_FIELD)
     payload = {
         "value": cur["value"], "label": cur["label"], "namespace": NS,
         "description": cur.get("description") or "",
@@ -116,9 +124,20 @@ for value in ["DESIGN_DECISION", "LESSON", "FIRESIDE", "SESSION", "YAC_MEMORY", 
     rep["sync_enabled"] = True
     cvv = dict(rep.get("cross_version_view") or {})
     cvv["versions"] = cvv.get("versions") or "all"
-    cvv["columns"] = {**(cvv.get("columns") or {}), "app": {}}
+    cvv["columns"] = {**(cvv.get("columns") or {}), "app": {}, "app_term_id": {}}
     rep["cross_version_view"] = cvv
     payload["reporting"] = rep
+    if has_app:
+        # Declaration only: in-place update, then a batch sync to rebuild the view.
+        item = req("PUT", f"/api/template-store/templates?namespace={NS}",
+                   [{"template_id": cur["template_id"], "reporting": rep}])["results"][0]
+        if item.get("status") != "updated" or item.get("is_new_version"):
+            sys.exit(f"ABORT {value}: reporting update status={item.get('status')} "
+                     f"new_version={item.get('is_new_version')} error={item.get('error')}")
+        job = req("POST", f"/api/reporting-sync/sync/batch/{value}?namespace={NS}")
+        print(f"OK {value}: v{cur['version']} reporting declaration -> {sorted(cvv['columns'])} "
+              f"(in place); view rebuild job {job.get('job_id')}")
+        continue
     item = req("POST", "/api/template-store/templates", [payload])["results"][0]
     if item["status"] != "updated":
         sys.exit(f"ABORT {value}: status={item['status']} error={item.get('error')} "
@@ -126,7 +145,7 @@ for value in ["DESIGN_DECISION", "LESSON", "FIRESIDE", "SESSION", "YAC_MEMORY", 
     d = item.get("details") or {}
     print(f"OK {value}: v{cur['version']} -> v{item.get('version')}  "
           f"added_optional={d.get('added_optional')} cvv_columns={sorted(cvv['columns'])}")
-    if (d.get("added_optional") != ["app"] or d.get("removed") or d.get("changed_type")
+    if ((d.get("added_optional") or []) != ["app"] or d.get("removed") or d.get("changed_type")
             or d.get("made_required") or d.get("modified_existing") or d.get("added_required")):
-        sys.exit(f"ABORT {value}: diff is more than added_optional[app]: {json.dumps(d)[:400]}")
+        sys.exit(f"ABORT {value}: field diff is not exactly added_optional=['app']: {json.dumps(d)[:400]}")
 print("DONE")

@@ -37,7 +37,7 @@ import subprocess
 import sys
 import urllib.parse
 
-from kb_client_core import DEV_ROOT, gw_get, gw_post
+from kb_client_core import DEV_ROOT, PROJECT, gw_get, gw_post
 
 
 def _coerce(v: str) -> object:
@@ -374,6 +374,8 @@ def cmd_memory(args: argparse.Namespace) -> int:
             rc = rc or 1
             continue
         req: dict = {"data": data}
+        if PROJECT:
+            req["project"] = PROJECT
         if edges:
             req["edges"] = edges
         if md:
@@ -448,8 +450,12 @@ def build_records(type_: str, args: argparse.Namespace) -> tuple[dict, list]:
 
 
 def _post_write(type_: str, data: dict, edges: list, metadata: dict | None, fmt: str) -> int:
-    """The single write call: { data, edges?, metadata? } → POST /write/:type."""
+    """The single write call: { data, edges?, metadata?, project? } → POST /write/:type.
+    `project` (kb.json / KB_PROJECT) lets the gateway tag the document with `app`
+    when its type has that field and the document names none."""
     body: dict = {"data": data}
+    if PROJECT:
+        body["project"] = PROJECT
     if edges:
         body["edges"] = edges
     if metadata:

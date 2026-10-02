@@ -67,6 +67,11 @@ if [ -r "$KBJSON" ]; then
     _kbj_ns="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("namespace",""))' "$KBJSON" 2>/dev/null || true)"
     [ -n "$_kbj_ns" ] && export KB_NAMESPACE="$_kbj_ns"
   fi
+  # Optional: the project (a KB_APP term) this repo is; writes tag documents with it.
+  if [ -z "${KB_PROJECT:-}" ]; then
+    _kbj_proj="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("project",""))' "$KBJSON" 2>/dev/null || true)"
+    [ -n "$_kbj_proj" ] && export KB_PROJECT="$_kbj_proj"
+  fi
 fi
 
 KB_APP_URL="${KB_APP_URL:-https://kb.internal}"

@@ -3,6 +3,22 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-02 — Find and tag a project's documents
+
+- **Added:** `/read/:type` filters on a term field match the resolved term, not the
+  stored spelling: `app=ClinTrial`, `clintrial`, `ct` and `clintrial-explorer` all
+  find the same 22 cases on localhost (spelling-only matching found 11). A value
+  naming no term keeps the old spelling match.
+- **Added:** gateway `/search?app=` and `kbc case-fetch.py search --project <app>` —
+  only documents tagged with that project (compared on `app_term_id`).
+- **Added:** optional `project` key in `.claude/kb.json` (`KB_PROJECT`): every write
+  sends it, and the gateway sets `app` when the type has the field and the document
+  names none. An explicit `app` wins.
+- **Fixed (migration script):** the reporting view must declare `app_term_id` as well
+  as `app`, or project filtering cannot see the resolved term on the new versions.
+  A reporting-only change is not a new template version, so already-migrated
+  templates get the declaration updated in place plus a batch sync to rebuild views.
+
 ## 2026-10-02 — Projects inside a domain: `PROJECT` and the `app` field
 
 - **Added (data model, approved):** `PROJECT` template — one profile per project,

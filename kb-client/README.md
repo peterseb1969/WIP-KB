@@ -74,7 +74,10 @@ Env:
   CASE-471). The runner and `kb_client_core.py` derive `KB_BASE_URL` +
   `KB_API_KEY_FILE` from it when unset, so a hostname cutover is one edit there.
   An optional `namespace` key picks the knowledge domain this repo works in (it
-  becomes `KB_NAMESPACE`); absent = the instance's default corpus.
+  becomes `KB_NAMESPACE`); absent = the instance's default corpus. An optional
+  `project` key (a `KB_APP` term, becomes `KB_PROJECT`) is sent with every write:
+  the gateway tags the document with `app` when its type has that field and the
+  document names none. `search --project <app>` scopes a search to one project.
 - `KB_BASE_URL` — the canonical instance (default `https://kb.internal`).
 - `KB_API_KEY_FILE` — its key file (default `~/.wip-deploy/kb/secrets/api-key`).
   **One var across the whole bundle** (CASE-444); `KB_KEY_FILE` is accepted as a

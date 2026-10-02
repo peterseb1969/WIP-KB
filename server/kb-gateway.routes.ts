@@ -121,6 +121,24 @@ async function templateId(value: string, ns: string, key: string): Promise<strin
   return t.id || t.template_id
 }
 
+// A field's live definition. Templates gain versions at runtime (an optional field
+// added by a migration), so a field missing from the cached template may exist in
+// the live one: refetch once before concluding the type lacks it.
+async function liveField(type: string, ns: string, key: string, name: string): Promise<AnyObj | undefined> {
+  const find = (t: AnyObj) => ((t.fields || []) as AnyObj[]).find((f) => f.name === name)
+  const hit = find(await getTemplate(type, ns, key))
+  if (hit) return hit
+  tplCache.delete(`${ns}/${type}`)
+  return find(await getTemplate(type, ns, key))
+}
+
+// The term a value names in a terminology — by value or any alias, using
+// def-store's own matching rules. null when it names none.
+async function resolveTerm(terminologyId: string, value: string, key: string): Promise<AnyObj | null> {
+  const r = await wipReq('POST', '/api/def-store/validate', key, { terminology_id: terminologyId, value })
+  return r.valid && r.matched_term ? (r.matched_term as AnyObj) : null
+}
+
 // Type → home namespace (CASE-518). A doc type lives in exactly one configured
 // namespace; the gateway routes a write there so a producer just says "write a
 // LIBRARY_DOC" without knowing namespaces. Library-owned types (LIBRARY_DOC, …)
@@ -570,8 +588,7 @@ async function canonicalTermIdentity(tpl: AnyObj, data: AnyObj, key: string): Pr
     const f = ((tpl.fields || []) as AnyObj[]).find((x) => x.name === name)
     const v = data[name]
     if (!f || f.type !== 'term' || !f.terminology_ref || typeof v !== 'string') continue
-    const r = await wipReq('POST', '/api/def-store/validate', key, { terminology_id: f.terminology_ref, value: v })
-    const canonical = r.valid ? r.matched_term?.value : undefined
+    const canonical = (await resolveTerm(f.terminology_ref, v, key))?.value
     if (typeof canonical === 'string' && canonical !== v) out = { ...out, [name]: canonical }
   }
   return out
@@ -772,13 +789,21 @@ router.post('/write/:type', async (req, res) => {
   }
 
   // --- create / upsert mode ---
-  const data: AnyObj = b.data || {}
+  let data: AnyObj = b.data || {}
   if (typeof data !== 'object' || Array.isArray(data) || !Object.keys(data).length) {
     res.status(422).json({ error: 'data (non-empty object) is required' })
     return
   }
   const edges: AnyObj[] = Array.isArray(b.edges) ? b.edges : []
   try {
+    // A writer's configured project (kb.json `project`) tags the document with
+    // `app` when its type has the field and the document names none — so a repo's
+    // sessions, lessons and memories become that project's memory without every
+    // writer remembering to tag. An explicit `app` always wins.
+    const project = typeof b.project === 'string' ? b.project.trim() : ''
+    if (project && data.app === undefined && (await liveField(type, ns, key, 'app'))) {
+      data = { ...data, app: project }
+    }
     const w = await genericWrite(type, data, { metadata: b.metadata, ns, key })
     const edgeResults = edges.length ? await applyEdges(w.document_id, edges, ns, key) : []
     res.json({ type, ...w, ...(edges.length ? { edges: edgeResults } : {}) })
@@ -823,6 +848,19 @@ router.get('/read/:type', async (req, res) => {
   for (const [k, v] of Object.entries(req.query)) {
     if (READ_RESERVED.has(k) || v == null) continue
     const s = String(v).trim()
+    // A term field matches the TERM, not a spelling: stored values keep whatever
+    // alias the writer used (kb / KB / wip-kb are one KB_APP term), so an eq on
+    // data.<field> silently misses every other spelling. A value that names no term
+    // falls through to the spelling match below, so nothing that matched before
+    // stops matching.
+    const tf = await liveField(type, ns, key, k)
+    if (tf?.type === 'term' && tf.terminology_ref && s) {
+      const term = await resolveTerm(tf.terminology_ref, s, key)
+      if (term?.term_id) {
+        filters.push({ field: 'term_references.term_id', operator: 'eq', value: term.term_id })
+        continue
+      }
+    }
     // Query params always arrive as strings, but a mint type's <type>_number identity
     // field is stored as a JSON number — an eq against the string form can never match,
     // which silently made every numeric identity field unfilterable. Match BOTH
@@ -1553,7 +1591,44 @@ async function titlesForHits(ns: string, hits: AnyObj[], key: string): Promise<M
   return out
 }
 
-// GET /search?q=&mode=auto|fts|substring&type=&limit=
+// The hits whose document is tagged with the project term `termId`, via ONE
+// reporting query per namespace over the matched types that carry `app` (its
+// resolved term lands in `app_term_id`). Types without the column cannot belong to
+// a project and drop out — so a project-scoped search never shows library docs.
+async function hitsInProject(ns: string, hits: AnyObj[], termId: string, key: string): Promise<AnyObj[]> {
+  const byStem = new Map<string, string[]>()
+  for (const h of hits) {
+    const stem = String(h.value ?? '').toLowerCase()
+    const id = String(h.id ?? '')
+    if (!SQL_NAME_RE.test(stem) || !SQL_ID_RE.test(id)) continue
+    byStem.set(stem, [...(byStem.get(stem) ?? []), id])
+  }
+  if (byStem.size === 0) return []
+  const stems = [...byStem.keys()]
+  const probe = await wipReq('POST', '/api/reporting-sync/query', key, {
+    namespace: ns,
+    sql:
+      `SELECT table_name FROM information_schema.columns WHERE table_schema = '${ns}' ` +
+      `AND column_name = 'app_term_id' AND table_name IN (${stems.map((s) => `'doc_${s}'`).join(',')})`,
+    max_rows: 200,
+  })
+  const tagged = new Set((probe.rows ?? []).map((r: AnyObj) => String(r.table_name)))
+  const parts = stems
+    .filter((s) => tagged.has(`doc_${s}`))
+    .map(
+      (s) =>
+        `SELECT document_id FROM "${ns}"."doc_${s}" WHERE app_term_id = '${termId}' ` +
+        `AND document_id IN (${(byStem.get(s) as string[]).map((i) => `'${i}'`).join(',')})`,
+    )
+  if (parts.length === 0) return []
+  const d = await wipReq('POST', '/api/reporting-sync/query', key, {
+    namespace: ns, sql: parts.join('\nUNION ALL\n'), max_rows: 2000,
+  })
+  const keep = new Set((d.rows ?? []).map((r: AnyObj) => String(r.document_id)))
+  return hits.filter((h) => keep.has(String(h.id)))
+}
+
+// GET /search?q=&mode=auto|fts|substring&type=&limit=&app=
 router.get('/search', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
@@ -1568,6 +1643,22 @@ router.get('/search', async (req, res) => {
   // another domain silently searched the default one.
   const corpus = req.query.namespace ? String(req.query.namespace) : NS_DEFAULT
   const namespaces = [...new Set([corpus, NS_LIBRARY])].filter((n) => NS_NAME_RE.test(n))
+  // ?app= scopes the search to one project: the KB_APP term it names (by value or
+  // any alias) in this domain. A hit stays only if its document is tagged with that
+  // TERM — compared on the resolved term id, so every spelling a writer used counts.
+  const appQ = req.query.app ? String(req.query.app).trim() : ''
+  let appTermId: string | null = null
+  if (appQ) {
+    try {
+      const tm = await wipReq('GET', `/api/def-store/terminologies/by-value/KB_APP?namespace=${encodeURIComponent(corpus)}`, key)
+      appTermId = (await resolveTerm(tm.terminology_id, appQ, key))?.term_id ?? null
+    } catch {
+      appTermId = null
+    }
+    if (!appTermId || !SQL_ID_RE.test(appTermId)) {
+      return res.status(400).json({ error: `app '${appQ}' names no KB_APP term in ${corpus}` })
+    }
+  }
 
   const perNs = await Promise.all(
     namespaces.map(async (ns) => {
@@ -1586,12 +1677,13 @@ router.get('/search', async (req, res) => {
         const hits: AnyObj[] = Object.values(r.results ?? {}).flatMap(
           (b) => ((b as AnyObj).items as AnyObj[]) ?? [],
         )
-        const titles = await titlesForHits(ns, hits, key)
+        const kept = appTermId ? await hitsInProject(ns, hits, appTermId, key) : hits
+        const titles = await titlesForHits(ns, kept, key)
         return {
           // null (not false) when the platform predates the signal — absence of
           // evidence, which must not be reported as a matched filter (CASE-811).
           unmatched: r.unmatched_template === undefined ? null : r.unmatched_template != null,
-          items: hits.map((h) => ({
+          items: kept.map((h) => ({
             document_id: h.id,
             template_value: h.value ?? null,
             namespace: ns,
@@ -1621,7 +1713,7 @@ router.get('/search', async (req, res) => {
   // Report the cap rather than silently truncating: the per-namespace page_size
   // above is itself a window, so `truncated` means "there is more", not a total.
   res.json({
-    query: q, mode, namespaces, type: typeFilter,
+    query: q, mode, namespaces, type: typeFilter, app: appQ || null,
     // Echoes the requested type when it matched no reporting table in any
     // namespace searched — so a caller can tell a bad type name from a genuine
     // zero-result instead of reading silence as an answer (CASE-811).

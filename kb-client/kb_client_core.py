@@ -57,6 +57,10 @@ def _load_kbjson_into_env() -> None:
     # client's namespace exactly as if KB_NAMESPACE had been set; env still wins.
     if cfg.get("namespace") and not os.environ.get("KB_NAMESPACE"):
         os.environ["KB_NAMESPACE"] = cfg["namespace"]
+    # Optional: the project (a KB_APP term) this repo is. Writes send it so the
+    # gateway tags documents whose type has an `app` field; env still wins.
+    if cfg.get("project") and not os.environ.get("KB_PROJECT"):
+        os.environ["KB_PROJECT"] = cfg["project"]
 
 
 _load_kbjson_into_env()
@@ -109,6 +113,8 @@ NAMESPACE = os.environ.get("KB_NAMESPACE", "kb")
 # Whether the caller CHOSE that namespace, as opposed to inheriting the default.
 # The distinction matters only for cross-namespace endpoints — see _gw_url.
 NAMESPACE_EXPLICIT = "KB_NAMESPACE" in os.environ
+# The project this repo is (kb.json `project` / KB_PROJECT), or "" for none.
+PROJECT = os.environ.get("KB_PROJECT", "").strip()
 GW_BASE_PATH = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")  # KB gateway mount
 PREFER_LOCAL = os.environ.get("KB_PREFER_LOCAL") == "1"
 VERIFY_TLS = os.environ.get("KB_VERIFY_TLS", "false").lower() == "true"
