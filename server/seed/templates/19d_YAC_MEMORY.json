@@ -14,6 +14,7 @@
     { "name": "memory_type",    "label": "Memory Type",     "type": "term",   "mandatory": true,  "reference_type": "term", "terminology_ref": "KB_MEMORY_TYPE", "description": "user | feedback | project | reference, normalized from nested metadata.type or top-level type." },
     { "name": "origin_session", "label": "Origin Session",  "type": "string", "mandatory": false, "description": "The frontmatter originSessionId (the Claude session that first wrote the memory). Provenance, NOT identity." },
     { "name": "session_id",     "label": "Writing Session", "type": "string", "mandatory": false, "description": "The YAC session_id that last mirrored this memory to the KB (e.g. APP-KB-YYYYMMDD-HHMMSS). Provenance, NOT identity." },
-    { "name": "repo",           "label": "Repo",            "type": "string", "mandatory": false, "description": "The repo/project the memory belongs to (memory is project-scoped via the projects/<proj>/ path). Optional." }
+    { "name": "repo",           "label": "Repo",            "type": "string", "mandatory": false, "description": "The repo/project the memory belongs to (memory is project-scoped via the projects/<proj>/ path). Optional." },
+    { "name": "app",         "label": "App",         "type": "term",    "mandatory": false, "reference_type": "term", "terminology_ref": "KB_APP" }
   ]
 }

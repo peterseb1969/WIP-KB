@@ -12,6 +12,7 @@
     { "name": "ended_at",       "label": "Ended At",       "type": "datetime", "mandatory": false, "description": "Set when /report session-end or /wake's auto-close closes the session." },
     { "name": "continues_from", "label": "Continues From", "type": "string",   "mandatory": false, "description": "Prior session_id if this session was reached via /wake. Materialized as a CONTINUES_FROM edge by add-to-kb.py at mirror time." },
     { "name": "status",         "label": "Status",         "type": "term",     "mandatory": true,  "reference_type": "term", "terminology_ref": "SESSION_STATUS" },
-    { "name": "body",           "label": "Body",           "type": "string",   "mandatory": true,  "full_text_indexed": true,  "description": "Merged content of all *.md files in reports/<session-id>/ with session.md first then the rest alphabetically; each prefixed with '## <filename>' (CASE-389 §E)." }
+    { "name": "body",           "label": "Body",           "type": "string",   "mandatory": true,  "full_text_indexed": true,  "description": "Merged content of all *.md files in reports/<session-id>/ with session.md first then the rest alphabetically; each prefixed with '## <filename>' (CASE-389 §E)." },
+    { "name": "app",         "label": "App",         "type": "term",    "mandatory": false, "reference_type": "term", "terminology_ref": "KB_APP" }
   ]
 }

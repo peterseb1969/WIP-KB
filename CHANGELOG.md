@@ -3,6 +3,22 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-02 — Projects inside a domain: `PROJECT` and the `app` field
+
+- **Added (data model, approved):** `PROJECT` template — one profile per project,
+  identity = its `KB_APP` term; title, scope (`body`), `repo_ids`, and an optional
+  `tooling` archive (zip/tar/gzip file, ≤100 MB) a user downloads and unpacks.
+- **Added:** optional `app` (`KB_APP` term) on `DESIGN_DECISION`, `LESSON`,
+  `FIRESIDE`, `SESSION`, `YAC_MEMORY` and `DOCUMENT` (`CASE_RECORD` already had it).
+  Applied to existing instances by `tools/add-project-and-app-field.py` (idempotent,
+  exact-diff checked, merges the reporting view columns, leaves old versions active);
+  the seed files carry the same fields. Existing documents stay on their old version
+  and cannot take `app` until migrated — a separate backfill step.
+- **Fixed (gateway):** a term in an identity field is written as the term's canonical
+  value. WIP hashes identity from the submitted spelling, so `ClinTrial`, `clintrial`
+  and `ct` — one term — created three `PROJECT` profiles. Platform question filed as
+  CASE-847.
+
 ## 2026-10-02 — Choose the knowledge domain per request
 
 - **Added:** the UI shows any knowledge domain (KB namespace) via a URL prefix,

@@ -1,0 +1,18 @@
+{
+  "value": "PROJECT",
+  "label": "Project",
+  "description": "One profile per project inside a knowledge domain (DECISION-1): what a project's Claude reads first. Identity is the project's KB_APP term — the term, not a spelling, so a rename is a label/alias change and documents keep resolving. Documents belong to a project through their optional `app` field. `tooling` is an optional archive of project-specific tooling a user downloads and unpacks. usage:reference (master data other documents point at by `app`).",
+  "usage": "reference",
+  "identity_fields": ["app"],
+  "fields": [
+    { "name": "app",         "label": "Project (App)", "type": "term",   "mandatory": true, "reference_type": "term", "terminology_ref": "KB_APP" },
+    { "name": "title",       "label": "Title",         "type": "string", "mandatory": true, "full_text_indexed": true },
+    { "name": "body",        "label": "Scope",         "type": "string", "mandatory": true, "full_text_indexed": true },
+    { "name": "repo_ids",    "label": "Repositories",  "type": "array",  "array_item_type": "string" },
+    { "name": "tooling",     "label": "Project Tooling", "type": "file", "mandatory": false,
+      "file_config": { "multiple": false, "max_size_mb": 100,
+                       "allowed_types": ["application/zip", "application/x-tar", "application/gzip", "application/x-gzip"] } },
+    { "name": "authored_by", "label": "Authored By",   "type": "string", "mandatory": true },
+    { "name": "doc_status",  "label": "Doc Status",    "type": "term",   "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "draft" }
+  ]
+}

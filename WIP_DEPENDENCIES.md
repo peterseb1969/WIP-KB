@@ -34,7 +34,7 @@ session (or `/add-app`) needs.
 | `SESSION_STATUS` | active / closed. |
 | `KB_MEMORY_TYPE` | `YAC_MEMORY` classification: user / feedback / project / reference (CASE-507). |
 
-## Entity & config templates (14)
+## Entity & config templates (15)
 
 Identity fields drive upsert (same identity → new version; different → new doc).
 "Mint" types get a gateway-allocated number + `CASE-`/`PAPER-`-style synonym via a
@@ -54,9 +54,14 @@ Identity fields drive upsert (same identity → new version; different → new d
 | `YAC_MEMORY` | `owner` + `mem_key` | natural | A YAC's persisted memory file (CASE-507) | title, description, body |
 | `FLAG_RECORD` | (flag identity) | natural (UI write) | **The one UI write** — flag-for-YAC | title, body |
 | `AGENT_IDENTITY` | (agent key) | natural (reference) | YAC identity records | — |
+| `PROJECT` | `app` (a `KB_APP` term) | natural (reference) | One profile per project inside a domain (DECISION-1): scope, repo ids, optional `tooling` archive (a WIP **file**: zip/tar/gzip, ≤100 MB). The gateway writes `app` as the term's canonical value so aliases cannot fork it (CASE-847). | title, body |
 | `KB_BOOTSTRAP_RECORD` | `bootstrap_id` | natural | Bootstrap provenance audit (namespace-prefixed value; namespaces bootstrapped pre-prefixing carry `BOOTSTRAP_RECORD`) | — |
 | `WRITE_POLICY` | `doc_type` | natural (config) | Per-type mint/natural config the gateway reads (CASE-482) | — |
 
+> **`app` (optional `KB_APP` term)** tags a document to its project on `CASE_RECORD`,
+> `DESIGN_DECISION`, `LESSON`, `FIRESIDE`, `SESSION`, `YAC_MEMORY` and `DOCUMENT`
+> (added by `tools/add-project-and-app-field.py`; seed files carry it).
+>
 > The identity/field details per template are in DESIGN.md §5 and the seed JSON.
 > `full_text_indexed: true` on a string field requires the field to be synced; it
 > produces `<field>_search` + `<field>_tsv` columns in the reporting table.

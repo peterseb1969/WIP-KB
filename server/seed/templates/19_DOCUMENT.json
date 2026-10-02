@@ -19,6 +19,7 @@
     { "name": "repo_id",         "label": "Repo ID",         "type": "string",  "mandatory": false },
     { "name": "path_tail",       "label": "Path (repo-relative)", "type": "string", "mandatory": false },
     { "name": "doc_status",      "label": "Doc Status",      "type": "term",    "mandatory": true,  "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "published" },
-    { "name": "topics",          "label": "Topics",          "type": "array",   "array_item_type": "term", "array_terminology_ref": "KB_TOPIC" }
+    { "name": "topics",          "label": "Topics",          "type": "array",   "array_item_type": "term", "array_terminology_ref": "KB_TOPIC" },
+    { "name": "app",         "label": "App",         "type": "term",    "mandatory": false, "reference_type": "term", "terminology_ref": "KB_APP" }
   ]
 }
