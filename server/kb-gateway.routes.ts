@@ -1542,90 +1542,45 @@ router.get('/topics', async (req, res) => {
 // per-namespace catch, because a namespace with no FTS data yet must not sink the
 // whole search.
 
-// Template stems reach SQL as identifiers. Document ids are interpolated into
-// IN-lists — guard likewise.
-const SQL_NAME_RE = /^[a-z0-9_]+$/
-// Namespaces reach SQL inside quotes (a '…' literal and a "…" schema identifier)
-// and the search domain comes from the CALLER, so the shape is enforced: a
-// namespace slug, hyphens included (DECISION-1 domains like `dev-proj-a`), and
-// never a quote.
+// The search domain comes from the CALLER and reaches URL query strings, so its
+// shape is enforced: a namespace slug, hyphens included (DECISION-1 domains like
+// `dev-proj-a`).
 const NS_NAME_RE = /^[a-z][a-z0-9_-]*$/
-const SQL_ID_RE = /^[0-9a-f][0-9a-f-]{15,}$/i
 
-// FTS hits carry the template value but NO title, and a title is what makes a
-// result readable. Enrich with ONE reporting query per namespace (a UNION over the
-// matched types' tables) rather than N per-document fetches.
-async function titlesForHits(ns: string, hits: AnyObj[], key: string): Promise<Map<string, string>> {
-  const out = new Map<string, string>()
-  const byStem = new Map<string, string[]>()
+// FTS hits carry the template value but no title, and a title is what makes a
+// result readable; a project-scoped search also needs each hit's `app` term. Both
+// come from the document store with the CALLER's key, ONE query per matched type.
+// Raw reporting SQL would be cheaper but is reserved to admin and service keys
+// (CASE-851): built on it, search silently returned nothing for every
+// namespace-scoped key. A type that cannot be read is skipped, not fatal.
+interface HitDoc { title: string | null; appTermId: string | null }
+async function docsForHits(ns: string, hits: AnyObj[], key: string): Promise<Map<string, HitDoc>> {
+  const out = new Map<string, HitDoc>()
+  const byType = new Map<string, string[]>()
   for (const h of hits) {
-    const stem = String(h.value ?? '').toLowerCase()
+    const type = String(h.value ?? '')
     const id = String(h.id ?? '')
-    if (!SQL_NAME_RE.test(stem) || !SQL_ID_RE.test(id)) continue
-    byStem.set(stem, [...(byStem.get(stem) ?? []), id])
+    if (!type || !id) continue
+    byType.set(type, [...(byType.get(type) ?? []), id])
   }
-  if (byStem.size === 0) return out
-  const stems = [...byStem.keys()]
-  // Only union tables that actually expose `title` — one missing column would
-  // error the entire union and cost every result its title.
-  const probe = await wipReq('POST', '/api/reporting-sync/query', key, {
-    namespace: ns,
-    sql:
-      `SELECT table_name FROM information_schema.columns WHERE table_schema = '${ns}' ` +
-      `AND column_name = 'title' AND table_name IN (${stems.map((s) => `'doc_${s}'`).join(',')})`,
-    max_rows: 200,
-  })
-  const titled = new Set((probe.rows ?? []).map((r: AnyObj) => String(r.table_name)))
-  const parts = stems
-    .filter((s) => titled.has(`doc_${s}`))
-    .map(
-      (s) =>
-        `SELECT document_id, title FROM "${ns}"."doc_${s}" ` +
-        `WHERE document_id IN (${(byStem.get(s) as string[]).map((i) => `'${i}'`).join(',')})`,
-    )
-  if (parts.length === 0) return out
-  const d = await wipReq('POST', '/api/reporting-sync/query', key, {
-    namespace: ns, sql: parts.join('\nUNION ALL\n'), max_rows: 2000,
-  })
-  for (const r of d.rows ?? []) if (r.title) out.set(String(r.document_id), String(r.title))
+  await Promise.all([...byType].map(async ([type, ids]) => {
+    try {
+      const tid = await templateId(type, ns, key)
+      const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${encodeURIComponent(ns)}`, key, {
+        template_id: tid, filters: [{ field: 'document_id', operator: 'in', value: ids }], page_size: ids.length,
+      })
+      for (const doc of (d.items ?? []) as AnyObj[]) {
+        const app = ((doc.term_references ?? []) as AnyObj[]).find((r) => r.field_path === 'app')
+        out.set(String(doc.document_id), {
+          title: typeof doc.data?.title === 'string' ? doc.data.title : null,
+          appTermId: app?.term_id ? String(app.term_id) : null,
+        })
+      }
+    } catch {
+      // unreadable or unknown type: its hits keep a null title and match no project
+    }
+  }))
   return out
-}
-
-// The hits whose document is tagged with the project term `termId`, via ONE
-// reporting query per namespace over the matched types that carry `app` (its
-// resolved term lands in `app_term_id`). Types without the column cannot belong to
-// a project and drop out — so a project-scoped search never shows library docs.
-async function hitsInProject(ns: string, hits: AnyObj[], termId: string, key: string): Promise<AnyObj[]> {
-  const byStem = new Map<string, string[]>()
-  for (const h of hits) {
-    const stem = String(h.value ?? '').toLowerCase()
-    const id = String(h.id ?? '')
-    if (!SQL_NAME_RE.test(stem) || !SQL_ID_RE.test(id)) continue
-    byStem.set(stem, [...(byStem.get(stem) ?? []), id])
-  }
-  if (byStem.size === 0) return []
-  const stems = [...byStem.keys()]
-  const probe = await wipReq('POST', '/api/reporting-sync/query', key, {
-    namespace: ns,
-    sql:
-      `SELECT table_name FROM information_schema.columns WHERE table_schema = '${ns}' ` +
-      `AND column_name = 'app_term_id' AND table_name IN (${stems.map((s) => `'doc_${s}'`).join(',')})`,
-    max_rows: 200,
-  })
-  const tagged = new Set((probe.rows ?? []).map((r: AnyObj) => String(r.table_name)))
-  const parts = stems
-    .filter((s) => tagged.has(`doc_${s}`))
-    .map(
-      (s) =>
-        `SELECT document_id FROM "${ns}"."doc_${s}" WHERE app_term_id = '${termId}' ` +
-        `AND document_id IN (${(byStem.get(s) as string[]).map((i) => `'${i}'`).join(',')})`,
-    )
-  if (parts.length === 0) return []
-  const d = await wipReq('POST', '/api/reporting-sync/query', key, {
-    namespace: ns, sql: parts.join('\nUNION ALL\n'), max_rows: 2000,
-  })
-  const keep = new Set((d.rows ?? []).map((r: AnyObj) => String(r.document_id)))
-  return hits.filter((h) => keep.has(String(h.id)))
 }
 
 // GET /search?q=&mode=auto|fts|substring&type=&limit=&app=
@@ -1655,7 +1610,7 @@ router.get('/search', async (req, res) => {
     } catch {
       appTermId = null
     }
-    if (!appTermId || !SQL_ID_RE.test(appTermId)) {
+    if (!appTermId) {
       return res.status(400).json({ error: `app '${appQ}' names no KB_APP term in ${corpus}` })
     }
   }
@@ -1677,8 +1632,8 @@ router.get('/search', async (req, res) => {
         const hits: AnyObj[] = Object.values(r.results ?? {}).flatMap(
           (b) => ((b as AnyObj).items as AnyObj[]) ?? [],
         )
-        const kept = appTermId ? await hitsInProject(ns, hits, appTermId, key) : hits
-        const titles = await titlesForHits(ns, kept, key)
+        const docs = await docsForHits(ns, hits, key)
+        const kept = appTermId ? hits.filter((h) => docs.get(String(h.id))?.appTermId === appTermId) : hits
         return {
           // null (not false) when the platform predates the signal — absence of
           // evidence, which must not be reported as a matched filter (CASE-811).
@@ -1687,7 +1642,7 @@ router.get('/search', async (req, res) => {
             document_id: h.id,
             template_value: h.value ?? null,
             namespace: ns,
-            title: titles.get(String(h.id)) ?? null,
+            title: docs.get(String(h.id))?.title ?? null,
             score: h.score == null ? null : Number(h.score),
             // Snippet carries the platform's <b> highlight markup and embedded
             // newlines; passed through as-is so each consumer renders it its own way.

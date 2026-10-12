@@ -3,6 +3,16 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-12 — Gateway search works for namespace-scoped keys
+
+- **Fixed:** WIP now reserves raw reporting SQL to admin and service keys (CASE-851).
+  The gateway's `/search` enriched hits (titles, project membership) with raw SQL
+  under the caller's key, so for any namespace-scoped key every namespace failed and
+  search returned **nothing, without an error**. Titles and the `app` term now come
+  from the document store with the caller's key, one query per matched type; the
+  gateway runs no raw SQL at all. Verified on localhost with a `kb`-scoped key: hits
+  with titles from `kb`, none from namespaces it has no grant on, `--project` works.
+
 ## 2026-10-02 — Find and tag a project's documents
 
 - **Added:** `/read/:type` filters on a term field match the resolved term, not the
