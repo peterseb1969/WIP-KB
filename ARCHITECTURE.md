@@ -11,7 +11,8 @@ Browser (React SPA)
   │  fetch  ${BASE_URL}{wip,server-api}/*
   ▼
 Express server (server/index.ts)
-  ├── @wip/proxy            → /wip/*          → WIP REST API (deterministic UI reads/writes)
+  ├── @wip/proxy            → /wip/*          → WIP REST API (UI reads + the flag-for-YAC write;
+  │                                               wip-proxy-guard.ts refuses everything else)
   ├── kb-gateway.routes.ts  → /server-api/kb/*        (case mint/read, generic POST /write/:type)
   ├── kb-client.routes.ts   → /server-api/kb-client/* (serves the versioned CLI bundle)
   ├── config.routes.ts      → /server-api/config/*    (admin runtime config, e.g. Anthropic key)

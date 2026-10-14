@@ -3,6 +3,20 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-14 — The browser's WIP proxy is read-only apart from flags
+
+- **Changed:** `/wip` forwards with the install's API key, which is a `wip-admins` key,
+  so any signed-in browser session could do anything an administrator can (delete a
+  namespace, mint an API key). `server/wip-proxy-guard.ts` now lets through only
+  GET/HEAD/OPTIONS, the four POST endpoints that are queries (document query,
+  reporting search and query, registry lookup), and document creates whose every item
+  is a `FLAG_RECORD` or `FLAGGED_FROM` document. Anything else answers 405 (403 for a
+  disallowed document create) without reaching WIP.
+- The proxy (`@wip/proxy` 0.5) streams request bodies, so the guard reads a body only
+  for a document create, and forwards an allowed one to WIP itself.
+- Not changed: the `/server-api/kb-ui` gateway bridge still exposes every gateway
+  verb to a signed-in session.
+
 ## 2026-10-14 — Vocabulary on the Settings page (CASE-828)
 
 - **Added:** an admin-only Vocabulary section on Settings: add a term to `KB_APP` or

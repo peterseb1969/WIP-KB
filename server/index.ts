@@ -11,6 +11,7 @@ import { initAuth, requireAuth, requireAdmin, handleCallback, handleLogout } fro
 import bootstrapRoutes from './bootstrap.routes.js'
 import configRoutes from './config.routes.js'
 import vocabRoutes from './vocab.routes.js'
+import { wipProxyGuard } from './wip-proxy-guard.js'
 import kbClientRoutes from './kb-client.routes.js'
 import kbGatewayRoutes from './kb-gateway.routes.js'
 
@@ -80,7 +81,10 @@ router.use(requireAuth())
 // WIP REST proxy: /wip/* → upstream WIP cluster with API key injected.
 // MUST come before express.json() — wipProxy forwards request bodies as a
 // raw stream; a json parser upstream of it would consume the stream first.
-router.use('/wip', wipProxy({
+// The guard ahead of it narrows what a browser session can do with the injected
+// (wip-admins) key to reads plus the flag-for-YAC write; it reads a body only for
+// a document create, which it then forwards itself.
+router.use('/wip', wipProxyGuard(WIP_KEY), wipProxy({
   baseUrl: process.env.WIP_BASE_URL || 'https://wip-kb.local',
   // Both key sources, deliberately. The file is preferred so a key rotation is
   // picked up on restart instead of stranding a stale inline value; the inline
