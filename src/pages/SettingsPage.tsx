@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { VocabularySettings } from '../components/VocabularySettings'
 
 // Admin-only runtime settings (CASE-508). The Anthropic key control sets/rotates
 // the askBar agent's key without a redeploy. The key is write-only here — the
@@ -71,7 +72,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h1 className="text-xl font-semibold">Settings</h1>
 
       <section className="mt-6 rounded-lg border border-gray-200 bg-surface p-5">
@@ -124,6 +125,8 @@ export default function SettingsPage() {
           </p>
         )}
       </section>
+
+      <VocabularySettings />
     </div>
   )
 }

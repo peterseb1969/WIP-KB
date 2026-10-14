@@ -10,6 +10,7 @@ import { initAgent, ask } from './agent.js'
 import { initAuth, requireAuth, requireAdmin, handleCallback, handleLogout } from './auth.js'
 import bootstrapRoutes from './bootstrap.routes.js'
 import configRoutes from './config.routes.js'
+import vocabRoutes from './vocab.routes.js'
 import kbClientRoutes from './kb-client.routes.js'
 import kbGatewayRoutes from './kb-gateway.routes.js'
 
@@ -113,6 +114,10 @@ router.use('/server-api/kb-ui', (req, _res, next) => {
 
 // Runtime config (admin-only) — set/rotate the Anthropic key without a redeploy (CASE-508)
 router.use('/server-api/config', requireAdmin(), configRoutes)
+
+// Vocabulary curation (admin-only, CASE-828): add a term or an alias to an
+// allowlisted KB vocabulary in one domain, and see how live terms drift from the seed.
+router.use('/server-api/vocab', requireAdmin(), vocabRoutes(WIP_KEY))
 
 // Bootstrap (offer-on-empty / use-on-exists for the kb namespace)
 router.use('/server-api', bootstrapRoutes)

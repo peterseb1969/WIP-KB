@@ -15,6 +15,7 @@ Express server (server/index.ts)
   ├── kb-gateway.routes.ts  → /server-api/kb/*        (case mint/read, generic POST /write/:type)
   ├── kb-client.routes.ts   → /server-api/kb-client/* (serves the versioned CLI bundle)
   ├── config.routes.ts      → /server-api/config/*    (admin runtime config, e.g. Anthropic key)
+  ├── vocab.routes.ts       → /server-api/vocab/*     (admin: add KB_APP / SESSION_ROLE terms + aliases, seed drift)
   ├── bootstrap.routes.ts   → /server-api/bootstrap/* (status + SSE-streamed run)
   └── agent.ts (askBar)     → /server-api/ask         (NL query → Anthropic + WIP MCP tools)
   ▼
@@ -60,10 +61,11 @@ no cached data crosses domains. The CLI picks a domain with `KB_NAMESPACE` or th
 | Route | Component | Notes |
 |---|---|---|
 | `/` | `HomePage` | Fetches all docs across `NAMESPACES` (paged, concurrently — CASE-501), groups by `template_value`, newest group first. `HIDDEN_TYPES` + per-namespace edge-type keys exclude structural/config/relationship types and `CASE_RESPONSE` (CASE-533). |
-| `/search` | `SearchPage` | Faceted search, fanned out per namespace → `POST /api/reporting-sync/search?namespace=` (scoped, CASE-541) and merged. Facets (type/status/author/kind/severity/app/**release**) are URL params; counts computed client-side. **Author** buckets are normalized to YAC roles (`docAuthors`, CASE-563); **Release** auto-hides when no `LIBRARY_DOC` is in scope. `CASE_RESPONSE` default-off but selectable (CASE-533). |
+| `/search` | `SearchPage` | Faceted search, fanned out per namespace → `POST /api/reporting-sync/search?namespace=` (scoped, CASE-541) and merged. Facets (type/status/author/kind/severity/**project**/**release**; a `CASE_RESPONSE` takes its case's project, and each project entry links to `/project/:app`) are URL params; counts computed client-side. **Author** buckets are normalized to YAC roles (`docAuthors`, CASE-563); **Release** auto-hides when no `LIBRARY_DOC` is in scope. `CASE_RESPONSE` default-off but selectable (CASE-533). |
 | `/doc/:id` | `DocPage` | One document. Renders body (markdown), structured fields (document-reference fields like `kb_refs` resolve to linked titles via `RefValue`), the `RelationshipGraph`, inline `CaseThread` (CASE-506/511), `PrepareButtons`, and `FlagModal` — **flag-for-YAC is corpus-only** (`canFlag = doc.namespace === CORPUS_NS`; cross-namespace `FLAGGED_FROM` unsupported). |
 | `/client` | `ClientPage` | Renders the served kb-client manifest + per-file roles — in-app docs for the CLI. |
-| `/settings` | `SettingsPage` | Admin-gated runtime config via `/server-api/config/*`. |
+| `/settings` | `SettingsPage` | Admin-gated runtime config via `/server-api/config/*`, and the Vocabulary section (`VocabularySettings`) via `/server-api/vocab/*`: add a term or an alias to `KB_APP` / `SESSION_ROLE` in the viewed domain (add-only; aliases merged server-side because WIP's update replaces the list), plus seed drift against `server/seed/terminologies/`. |
+| `/project/:app` | `ProjectPage` | A project's brief through the `/server-api/kb-ui` bridge: profile, tooling download, tagged documents by type. Read-only. |
 
 `Layout` + `Sidebar` wrap all routes; `AskBar` is mounted app-wide.
 

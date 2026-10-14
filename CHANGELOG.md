@@ -3,6 +3,22 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-14 — Vocabulary on the Settings page (CASE-828)
+
+- **Added:** an admin-only Vocabulary section on Settings: add a term to `KB_APP` or
+  `SESSION_ROLE`, or an alias to one of their terms, in the knowledge base being
+  viewed. Add-only; renaming and retiring stay in the WIP Console. `KB_TOPIC` is not
+  included (a topic needs a parent and a relation).
+- **Added:** `server/vocab.routes.ts` (`/server-api/vocab`, behind `requireAdmin()`).
+  The alias merge happens on the server, because WIP's term update replaces the whole
+  alias list. A spelling that already resolves to the term is a no-op; one that
+  resolves to a different term is refused.
+- **Added:** seed drift: each vocabulary lists how its live terms differ from
+  `server/seed/terminologies/<T>.json` (missing from the seed, with the entry to paste;
+  in the seed but not live; label / description / sort order / aliases differing).
+  Aliases are compared by what they resolve to, since WIP drops case-only variants
+  that older seed entries still list.
+
 ## 2026-10-14 — Project page
 
 - **Added:** `/project/:app` — a project's profile (title, scope, repositories), its
