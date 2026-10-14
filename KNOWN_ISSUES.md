@@ -5,22 +5,31 @@ re-investigate solved problems, "fix" intentional choices, or miss real gaps.
 
 ## Open / deferred
 
-### Term-valued identity fields hash the submitted spelling (CASE-847)
-**Status:** worked around in the gateway · **Severity:** medium (direct writers)
-WIP builds a document's identity from the text submitted, not from the term it
-resolves to, so aliases of one term create separate documents. The gateway's
-`canonicalTermIdentity()` rewrites term identity values to the canonical term value
-before every write, which covers all KB writes. Direct API/MCP writes are not
-covered until the platform decides (CASE-847).
+### The browser's gateway bridge exposes every gateway verb
+**Status:** open · **Severity:** medium
+`/server-api/kb-ui` mounts the whole KB gateway for any signed-in browser session and
+injects the install's `wip-admins` key, so a session can call any gateway verb:
+`/write/<any type>`, `POST /namespaces`. The UI itself uses only `/edges`,
+`/write/CASE_RESPONSE`, `/write/CASE_RECORD` and `/write/<type>` patches (status,
+topics), plus the project brief and tooling reads. The `/wip` proxy was narrowed to
+reads and flag-for-YAC (`server/wip-proxy-guard.ts`); the bridge has not been.
+Narrowing it to the verbs the UI uses is the matching fix.
 
-### Existing documents carry no `app` until the backfill runs
-**Status:** tool ready (`tools/backfill-app.py`), applied on localhost only · **Severity:** low
-`app` exists only on the new template versions. `tools/backfill-app.py` infers each
-document's project from `tools/backfill-app-mapping.json` (session role, memory owner,
-document repo_id; lessons/decisions/firesides only from a single app-YAC author) and
-re-submits it on the latest version — same document, same identity hash, only `app`
-added. Dry run by default; run it per instance along the ladder. Lessons, firesides and
-decisions authored by BE-YAC / FRanC / Peter stay untagged by design.
+### `app` not backfilled on dev-test
+**Status:** optional · **Severity:** low
+`tools/backfill-app.py` has been applied on canonical, prod-test and localhost. dev-test
+has the template change but its older documents carry no `app`. Run it there only if
+dev-test should match (`KB_TARGET=https://dev-test.internal
+KB_KEYFILE=~/.wip-deploy/dev-test/secrets/api-key python3 tools/backfill-app.py`, then
+`--apply`).
+
+### Seed vocabularies list aliases WIP now drops
+**Status:** cosmetic · **Severity:** low
+Since WIP's typed-names term model, an alias that only re-cases the term's value or
+another alias is dropped on write (values match case-insensitively anyway). The seed
+files still list such aliases (`KB_APP`: `kb`, `reactconsole`, `RC-Console`,
+`clintrial`, …). Harmless: they resolve the same. The Settings seed-drift view
+compares what each side resolves, so these do not show as drift.
 
 ### `kb_refs` cross-namespace references are not existence-validated
 **Status:** known (BE-YAC) · **Severity:** low
