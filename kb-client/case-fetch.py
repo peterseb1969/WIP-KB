@@ -30,6 +30,7 @@ Usage:
     case-fetch.py library <slug> --release <release>
     case-fetch.py search "<terms>" [--type TYPE] [--mode auto|fts|substring] [--limit N] [--format …]
     case-fetch.py read <TYPE> [--filter KEY=VALUE …] [--namespace …] [--page N] [--page-size N] [--format …]
+    case-fetch.py brief [<app>] [--namespace …] [--tooling DIR] [--format text|json]
 
 Env: see kb_client_core (KB_BASE_URL / KB_API_KEY_FILE / KB_PREFER_LOCAL / …).
 """
@@ -40,8 +41,9 @@ import json
 import re
 import sys
 import urllib.parse
+from pathlib import Path
 
-from kb_client_core import gw_get
+from kb_client_core import PROJECT, gw_get, gw_get_bytes
 
 
 # ----------------------------------------------------------------------------
@@ -366,6 +368,114 @@ def _format_topics(payload: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ----------------------------------------------------------------------------
+# brief (DECISION-1) — a project's context in one read, for a session start
+# ----------------------------------------------------------------------------
+
+def fetch_brief(app: str, namespace: str | None) -> dict | None:
+    """GET /projects/:app/brief. `app` is any spelling of the project's KB_APP term."""
+    q = f"/projects/{urllib.parse.quote(app, safe='')}/brief"
+    if namespace:
+        q += f"?namespace={urllib.parse.quote(namespace)}"
+    return gw_get(q)
+
+
+def download_tooling(app: str, namespace: str | None, dest: Path) -> Path | None:
+    """Save the project's tooling archive into `dest` as stored — never unpacked.
+    Returns the written path, or None when the project has no archive."""
+    q = f"/projects/{urllib.parse.quote(app, safe='')}/tooling"
+    if namespace:
+        q += f"?namespace={urllib.parse.quote(namespace)}"
+    got = gw_get_bytes(q)
+    if got is None:
+        return None
+    content, filename = got
+    # The name comes from the server; keep only its last path component so it can
+    # never write outside `dest`.
+    name = Path(filename or f"{app}-tooling").name or f"{app}-tooling"
+    dest.mkdir(parents=True, exist_ok=True)
+    out = dest / name
+    out.write_bytes(content)
+    return out
+
+
+_BRIEF_SECTION_TITLES = (
+    ("open_cases", "Open cases"),
+    ("decisions", "Decisions"),
+    ("lessons", "Lessons"),
+    ("firesides", "Firesides"),
+    ("sessions", "Recent sessions"),
+    ("memories", "Memories"),
+    ("documents", "Documents"),
+)
+
+
+def _brief_line(key: str, it: dict) -> str:
+    when = (it.get("updated_at") or "")[:10]
+    parts = [str(it.get("handle") or it.get("document_id") or "?")]
+    if key == "open_cases":
+        parts.append(f"[{it.get('status') or '?'}]")
+    if key == "sessions":
+        parts.append(f"[{it.get('status') or '?'}]")
+    title = it.get("title") or it.get("description") or ""
+    if title:
+        parts.append(str(title))
+    if key == "memories" and it.get("title") and it.get("description"):
+        parts.append(f"— {it['description']}")
+    if key == "documents" and it.get("path"):
+        sha = (it.get("synced_from_sha") or "")[:8]
+        parts.append(f"({it['path']}{' @ ' + sha if sha else ''})")
+    if when:
+        parts.append(f"· {when}")
+    return "  - " + " ".join(parts)
+
+
+def _format_brief(payload: dict) -> str:
+    app, ns = payload.get("app"), payload.get("namespace")
+    proj = payload.get("project")
+    head = f"Project brief: {app} [{ns}]"
+    lines = [head, "=" * len(head), ""]
+    if proj:
+        lines.append(f"## {proj.get('title') or app}")
+        lines.append("")
+        if proj.get("scope"):
+            lines.append(str(proj["scope"]).rstrip("\n"))
+            lines.append("")
+        if proj.get("repo_ids"):
+            lines.append("Repositories: " + ", ".join(str(r) for r in proj["repo_ids"]))
+        t = proj.get("tooling")
+        if t:
+            size = t.get("size_bytes")
+            lines.append(f"Tooling archive: {t.get('filename') or t.get('file_id')}"
+                         + (f" ({size} bytes)" if size is not None else "")
+                         + " — fetch with --tooling DIR")
+        lines.append("")
+    else:
+        lines.append(f"_(no PROJECT profile for {app} in {ns})_")
+        lines.append("")
+    for note in payload.get("notes") or []:
+        lines.append(f"> {note}")
+    lines.append("")
+    sections = payload.get("sections") or {}
+    for key, title in _BRIEF_SECTION_TITLES:
+        sec = sections.get(key)
+        if sec is None:
+            continue
+        if sec.get("unavailable"):
+            lines.append(f"### {title} — unavailable in this domain")
+            lines.append("")
+            continue
+        items = sec.get("items") or []
+        total = sec.get("total")
+        shown = f"{len(items)} of {total}" if total is not None and total > len(items) else str(len(items))
+        lines.append(f"### {title} ({shown})")
+        lines.extend(_brief_line(key, it) for it in items)
+        if not items:
+            lines.append("  _(none tagged with this project)_")
+        lines.append("")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -507,6 +617,15 @@ def main() -> None:
     topics_sp.add_argument("--namespace", help="namespace override (default: gateway corpus)")
     topics_sp.add_argument("--format", choices=["tree", "json"], default="tree")
 
+    brief_sp = sub.add_parser("brief", help="a project's context in one read: its profile, "
+                                            "open cases, decisions, lessons, sessions, memories, documents")
+    brief_sp.add_argument("app", nargs="?", default=None,
+                          help="the project (a KB_APP term, any alias); default: kb.json `project`")
+    brief_sp.add_argument("--namespace", help="knowledge domain (default: the configured one)")
+    brief_sp.add_argument("--tooling", metavar="DIR",
+                          help="also save the project's tooling archive into DIR, as stored (never unpacked)")
+    brief_sp.add_argument("--format", choices=["text", "json"], default="text")
+
     read_sp = sub.add_parser("read", help="generic typed read (CASE-683) — every type "
                                           "kb-write.py can write is readable here, via GET /read/:type")
     read_sp.add_argument("type_", metavar="TYPE",
@@ -574,6 +693,32 @@ def main() -> None:
                       f"table — not a zero-result", file=sys.stderr)
                 sys.exit(3)
             sys.exit(0 if payload.get("items") else 1)
+
+        elif args.mode == "brief":
+            app = args.app or PROJECT
+            if not app:
+                print("ERROR: name a project, or set `project` in .claude/kb.json", file=sys.stderr)
+                sys.exit(2)
+            payload = fetch_brief(app, args.namespace)
+            if payload is None:
+                print(f"no project {app!r} in kb (not a KB_APP term), or this instance has "
+                      "no /projects route yet", file=sys.stderr)
+                sys.exit(1)
+            if args.format == "json":
+                sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+            else:
+                sys.stdout.write(_format_brief(payload))
+            # A project without an archive is normal, not a failure: a session-start
+            # hook passes --tooling for every project.
+            if args.tooling:
+                saved = None
+                if (payload.get("project") or {}).get("tooling"):
+                    saved = download_tooling(app, args.namespace, Path(args.tooling).expanduser())
+                if saved is None:
+                    print(f"project {app!r} has no tooling archive; nothing saved", file=sys.stderr)
+                else:
+                    print(f"tooling archive saved to {saved} (not unpacked)", file=sys.stderr)
+            sys.exit(0)
 
         elif args.mode == "read":
             payload = read_type(args.type_, args.filter, args.namespace, args.page, args.page_size)

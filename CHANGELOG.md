@@ -3,6 +3,17 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-14 — `kbc case-fetch.py brief` (client 4.3.0)
+
+- **Added:** `brief [<app>] [--namespace NS] [--tooling DIR] [--format text|json]` — the
+  project brief as text for a session start. `<app>` defaults to kb.json `project`.
+  `--tooling DIR` saves the tooling archive into DIR exactly as stored (never unpacked;
+  the server's filename is reduced to its last path component); a project without an
+  archive is reported on stderr, not treated as a failure, so a session-start hook can
+  always pass the flag.
+- **Added:** `gw_get_bytes()` in `kb_client_core.py` — file downloads through the
+  gateway, with the same local→remote failover as JSON reads.
+
 ## 2026-10-14 — Project brief and tooling download (gateway)
 
 - **Added:** `GET /projects/:app/brief` — a project's context in one read: the `PROJECT`

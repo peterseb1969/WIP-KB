@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import ssl
 import sys
 import urllib.error
@@ -234,6 +235,42 @@ def gw_get(path: str) -> dict | None:
                       file=sys.stderr)
                 continue
             raise
+    if last_error:
+        raise last_error
+    return None
+
+
+def gw_get_bytes(path: str, timeout: float = 60) -> tuple[bytes, str | None] | None:
+    """GET a gateway endpoint that answers with a file rather than JSON. Returns
+    (content, filename from Content-Disposition), or None when the gateway says
+    404 or the route is absent (the SPA fallback's HTML page). A JSON body is an
+    error envelope, never file content. Same local→remote failover as gw_get."""
+    last_error: Exception | None = None
+    for name, url, key in targets():
+        req = urllib.request.Request(_gw_url(url, path), method="GET",
+                                     headers={"X-API-Key": read_key(key)})
+        try:
+            resp = urllib.request.urlopen(req, context=_ssl_ctx(), timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            snippet = e.read()[:300].decode("utf-8", errors="replace")
+            last_error = RuntimeError(f"HTTP {e.code} from {url}: {snippet}")
+        except (urllib.error.URLError, OSError) as e:
+            last_error = RuntimeError(f"{url} unreachable: {e}")
+        else:
+            ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype == "text/html":
+                return None
+            if ctype == "application/json":
+                raise RuntimeError(f"{url} answered JSON, not a file: "
+                                   f"{resp.read()[:300].decode('utf-8', 'replace')}")
+            disp = resp.headers.get("Content-Disposition") or ""
+            m = re.search(r'filename="?([^";]+)"?', disp)
+            return resp.read(), (m.group(1) if m else None)
+        if name != "remote":
+            print(f"[kb-client] {name} unreachable, falling through to remote: {last_error}",
+                  file=sys.stderr)
     if last_error:
         raise last_error
     return None

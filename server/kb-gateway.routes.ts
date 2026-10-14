@@ -1349,11 +1349,6 @@ router.get('/library-docs/:slug', async (req, res) => {
   }
 })
 
-// GET /types — the doc-type manifest the write client lists/validates against
-// (CASE-482). Entity templates only; write_mode is derived from the same
-// metadata.custom.write the gateway mints from ('mint' when present, else
-// 'natural' upsert by identity). The schema is the single source — this just
-// surfaces it, so the client never hand-maintains a type list.
 // --- Project brief (DECISION-1, option one) --------------------------------------
 // One read that gives a project's Claude its context at session start, and the data
 // behind the UI's project page. A project is a KB_APP term; every document tagged
@@ -1483,6 +1478,11 @@ router.get('/projects/:app/tooling', async (req, res) => {
   }
 })
 
+// GET /types — the doc-type manifest the write client lists/validates against
+// (CASE-482). Entity templates only; write_mode is derived from the same
+// metadata.custom.write the gateway mints from ('mint' when present, else
+// 'natural' upsert by identity). The schema is the single source — this just
+// surfaces it, so the client never hand-maintains a type list.
 router.get('/types', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
