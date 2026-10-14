@@ -3,6 +3,18 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-14 — Backfill `app` onto existing documents
+
+- **Added:** `tools/backfill-app.py` + `tools/backfill-app-mapping.json`. Infers a
+  document's project from fields it already has (SESSION role, YAC_MEMORY owner,
+  DOCUMENT repo_id; LESSON / DESIGN_DECISION / FIRESIDE only when their app-YAC authors
+  name exactly one app) and re-submits its complete data plus `app` on the latest
+  template version: an update of the same document, so only tagged documents get a new
+  version (a migrate would bump whole version cohorts). The dry run (default) validates
+  every planned write and checks its identity hash equals the current one, so an apply
+  can only update, never fork. Localhost: 446 documents tagged, document count
+  unchanged, each new version differs from the previous in `app` only.
+
 ## 2026-10-12 — Gateway search works for namespace-scoped keys
 
 - **Fixed:** WIP now reserves raw reporting SQL to admin and service keys (CASE-851).

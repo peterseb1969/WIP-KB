@@ -1,0 +1,27 @@
+{
+  "_comment": "Input to tools/backfill-app.py: how an existing document's project (`app`, a KB_APP term) is inferred. Reviewed by Peter before any apply. Values must be KB_APP terms; the script checks each one resolves before touching anything.",
+
+  "role_to_app": {
+    "BE-YAC":    "backend",
+    "APP-KB":    "KB",
+    "FRanC":     "FR-YAC",
+    "APP-RC":    "ReactConsole",
+    "APP-CT":    "ClinTrial",
+    "APP-AA":    "AuthorAssist",
+    "APP-DND":   "DnD",
+    "APP-VAL":   "Validator",
+    "APP-SONG":  "wip-song",
+    "APP-PBSCT": "pbs-clintrial",
+    "WEB-YAC":   "web"
+  },
+
+  "repo_id_to_app": {
+    "701ff5202e28a8b0a81b913fdc73e9257af5cd0d": "FR-YAC",
+    "5157b9adb97fccf0637723930f4512fd50760be7": "backend",
+    "1a2726d68c332e88dcba437538834a39ad12077d,27496510502c9b631ed744be263bef657cf4ea0f": "KB"
+  },
+  "_repo_ids": "FR-YAC repo -> FR-YAC; World-in-a-Pie -> backend; WIP-KB (its repo_id is a comma-joined double root) -> KB.",
+
+  "infer_from_author_roles": ["APP-KB", "APP-RC", "APP-CT", "APP-AA", "APP-DND", "APP-VAL", "APP-SONG", "APP-PBSCT", "WEB-YAC"],
+  "_infer_from_author_roles": "LESSON / DESIGN_DECISION / FIRESIDE carry no project field, only authored_by. They are tagged only when their YAC authors (Peter ignored) include roles from this list and those map to exactly ONE app. BE-YAC and FRanC are left out on purpose: what they write usually spans the constellation, so their lessons and firesides stay untagged rather than all becoming 'backend' or 'FR-YAC'."
+}

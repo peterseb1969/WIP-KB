@@ -13,11 +13,14 @@ resolves to, so aliases of one term create separate documents. The gateway's
 before every write, which covers all KB writes. Direct API/MCP writes are not
 covered until the platform decides (CASE-847).
 
-### Existing documents cannot take `app` until migrated
-**Status:** deferred · **Severity:** low
-`app` exists only on the new template versions; PATCH validates against a document's
-pinned version, so tagging existing documents needs `migrate_documents` to the new
-version first. Planned as its own backfill step.
+### Existing documents carry no `app` until the backfill runs
+**Status:** tool ready (`tools/backfill-app.py`), applied on localhost only · **Severity:** low
+`app` exists only on the new template versions. `tools/backfill-app.py` infers each
+document's project from `tools/backfill-app-mapping.json` (session role, memory owner,
+document repo_id; lessons/decisions/firesides only from a single app-YAC author) and
+re-submits it on the latest version — same document, same identity hash, only `app`
+added. Dry run by default; run it per instance along the ladder. Lessons, firesides and
+decisions authored by BE-YAC / FRanC / Peter stay untagged by design.
 
 ### `kb_refs` cross-namespace references are not existence-validated
 **Status:** known (BE-YAC) · **Severity:** low
