@@ -3,6 +3,18 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-14 — Gateway no longer rewrites term identity values
+
+- **Removed:** `canonicalTermIdentity()`, which rewrote a term-valued identity field
+  (e.g. `PROJECT.app`) to the term's canonical value before every write. WIP now builds
+  identity from the term a value resolves to (CASE-847), so aliases cannot fork a
+  document without it, and every write saves one def-store lookup per such field.
+- **Changed as a result:** `data.app` stores the spelling the writer sent, as WIP
+  intends (the resolved term is stored beside it). Facets, project filters and the
+  brief all read the resolved term, so they are unaffected.
+- Verified on localhost: three PROJECT writes as `ct`, `ClinTrial Explorer` and
+  `CLINTRIAL` updated one document (version 3).
+
 ## 2026-10-14 — Seed vocabularies brought up to date
 
 - **Changed:** `KB_APP` seed gains `web` and `KB_TARGET_YAC` gains `WEB-YAC`, both

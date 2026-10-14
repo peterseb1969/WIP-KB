@@ -574,29 +574,8 @@ async function derivedTopics(tpl: AnyObj, data: AnyObj, ns: string, key: string)
 // has write config (resolve-then-mint by its search key), else upsert by the
 // template's natural identity. Every write verb routes through here — no bespoke
 // per-type mint/upsert logic survives in the handlers.
-// CASE-847: a term in an identity field must be written as its CANONICAL value.
-// WIP hashes identity from the text submitted, not from the term it resolves to,
-// so two writers naming one term by different aliases (ClinTrial / clintrial / ct)
-// would create two documents for one entity. Resolving through def-store's own
-// validate endpoint applies WIP's matching rules rather than a copy of them; a
-// value that does not resolve is left as sent, so WIP's validation reports it.
-// Only identity fields are rewritten — elsewhere the submitted spelling is kept,
-// as WIP intends (it stores the original value beside the resolved term).
-async function canonicalTermIdentity(tpl: AnyObj, data: AnyObj, key: string): Promise<AnyObj> {
-  let out = data
-  for (const name of (tpl.identity_fields || []) as string[]) {
-    const f = ((tpl.fields || []) as AnyObj[]).find((x) => x.name === name)
-    const v = data[name]
-    if (!f || f.type !== 'term' || !f.terminology_ref || typeof v !== 'string') continue
-    const canonical = (await resolveTerm(f.terminology_ref, v, key))?.value
-    if (typeof canonical === 'string' && canonical !== v) out = { ...out, [name]: canonical }
-  }
-  return out
-}
-
 async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyObj; ns: string; key: string }): Promise<{ document_id: string; result: string; number?: number; synonym?: string }> {
   const { ns, key, metadata } = opts
-  data = await canonicalTermIdentity(await getTemplate(type, ns, key), data, key)
   // Derive here rather than in the route handler so every writer gets the same
   // baseline — the served client, the browser bridge, and anything added later
   // — instead of each having to remember to tag.
