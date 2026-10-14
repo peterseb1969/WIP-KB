@@ -102,7 +102,7 @@ const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb/firesides  ·  kb/firesides/:id', 'list firesides / one fireside body (:id = a FIRESIDE-<n> synonym, a bare <n>, or a document_id)'],
   ['GET', 'kb/library-docs  ·  kb/library-docs/:slug', 'list published LIBRARY_DOCs / one body (?release= required for a slug)'],
   ['GET', 'kb/read/:type', 'generic typed read — every writable type is readable; each query param is an eq-filter on data.<field> (a term field matches the resolved term, so any alias finds it)'],
-  ['GET', 'kb/search?q=&mode=auto|fts|substring&type=&limit=&app=', 'full-text search across a knowledge domain (?namespace=, default corpus) plus the library, merged, ranked, with snippets; ?app= keeps only one project\'s documents'],
+  ['GET', 'kb/search?q=&mode=auto|fts|substring&type=&limit=&app=', 'full-text search across a knowledge base (?namespace=, default: the instance's) plus the library, merged, ranked, with snippets; ?app= keeps only one project\'s documents'],
   ['GET', 'kb/flags', 'flag-for-YAC dispatch queue — FLAG_RECORDs joined to their target doc'],
   ['GET', 'kb/edges/:handle', 'every edge touching a doc, both directions (handle = synonym or document_id)'],
   ['GET', 'kb/types', 'doc-type manifest — write_mode + home namespace per type (spans corpus + library)'],
@@ -111,7 +111,7 @@ const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
   ['POST', 'kb/edges', 'attach an edge between two EXISTING docs — the sanctioned retry for a failed edge intent'],
   ['GET', 'kb/projects/:app/brief?namespace=', 'a project\'s context in one read: PROJECT profile, open cases, newest decisions/lessons/firesides, recent sessions, memories, mirrored docs (handles + titles); :app = any alias'],
   ['GET', 'kb/projects/:app/tooling?namespace=', 'the project\'s tooling archive, streamed as stored (never unpacked or run)'],
-  ['POST', 'kb/namespaces', 'create a new knowledge domain — a namespace seeded with the full corpus model; 409 if it exists (never re-seeds)'],
+  ['POST', 'kb/namespaces', 'create a new knowledge base — a namespace seeded with the full KB model; 409 if it exists (never re-seeds)'],
 ]
 
 function Copyable({ text, label }: { text: string; label?: string }) {
