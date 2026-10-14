@@ -13,14 +13,6 @@ dev-test should match (`KB_TARGET=https://dev-test.internal
 KB_KEYFILE=~/.wip-deploy/dev-test/secrets/api-key python3 tools/backfill-app.py`, then
 `--apply`).
 
-### Seed vocabularies list aliases WIP now drops
-**Status:** cosmetic · **Severity:** low
-Since WIP's typed-names term model, an alias that only re-cases the term's value or
-another alias is dropped on write (values match case-insensitively anyway). The seed
-files still list such aliases (`KB_APP`: `kb`, `reactconsole`, `RC-Console`,
-`clintrial`, …). Harmless: they resolve the same. The Settings seed-drift view
-compares what each side resolves, so these do not show as drift.
-
 ### `kb_refs` cross-namespace references are not existence-validated
 **Status:** known (BE-YAC) · **Severity:** low
 A field with `array_item_type: reference` (e.g. `LIBRARY_DOC.kb_refs` → corpus docs)

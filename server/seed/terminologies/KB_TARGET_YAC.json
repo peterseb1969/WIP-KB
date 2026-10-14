@@ -11,6 +11,7 @@
     { "value": "APP-KB",  "label": "APP-KB-YAC",                 "sort_order": 50, "description": "KB app YAC (this app's authoring agent)." },
     { "value": "BUG-YAC", "label": "BUG-YAC",                    "sort_order": 60, "description": "Bug-hunting YAC." },
     { "value": "FRanC",   "label": "FRanC",                      "sort_order": 70, "description": "Field Reporter — captures sessions, synthesizes, owns design papers." },
+    { "value": "WEB-YAC", "label": "WEB-YAC",                    "sort_order": 75 },
     { "value": "any",     "label": "Any (no specific target)",   "sort_order": 80, "description": "Open flag — any agent can pick it up." }
   ]
 }

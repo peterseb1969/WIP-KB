@@ -3,6 +3,16 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-14 — Seed vocabularies brought up to date
+
+- **Changed:** `KB_APP` seed gains `web` and `KB_TARGET_YAC` gains `WEB-YAC`, both
+  already live on canonical, so new domains and fresh bootstraps get them.
+- **Changed:** dropped nine `KB_APP` aliases that only re-case the term's value or
+  another alias (`kb`, `reactconsole`, `RC-Console`, `clintrial`, `authorassist`,
+  `song`, `dnd`, `validator`). WIP discards such aliases on write; they resolve the
+  same without them.
+- Verified: a fresh localhost domain seeded from these files matches them exactly.
+
 ## 2026-10-14 — The browser's gateway bridge allows only the UI's own writes
 
 - **Changed:** `/server-api/kb-ui` (the browser's route into the KB gateway, carrying
