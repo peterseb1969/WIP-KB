@@ -3,6 +3,18 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-15 — Response links on the case page (CASE-829)
+
+- **Fixed:** a relationship whose source is a case *response* (e.g. CASE-827#3
+  REFERENCES a fireside) was stored but shown nowhere: the case page only asked for the
+  case's own relationships. The thread now lists each response's links under its text,
+  with a count on the collapsed header. One reporting query covers the whole thread.
+  Today's data has 122 such links, all REFERENCES and all outgoing; links pointing at
+  a response would show too (prefixed ←), but none exist.
+- **Fixed:** the neighbourhood graph's "more neighbours" marker counted every edge
+  three times (per-version table, `__entities` relation and entity view), so a
+  neighbour linked only to the page still showed the marker.
+
 ## 2026-10-14 — Gateway no longer rewrites term identity values
 
 - **Removed:** `canonicalTermIdentity()`, which rewrote a term-valued identity field

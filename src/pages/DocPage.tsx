@@ -11,9 +11,9 @@ import { RelationshipGraph } from '../components/RelationshipGraph'
 import { RelationshipPicker } from '../components/RelationshipPicker'
 import { CaseActions } from '../components/CaseActions'
 import { TopicPicker } from '../components/TopicPicker'
-import { CaseThread, type ResponseDoc } from '../components/CaseThread'
+import { CaseThread, type ResponseDoc, type ResponseLink } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
-import { fetchDocTitlesByIds, fetchFlagTargets, fetchPeerDegrees } from '../lib/reporting'
+import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees } from '../lib/reporting'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 import { formatWipDateTime } from '../lib/datetime'
 
@@ -274,6 +274,44 @@ export default function DocPage() {
       return docs
         .filter((d): d is ResponseDoc => !!d)
         .sort((a, b) => (a.data?.response_seq ?? 0) - (b.data?.response_seq ?? 0))
+    },
+    enabled: responseIds.length > 0,
+    staleTime: 30_000,
+  })
+
+  // A response's own links (e.g. REFERENCES from CASE-827#3 to a fireside) belong to
+  // the response document, so the case's relationships call above never returns
+  // them. One reporting query fetches every edge touching any of the thread's
+  // responses; RESPONDS_TO (each response's link to this case) is the thread itself.
+  const { data: responseLinks } = useQuery<Record<string, ResponseLink[]>>({
+    queryKey: ['response-links', peerNs, responseIds],
+    queryFn: async () => {
+      const ids = new Set(responseIds)
+      const edges = (await fetchEdgesTouching(peerNs, responseIds)).filter(
+        (e) => e.edgeType !== 'RESPONDS_TO',
+      )
+      const peers = edges.map((e) => (ids.has(e.sourceId) ? e.targetId : e.sourceId))
+      const titles = await fetchDocTitlesByIds([peerNs], peers)
+      const out: Record<string, ResponseLink[]> = {}
+      for (const e of edges) {
+        // Both ends can be responses of this thread; list the edge under each.
+        for (const [rid, outgoing] of [
+          [e.sourceId, true],
+          [e.targetId, false],
+        ] as const) {
+          if (!ids.has(rid)) continue
+          const peerId = outgoing ? e.targetId : e.sourceId
+          const t = titles.get(peerId)
+          ;(out[rid] ??= []).push({
+            edgeType: e.edgeType,
+            outgoing,
+            peerId,
+            title: t?.title ?? '',
+            templateValue: t?.templateValue ?? '',
+          })
+        }
+      }
+      return out
     },
     enabled: responseIds.length > 0,
     staleTime: 30_000,
@@ -633,7 +671,7 @@ export default function DocPage() {
         )}
 
         {/* CASE-506: inline collapsible response thread */}
-        {responseDocs && responseDocs.length > 0 && <CaseThread responses={responseDocs} />}
+        {responseDocs && responseDocs.length > 0 && <CaseThread responses={responseDocs} links={responseLinks} />}
       </article>
 
       {hasEdges && (
