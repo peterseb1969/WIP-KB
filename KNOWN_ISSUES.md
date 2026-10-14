@@ -5,16 +5,6 @@ re-investigate solved problems, "fix" intentional choices, or miss real gaps.
 
 ## Open / deferred
 
-### The browser's gateway bridge exposes every gateway verb
-**Status:** open · **Severity:** medium
-`/server-api/kb-ui` mounts the whole KB gateway for any signed-in browser session and
-injects the install's `wip-admins` key, so a session can call any gateway verb:
-`/write/<any type>`, `POST /namespaces`. The UI itself uses only `/edges`,
-`/write/CASE_RESPONSE`, `/write/CASE_RECORD` and `/write/<type>` patches (status,
-topics), plus the project brief and tooling reads. The `/wip` proxy was narrowed to
-reads and flag-for-YAC (`server/wip-proxy-guard.ts`); the bridge has not been.
-Narrowing it to the verbs the UI uses is the matching fix.
-
 ### `app` not backfilled on dev-test
 **Status:** optional · **Severity:** low
 `tools/backfill-app.py` has been applied on canonical, prod-test and localhost. dev-test

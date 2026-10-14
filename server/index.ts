@@ -12,6 +12,7 @@ import bootstrapRoutes from './bootstrap.routes.js'
 import configRoutes from './config.routes.js'
 import vocabRoutes from './vocab.routes.js'
 import { wipProxyGuard } from './wip-proxy-guard.js'
+import { kbUiGuard } from './kb-ui-guard.js'
 import kbClientRoutes from './kb-client.routes.js'
 import kbGatewayRoutes from './kb-gateway.routes.js'
 
@@ -105,13 +106,13 @@ router.use((req, res, next) => {
 // Browser → KB gateway bridge (CASE-484): the human UI reaches the SAME write
 // core the CLI uses — "one core, two front-ends", never a second write path.
 // The gateway requires an X-API-Key (it executes WIP calls with the caller's
-// key); a browser session carries none, so inject the server's WIP key — the
-// identical key the /wip proxy already injects for every authenticated browser
-// REST write, so the bridge grants the UI no privilege it didn't already have.
+// key); a browser session carries none, so inject the server's WIP key. That key
+// is in wip-admins, so kbUiGuard first narrows the bridge to the reads and the
+// few writes the UI makes (edges from the picker, case close/reopen, topics).
 // Mounted AFTER requireAuth(): the browser session is the credential that gates
 // it. Distinct path from the public CLI mount (/server-api/kb) — Express matches
 // on the `kb-ui` segment, so the two never collide. Body is JSON-parsed above.
-router.use('/server-api/kb-ui', (req, _res, next) => {
+router.use('/server-api/kb-ui', kbUiGuard(), (req, _res, next) => {
   if (WIP_KEY) req.headers['x-api-key'] = WIP_KEY
   next()
 }, kbGatewayRoutes)
