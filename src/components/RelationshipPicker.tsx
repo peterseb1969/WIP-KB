@@ -157,12 +157,14 @@ export function RelationshipPicker({ sourceDocId }: { sourceDocId: string }) {
       <span className="w-full text-xs">
         {isSelf ? (
           <span className="text-danger">A doc can't link to itself.</span>
+        ) : error ? (
+          // Before the preview: a failed Add keeps its target, so the preview
+          // would otherwise hide why nothing happened.
+          <span className="text-danger">{error}</span>
         ) : target ? (
           <span className="text-text-muted">→ CASE-{num.trim()} · {target.title || '(untitled)'}</span>
         ) : debounced && debounced === num.trim() && !preview.isLoading ? (
           <span className="text-danger">no case {debounced}</span>
-        ) : error ? (
-          <span className="text-danger">{error}</span>
         ) : (
           <span className="text-text-muted">Pick an edge type and a target case.</span>
         )}

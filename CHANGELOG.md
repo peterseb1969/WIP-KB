@@ -3,6 +3,20 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-14 — The browser's gateway bridge allows only the UI's own writes
+
+- **Changed:** `/server-api/kb-ui` (the browser's route into the KB gateway, carrying
+  the install's `wip-admins` key) now admits reads and exactly the writes the UI makes:
+  relationships of the picker's three types, `WEB-UI` close/comment responses linked to
+  their own case, a case status set to open or closed, and topics. Anything else,
+  including creating a knowledge base, answers 405 (`server/kb-ui-guard.ts`).
+- **Fixed:** UI writes went to the default knowledge base whatever domain was being
+  viewed. Under `/ns/<other>/`, Close case patched the default domain's case with the
+  same number, and Add relationship failed. Every bridge write now names the viewed
+  domain.
+- **Fixed:** the relationship picker hid a failed Add behind the target preview; the
+  error now shows.
+
 ## 2026-10-14 — The browser's WIP proxy is read-only apart from flags
 
 - **Changed:** `/wip` forwards with the install's API key, which is a `wip-admins` key,

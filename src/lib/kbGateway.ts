@@ -12,13 +12,20 @@
 
 // BASE_URL always ends in `/` (dev `/`, prod `/apps/kb/`); concatenating without
 // a leading slash yields the right URL in both — same pattern as lib/wipBulk.ts.
+import { CORPUS_NS } from './namespaces'
+
 const GW_BASE = `${import.meta.env.BASE_URL}server-api/kb-ui`
 
 export const WEB_UI_AUTHOR = 'WEB-UI'
 
 /** POST JSON to a gateway verb; surface the gateway's `{error}` message on failure. */
 async function gwPost<T = unknown>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${GW_BASE}${path}`, {
+  // Every write lands in the knowledge base being viewed. Without the parameter the
+  // gateway falls back to its default domain, so under /ns/<other>/ a case action
+  // would patch the default domain's case with the same number. (A Library-owned
+  // type is still routed to the Library namespace by the gateway.)
+  const sep = path.includes('?') ? '&' : '?'
+  const res = await fetch(`${GW_BASE}${path}${sep}namespace=${encodeURIComponent(CORPUS_NS)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
