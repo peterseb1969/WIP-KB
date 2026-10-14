@@ -37,6 +37,7 @@ The contract has two halves — what the **source repo** must look like, and wha
 | `server/index.ts` (Express apps) | All routes mounted on an `express.Router()` under `APP_BASE_PATH`. `app.set('trust proxy', 1)` for HTTPS termination. `requireAuth()` middleware passes through when `OIDC_ISSUER` is unset (apps-only / dev mode). In `NODE_ENV=production`, serve `dist/` statically with a SPA fallback. |
 | Runtime app-config route (CASE-551) | `GET ${APP_BASE_PATH}/api/app-config` returns the deployment's client-visible config as JSON — at minimum `{"namespace": <WIP_NAMESPACE or null>}`; multi-namespace apps add their extra keys (e.g. `library_namespace`). Allowlist only: never an env dump, never secrets (the response reaches every browser); `Cache-Control: no-store`. The SPA fetches this at boot (scaffold: `src/lib/app-config.ts`) for **every** client-visible per-deployment value — never mirror such values into `VITE_*` build bakes; a bake and runtime env are two sources that drift silently (`VITE_BASE_PATH` is the one deliberate exception — consumed at bundle-emit time, loud when wrong). The scaffold emits the route inline; apps that vendor `@wip/proxy` ≥ 0.4.0 can mount its `appConfigHandler` at the same path. |
 | Client fetches | Every URL prefixed with `import.meta.env.BASE_URL` — *never* bare `/api/...` or `/wip/...`. |
+| `wipProxy` mount order (`@wip/proxy` ≥ 0.5.0) | The proxy streams both directions (O(1) memory in payload size — large archive uploads/downloads pass through flat; no bespoke streaming routes needed). Consequence: it consumes the request as a raw stream, so it must be mounted **before** any body-parsing middleware (`express.json()`, …) that would match the same paths — a parser ahead of the proxy drains the body and an empty stream is forwarded. The deprecated `bodyLimit` option is a no-op. |
 | `Dockerfile` (production) | Multi-stage. Build stage takes `VITE_BASE_PATH` as ARG and bakes it into the static bundle. Production stage runs the server via `tsx server/index.ts` (or your app's entry), exposes the app's port, healthchecks `${APP_BASE_PATH}/api/health`. **If the manifest declares an HTTP healthcheck, the runtime image MUST contain `curl` or `wget`** — the rendered probe is a shell `curl \|\| wget` chain; an image with neither (e.g. `node:*-slim`, distroless — alpine bases get busybox `wget` for free) exits 127 on every probe and reports permanently unhealthy while the app serves fine, and the install's health-wait fails pointing at the app. Fix: install `wget` in the runtime stage (~2 MB), use an alpine base, or drop `spec.healthcheck` — the container then shows plain `Up` with no health status, like the platform router. `wip-deploy check-app-deployability` pre-flights this. |
 | `.dockerignore` | Excludes `node_modules`, `dist`, `*.log`, `.git`. Be careful with `*.md` — narrow it to `/*.md` and add explicit excludes for `papers/` / `docs/`, **not** an unscoped `*.md` that catches runtime files like `server/prompts/assistant.md`. |
 | Readme | A `## Development with wip-deploy` section documenting the contract surface for human readers. Two paragraphs. Pointers at this paper. |
@@ -125,7 +126,7 @@ The contract is small. The failure signatures when you skip a step are specific 
 
 **Symptom signature:** SPA loads. F12 → Network shows 404s on `/api/...` URLs that don't include the BASE_PATH. The Express server's own access log shows no traffic.
 
-**Origin:** every retrofit ever. `--preset query` scaffold today emits bare paths; this is the single biggest source of integration friction. The fix is `${import.meta.env.BASE_URL}<path>`.
+**Origin:** every retrofit ever — this was the single biggest source of integration friction. **Now fixed in the scaffold:** `--preset query` emits `${import.meta.env.BASE_URL}<path>` (App.tsx, SettingsPage.tsx, AskBar.tsx, lib/app-config.ts). The note stands as the rationale for hand-written apps.
 
 ### Skip 7: `/api/me` is OIDC-only
 
@@ -151,6 +152,16 @@ The contract is small. The failure signatures when you skip a step are specific 
 
 **Origin:** apps-only deployment shape. The middleware must explicitly check `if (!process.env.OIDC_ISSUER) return next()` at the top.
 
+### Followed, not skipped: the SPA fallback answers missing API routes with 200 HTML
+
+This one is different from the entries above — it bites when you implement the SPA-fallback requirement **exactly as specified**, not when you skip it. The fallback exists so deep links and reloads work (any unmatched path → `index.html`, 200). As scaffolded it is a catch-all, so it also catches **API** paths the server doesn't have: a request for a route that does not exist gets `200 text/html`, never a 404.
+
+**Failure:** a JSON client calls an API route the server lacks — typically a client newer than the gateway it talks to, which is the *normal* state during a rollout — and receives `index.html` with 200. `JSON.parse` / `json.loads` dies on `<!DOCTYPE html>…`.
+
+**Symptom signature:** `JSONDecodeError: Expecting value: line 1 column 1 (char 0)` (or the JS equivalent) that looks like a parse bug or corrupt data. The real cause is a missing route. Second-order signature: any `if status == 404 → "route not available on this instance"` degradation branch in a client is **dead code against a contract-compliant server** — it compiles, reads correctly, and has never once fired. Do not branch on 404 to detect a missing route; decide on **content-type** (got HTML where JSON was expected). Do not flatten `JSONDecodeError` into "route missing" either — that trades a loud bug for a silent one when an existing route returns malformed JSON.
+
+**Origin:** WIP-KB's read client shipped "unavailable on this instance" messages that were unreachable since the day they were written; found while testing the degradation path for a newly added verb (CASE-831 has the full analysis). Fixed consumer-side in WIP-KB by switching the guard to content-type. The cause-side fix — excluding the API prefixes from the fallback so unmatched `/server-api/*`, `/api/*`, `/wip/*` genuinely 404 while page routes still fall through — is a scaffold change (see the scaffold-gaps table).
+
 ---
 
 ## Platform invariants you can rely on
@@ -168,6 +179,10 @@ These are platform-side guarantees the contract assumes. They're invariants toda
 
 - **External CA trust is auto-injected into app containers (Node-stack)** — when an apps-only install carries a `secrets/external-ca.crt` (seeded by `wip-deploy import-bundle`), the deployer automatically bind-mounts it read-only at **`/etc/ssl/certs/external-ca.crt`** in every app container and sets **`NODE_EXTRA_CA_CERTS`** to that path. You declare nothing — there is no manifest field; the behaviour flips on purely from the CA file's presence (the deployer's `install`/`render` auto-detect it). **Node-stack apps** pick the extra CA up transparently (Node reads `NODE_EXTRA_CA_CERTS`); **Python / Go / Rust apps ignore it** and use their own trust stores (`certifi`, the system pool, …) — harmless either way. Two reservations follow: don't unset `NODE_EXTRA_CA_CERTS`, and don't bind your own file at `/etc/ssl/certs/external-ca.crt`. Backend / full-stack installs never see this — it is apps-only. For the operator-side flow that makes the CA file exist in the first place, see `docs/design/bootstrap-bundle.md`.
 
+One **non-guarantee** belongs in the same list, because apps have assumed its opposite:
+
+- **Registered reporting views are not archived — apps own them.** WIP backup/restore carries MongoDB state only; registered SQL views (`POST /api/reporting-sync/namespace/{ns}/views`) live in PostgreSQL bookkeeping and come back **missing after every restore, by design**. An app that queries a registered view must tolerate its absence and re-register it idempotently (re-registering an existing name replaces the definition): at bootstrap, at startup, and again when a query fails on a missing relation. Registration validates the SQL against real reporting tables, which exist only after reporting-sync has synced the namespace — so a failure right after bootstrap or restore is a retry, not an error. The bootstrap scaffold ships this pattern as `server/seed/views/` + `ensureRegisteredViews()` / `ensureRegisteredViewsWithRetry()` in `bootstrap.server.ts.template`. Views registered by hand outside any app bootstrap are ephemeral: nothing recreates them after a restore.
+
 You don't need to test these. They're stable. Just use them.
 
 ---
@@ -176,7 +191,7 @@ You don't need to test these. They're stable. Just use them.
 
 With `BASE_PATH` defaulting to `/` and `import.meta.env.BASE_URL` defaulting to `/`:
 
-- Vite's dev server proxy keys become `'' + '/api'`, `'' + '/wip'`, `'' + '/server-api'` — same as a non-deployable scaffold today.
+- Vite's dev server proxy keys become `${PREFIX}/api` and `${PREFIX}/wip` (the scaffold emits exactly these two; there is no `/server-api` proxy key).
 - Express router mounts at `/` — routes resolve to identical paths.
 - All client fetches resolve to the same URLs.
 - Session cookie path is `/` — same as today.
@@ -218,10 +233,11 @@ What `--preset query` ships today vs. what this paper recommends:
 | `src/lib/wipBulk.ts` | `fetch('/wip' + path)` | `fetch(\`${import.meta.env.BASE_URL}wip\` + path)` |
 | Inline client fetches | Bare paths | Prefixed with `${import.meta.env.BASE_URL}` |
 | `/api/me` | OIDC session only | Gateway-header sniff → OIDC → anonymous |
-| `Dockerfile.dev` | Not in scaffold | Provided as starter (canonical pattern) |
-| `Dockerfile` (production) | Not in scaffold | Two-stage; `VITE_BASE_PATH` as ARG |
-| `.dockerignore` | Not in scaffold | Provided; narrow `*.md` exclusion called out |
-| `apps/<name>/wip-app.yaml` | Not in scaffold | Provided alongside source-repo files; declares both ports + required env |
+| SPA fallback scope | Catch-all under the base path — missing API routes return 200 HTML | Exclude the API prefixes (`/server-api`, `/api`, `/wip`) so unmatched API paths 404; page routes still fall through to `index.html` |
+| `Dockerfile.dev` | **In scaffold** | Provided as starter (canonical pattern) |
+| `Dockerfile` (production) | **In scaffold** | Two-stage; `VITE_BASE_PATH` as ARG |
+| `.dockerignore` | **In scaffold** | Provided; narrow `*.md` exclusion called out |
+| `apps/<name>/wip-app.yaml` | **In scaffold** | Provided alongside source-repo files; declares both ports + required env |
 
 These are mechanical scaffold edits. The right move is filing a case (BE-YAC owns the scaffold today) to fold each into `--preset query` so the next APP-YAC doesn't relearn them.
 
@@ -244,4 +260,4 @@ You don't have to actually deploy to k8s on day 1. You don't have to deploy at a
 
 This paper supersedes `WIP-KB/papers/k8s-from-start-app-yac-recipe.md` (KB-YAC, 2026-05-13). The original was retrofit-driven; this version is contract-driven. Title and scope generalized. The original is preserved as a stub at its old path so existing links / case references still resolve.
 
-Filed via CASE-379 (BE-YAC, 2026-05-14). Synthesizes the platform-side work from CASE-358 / CASE-359 / CASE-360 / CASE-361 / CASE-366 / CASE-374 / CASE-375 / CASE-377 / CASE-378, plus the WIP-KB and WIP-AA app-side containerization commits. Versioned-tarball invariant added 2026-06-10 (CASE-441 / CASE-442, BE-YAC). Companion modelling-discipline note added 2026-06-21 (CASE-480, FRanC) — a pointer to the canonical clause in the modelling gate, not a second copy.
+Filed via CASE-379 (BE-YAC, 2026-05-14). Synthesizes the platform-side work from CASE-358 / CASE-359 / CASE-360 / CASE-361 / CASE-366 / CASE-374 / CASE-375 / CASE-377 / CASE-378, plus the WIP-KB and WIP-AA app-side containerization commits. Versioned-tarball invariant added 2026-06-10 (CASE-441 / CASE-442, BE-YAC). Companion modelling-discipline note added 2026-06-21 (CASE-480, FRanC) — a pointer to the canonical clause in the modelling gate, not a second copy. Registered-views non-guarantee added 2026-10-13 (CASE-849 resolution, BE-YAC): archives never carry views; apps re-register idempotently.
