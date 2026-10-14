@@ -487,16 +487,12 @@ export async function fetchPeerDegrees(
   if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
   const idList = quoteIds(ids)
   if (!idList) return new Map()
-  const { rows: edgeTables } = await reportingQuery<{ table_name: string }>(
-    namespace,
-    `SELECT table_name FROM information_schema.columns ` +
-      `WHERE table_schema = '${namespace}' AND table_name LIKE 'doc_%' AND column_name = 'source_ref'`,
-  )
-  if (edgeTables.length === 0) return new Map()
-  const union = edgeTables
-    .flatMap((t) => [
-      `SELECT source_ref AS ref FROM "${namespace}"."${t.table_name}" WHERE ${ONLY_ACTIVE}`,
-      `SELECT target_ref AS ref FROM "${namespace}"."${t.table_name}" WHERE ${ONLY_ACTIVE}`,
+  const views = await edgeViews(namespace)
+  if (views.length === 0) return new Map()
+  const union = views
+    .flatMap((v) => [
+      `SELECT source_ref AS ref FROM "${namespace}"."${v}" WHERE ${ONLY_ACTIVE}`,
+      `SELECT target_ref AS ref FROM "${namespace}"."${v}" WHERE ${ONLY_ACTIVE}`,
     ])
     .join(' UNION ALL ')
   const { rows } = await reportingQuery<{ ref: string; c: number }>(
@@ -505,4 +501,48 @@ export async function fetchPeerDegrees(
     10000,
   )
   return new Map(rows.map((r) => [r.ref, r.c]))
+}
+
+// The edge-type relations to query: one entity view per edge type ("doc_<type>").
+// Each edge type also has a physical table per template version (doc_<type>__v<N>)
+// and an __entities relation with the same rows, so selecting every relation that
+// has a source_ref column counts each edge several times.
+async function edgeViews(namespace: string): Promise<string[]> {
+  const { rows } = await reportingQuery<{ table_name: string }>(
+    namespace,
+    `SELECT DISTINCT table_name FROM information_schema.columns ` +
+      `WHERE table_schema = '${namespace}' AND table_name LIKE 'doc_%' AND column_name = 'source_ref'`,
+  )
+  return rows.map((r) => r.table_name).filter((t) => !/__(v\d+|entities)$/.test(t))
+}
+
+export interface EdgeRow {
+  edgeType: string // template value, e.g. REFERENCES
+  sourceId: string
+  targetId: string
+}
+
+// Every active edge with either end in `ids`, across all edge types — one query.
+// The case page uses it for its responses' own links, which the case's
+// relationships call does not return because they belong to the response documents.
+export async function fetchEdgesTouching(namespace: string, ids: string[]): Promise<EdgeRow[]> {
+  if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
+  const idList = quoteIds(ids)
+  if (!idList) return []
+  const views = await edgeViews(namespace)
+  if (views.length === 0) return []
+  const sql = views
+    .map(
+      (v) =>
+        `SELECT '${v.slice('doc_'.length).toUpperCase()}' AS edge_type, source_ref, target_ref ` +
+        `FROM "${namespace}"."${v}" WHERE ${ONLY_ACTIVE} ` +
+        `AND (source_ref IN (${idList}) OR target_ref IN (${idList}))`,
+    )
+    .join(' UNION ALL ')
+  const { rows } = await reportingQuery<{ edge_type: string; source_ref: string; target_ref: string }>(
+    namespace,
+    sql,
+    10000,
+  )
+  return rows.map((r) => ({ edgeType: r.edge_type, sourceId: r.source_ref, targetId: r.target_ref }))
 }
