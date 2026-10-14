@@ -3,6 +3,19 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+
+## 2026-10-15 — Client page and playbook catch up with projects and knowledge bases
+
+- **Changed:** the Client page gains a **Projects** section (what a project is, the brief
+  and its `/project/<project>` page, automatic tagging from `kb.json` `project`, project
+  search and filters, creating a profile, adding the `KB_APP` term) and a **Knowledge
+  bases** section (`kb-namespace.py create`, `kb.json` `namespace`, `--namespace`, the
+  `/ns/<name>/` address). Quick start shows the brief. Auth & config lists all four
+  `kb.json` keys and their environment overrides.
+- **Changed:** the case playbook documents `search --namespace` / `--project` and has a
+  "Projects and knowledge bases" section.
+- Stated plainly: the client cannot upload a tooling archive yet; the page says how to
+  attach one by hand.
 ## 2026-10-14 — Response links on the case page (CASE-829)
 
 - **Fixed:** a relationship whose source is a case *response* (e.g. CASE-827#3

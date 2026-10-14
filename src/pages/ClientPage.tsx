@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Copy, Check, Download, Terminal, RefreshCw, KeyRound, FileText, Library } from 'lucide-react'
+import { Copy, Check, Download, Terminal, RefreshCw, KeyRound, FileText, Library, Boxes, Layers } from 'lucide-react'
 
 // The app's own backend (not the WIP proxy): kb-client + gateway routes are
 // served at {BASE_URL}server-api/* and authed by the app session — no X-API-Key
@@ -31,8 +32,8 @@ const FILE_ROLES: Record<string, Role> = {
   'kb-client.sh': { role: 'Runner — fetches/refreshes the bundle; run scripts via it', extra: true },
   'install.sh': { role: 'Bootstrap — `curl | sh` materializes the bundle', extra: true },
   'kb_client_core.py': { role: 'Shared core — kb.json/API-key resolution + gateway transport (gw_get/gw_post, failover)' },
-  'case-fetch.py': { role: 'Read — case (body + response thread) / journey / list / fireside / library / edges / flags / read <TYPE> (generic typed read) / search (full-text across a knowledge domain + library, --namespace to pick one) / topics (the topic vocabulary writes are validated against) / brief [<app>] (a project\'s context in one read; --tooling DIR saves its tooling archive), all via the gateway' },
-  'kb-namespace.py': { role: 'Create a new knowledge domain — a namespace seeded with the full corpus model, via POST /namespaces' },
+  'case-fetch.py': { role: 'Read — case (body + response thread) / journey / list / fireside / library / edges / flags / read <TYPE> (generic typed read) / search (full-text across a knowledge base + library, --namespace to pick one; --project for one project) / topics (the topic vocabulary writes are validated against) / brief [<app>] (a project\'s context in one read; --tooling DIR saves its tooling archive), all via the gateway' },
+  'kb-namespace.py': { role: 'Create a new knowledge base — a namespace seeded with the full KB model, via POST /namespaces' },
   'kb-write.py': { role: 'The write client — any doc type via POST /write/:type (file/dir/json sources, edges, patch, and git-stats via --git-repo)' },
   'case-workflow.md': { role: 'Playbook — authoritative case how-to (rendered below)', extra: true },
   'README.md': { role: 'Bundle readme', extra: true },
@@ -69,6 +70,24 @@ generated_from_rev: 69841f4f
 
 # Document Store API
 … generated body …`
+
+const KBC_RUN = 'bash ~/.cache/wip-kb-client/kb-client.sh'
+
+const PROJECT_PROFILE = `${KBC_RUN} kb-write.py PROJECT --json '{
+  "app": "<project>",
+  "title": "<display name>",
+  "body": "<scope: what the project is, what it owns, where its code lives>",
+  "repo_ids": ["<repository id>"],
+  "authored_by": "<your session id>",
+  "doc_status": "published"
+}'`
+
+const KB_JSON_SAMPLE = `{
+  "kb_app_url": "https://kb.internal",
+  "kb_api_key_file": "~/.wip-deploy/kb/secrets/api-key",
+  "namespace": "kb",
+  "project": "<project>"
+}`
 
 const SERVING_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb-client/manifest', 'files[] + bundle_digest (derived at serve time)'],
@@ -188,9 +207,11 @@ export default function ClientPage() {
           This KB is the single source of truth. Interact three ways:{' '}
           <strong className="text-text">served CLI client</strong> (humans + YAC slash-commands),{' '}
           <strong className="text-text">gateway REST API</strong> (deterministic reads/writes), and{' '}
-          <strong className="text-text">MCP</strong> (agents). The CLI client is fetched from this
-          instance and refreshes itself — everything below is read live from what this instance
-          actually serves.
+          <strong className="text-text">MCP</strong> (agents). Its content is organised in{' '}
+          <strong className="text-text">knowledge bases</strong> (one namespace each), and inside one,
+          by <strong className="text-text">project</strong>. The CLI client is fetched from this
+          instance and refreshes itself; the file list and version below are read live from what
+          this instance serves.
         </p>
       </header>
 
@@ -207,13 +228,105 @@ export default function ClientPage() {
           them):
         </p>
         <Copyable text={writeCmd} label="Copy write command" />
-        <p className="mt-3 text-sm text-text-muted">
-          The instance the client targets is the single source of truth in{' '}
-          <code className="font-mono text-xs">.claude/kb.json</code> (
-          <code className="font-mono text-xs">kb_app_url</code> +{' '}
-          <code className="font-mono text-xs">kb_api_key_file</code>) — the runner derives both from
-          it, so a hostname change is one edit there.
+        <p className="mb-2 mt-3 text-sm text-text-muted">
+          At the start of a session in a project's repository, read the project's brief (see
+          Projects below):
         </p>
+        <Copyable text={`${KBC_RUN} case-fetch.py brief`} label="Copy brief command" />
+        <p className="mt-3 text-sm text-text-muted">
+          Which instance, knowledge base and project the client works with all come from{' '}
+          <code className="font-mono text-xs">.claude/kb.json</code> (see Auth &amp; config), so a
+          hostname change is one edit there.
+        </p>
+      </Section>
+
+      <Section icon={Boxes} title="Projects">
+        <p className="mb-3 text-sm text-text-muted">
+          A <strong className="text-text">project</strong> is a <code className="font-mono text-xs">KB_APP</code>{' '}
+          term inside a knowledge base. Its documents are the ones tagged with it: cases, decisions,
+          lessons, firesides, sessions, memories and mirrored documents all carry an optional{' '}
+          <code className="font-mono text-xs">app</code> field. Any alias of the term works wherever a
+          project is named. A project may also have one <code className="font-mono text-xs">PROJECT</code>{' '}
+          profile document: its scope, repositories and a tooling archive.
+        </p>
+        <p className="mb-2 text-sm text-text-muted">
+          <strong className="text-text">Read it in one go.</strong> The brief lists the profile, open
+          cases, the newest decisions, lessons and firesides, recent sessions, memories and documents
+          (handles and titles; each is one read away). Without a name it uses the repository's
+          configured project. <code className="font-mono text-xs">--tooling DIR</code> also saves the
+          tooling archive, as stored and never unpacked. The same brief is a page here:{' '}
+          <Link to="/project/KB" className="font-mono text-xs text-primary hover:underline">
+            /project/&lt;project&gt;
+          </Link>
+          , linked from each entry of the Project facet on Search.
+        </p>
+        <Copyable text={`${KBC_RUN} case-fetch.py brief [<project>] [--tooling DIR]`} label="Copy brief command" />
+        <p className="mb-2 mt-3 text-sm text-text-muted">
+          <strong className="text-text">Tag what you write.</strong> Put{' '}
+          <code className="font-mono text-xs">"project": "&lt;project&gt;"</code> in{' '}
+          <code className="font-mono text-xs">.claude/kb.json</code> and every write of a type that has an{' '}
+          <code className="font-mono text-xs">app</code> field is tagged with it, unless the document
+          names its own <code className="font-mono text-xs">app</code> (an explicit value always wins).
+        </p>
+        <p className="mb-2 text-sm text-text-muted">
+          <strong className="text-text">Find a project's documents</strong> by content or by type:
+        </p>
+        <Copyable
+          text={`${KBC_RUN} case-fetch.py search "<terms>" --project <project>
+${KBC_RUN} case-fetch.py read LESSON --filter app=<project>`}
+          label="Copy project search commands"
+        />
+        <p className="mb-2 mt-3 text-sm text-text-muted">
+          <strong className="text-text">Create or update the profile.</strong> Its identity is{' '}
+          <code className="font-mono text-xs">app</code>, so writing again under any alias updates the
+          same profile:
+        </p>
+        <Copyable text={PROJECT_PROFILE} label="Copy PROJECT profile command" />
+        <ul className="mt-3 space-y-1.5 text-sm text-text-muted">
+          <li>
+            • A new project needs its <code className="font-mono text-xs">KB_APP</code> term first. An
+            administrator adds it (and any other spellings) on{' '}
+            <Link to="/settings" className="text-primary hover:underline">
+              Settings → Vocabulary
+            </Link>
+            .
+          </li>
+          <li>
+            • The client cannot upload files, so it cannot attach a tooling archive yet. Upload the
+            archive through WIP's file API, then set it with{' '}
+            <code className="font-mono text-xs">kb-write.py PROJECT --patch tooling=&lt;file_id&gt; --match document_id=&lt;profile id&gt;</code>{' '}
+            (the profile's id is in <code className="font-mono text-xs">brief --format json</code>).
+          </li>
+        </ul>
+      </Section>
+
+      <Section icon={Layers} title="Knowledge bases">
+        <p className="mb-3 text-sm text-text-muted">
+          A <strong className="text-text">knowledge base</strong> is a namespace seeded with the full KB
+          model. Each has its own documents, numbering (its own CASE-1), vocabularies and
+          relationships, and links cannot cross from one to another. Most work happens in the default
+          one; a project that needs to be walled off gets its own.
+        </p>
+        <Copyable text={`${KBC_RUN} kb-namespace.py create <name>`} label="Copy create command" />
+        <ul className="mt-3 space-y-1.5 text-sm text-text-muted">
+          <li>
+            • Creating one runs with your key, and WIP decides whether that key may create namespaces.
+            An existing namespace with content is never re-seeded.
+          </li>
+          <li>
+            • To make a repository work in one, set{' '}
+            <code className="font-mono text-xs">"namespace": "&lt;name&gt;"</code> in{' '}
+            <code className="font-mono text-xs">.claude/kb.json</code>; every read and write then goes
+            there. For a single command, <code className="font-mono text-xs">search</code>,{' '}
+            <code className="font-mono text-xs">read</code>, <code className="font-mono text-xs">brief</code>{' '}
+            and <code className="font-mono text-xs">topics</code> take{' '}
+            <code className="font-mono text-xs">--namespace</code>.
+          </li>
+          <li>
+            • In the app, each one has its own address, <code className="font-mono text-xs">/apps/kb/ns/&lt;name&gt;/</code>,
+            and the Knowledge base switcher in the sidebar lists them.
+          </li>
+        </ul>
       </Section>
 
       <Section icon={RefreshCw} title="The bundle — self-refreshing">
@@ -358,8 +471,20 @@ export default function ClientPage() {
             never pasted as a literal.
           </li>
           <li>
-            • <code className="font-mono text-xs">.claude/kb.json</code> is the single source of truth
-            for URL + key file; the runner and the python client derive both from it.
+            • <code className="font-mono text-xs">.claude/kb.json</code> is the single source of truth;
+            the runner and the python client derive everything from it.{' '}
+            <code className="font-mono text-xs">kb_app_url</code> and{' '}
+            <code className="font-mono text-xs">kb_api_key_file</code> are required;{' '}
+            <code className="font-mono text-xs">namespace</code> (the knowledge base, default: the
+            instance's) and <code className="font-mono text-xs">project</code> (tags your writes) are
+            optional. Environment variables override them:{' '}
+            <code className="font-mono text-xs">KB_BASE_URL</code>,{' '}
+            <code className="font-mono text-xs">KB_API_KEY_FILE</code>,{' '}
+            <code className="font-mono text-xs">KB_NAMESPACE</code>,{' '}
+            <code className="font-mono text-xs">KB_PROJECT</code>.
+            <div className="mt-2">
+              <Copyable text={KB_JSON_SAMPLE} label="Copy kb.json sample" />
+            </div>
           </li>
           <li>
             • Pairing guard: overriding the base URL without the matching key fails loud —

@@ -309,6 +309,9 @@ kbc case-fetch.py search "restore" --mode substring --limit 50
 #   --mode   auto (default) | fts | substring — auto falls back to substring when
 #            FTS finds nothing
 #   --limit  max hits (default 25, cap 100); output flags when it truncated
+#   --namespace  search another knowledge base (default: the configured one); the
+#                library is always included
+#   --project    only documents tagged with this project (any alias of its KB_APP term)
 #   --format table|json
 ```
 
@@ -403,3 +406,39 @@ FLAG_RECORD's identity is `[flag_type, flagged_document]`.) Re-flagging the
 same doc in the UI upserts that identity back to `published`, which re-arms
 the trigger after a failed run. `--doc-status dispatched` / `all` list
 consumed / every flag.
+
+---
+
+## Projects and knowledge bases (DECISION-1)
+
+A **project** is a `KB_APP` term inside a knowledge base. Its documents are the ones
+whose `app` field names it: cases, decisions, lessons, firesides, sessions, memories,
+mirrored documents. Any alias of the term works wherever a project is named. An optional
+`PROJECT` profile document carries its scope, repository ids and a tooling archive.
+
+```bash
+kbc case-fetch.py brief                       # the configured project's context in one read
+kbc case-fetch.py brief <project> --tooling DIR   # another project; also save its archive (never unpacked)
+kbc case-fetch.py search "<terms>" --project <project>
+kbc case-fetch.py read CASE_RECORD --filter app=<project>
+```
+
+- **Read the brief at session start** in a project's repository. It lists open cases and
+  the newest decisions, lessons, firesides, sessions, memories and documents as handles
+  and titles; each is one read away. Untagged documents are not listed, so an empty
+  section means "nothing tagged", not "nothing exists".
+- **Tagging is automatic** when `.claude/kb.json` has `"project": "<project>"`: every
+  write of a type with an `app` field is tagged with it unless the document names its
+  own `app` (an explicit value wins). Without the key, set `app:` in the frontmatter.
+- **A new project needs its `KB_APP` term first.** An administrator adds it on the
+  app's Settings → Vocabulary page; writing an unknown project is rejected.
+- **Profile:** `kbc kb-write.py PROJECT --json '{"app": …, "title": …, "body": "<scope>",
+  "repo_ids": […], "authored_by": …, "doc_status": "published"}'`. Its identity is `app`,
+  so writing again updates the same profile.
+
+A **knowledge base** is a namespace seeded with the full KB model, with its own
+documents, numbering, vocabularies and relationships; links cannot cross between
+knowledge bases. `kbc kb-namespace.py create <name>` makes one (with your key; WIP
+decides whether it may). `"namespace": "<name>"` in `.claude/kb.json` points the whole
+client at it; `search`, `read`, `brief` and `topics` also take `--namespace` for a
+single command.
