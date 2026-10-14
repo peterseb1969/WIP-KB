@@ -90,6 +90,8 @@ const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb/topics?type=&namespace=', 'the topic vocabulary a type\'s validated `topics` field draws from, as a hierarchy with aliases'],
   ['POST', 'kb/write/:type', 'THE write path — {data, edges[]} or {patch, match}. Routes to the type’s home namespace (LIBRARY_DOC → library)'],
   ['POST', 'kb/edges', 'attach an edge between two EXISTING docs — the sanctioned retry for a failed edge intent'],
+  ['GET', 'kb/projects/:app/brief?namespace=', 'a project\'s context in one read: PROJECT profile, open cases, newest decisions/lessons/firesides, recent sessions, memories, mirrored docs (handles + titles); :app = any alias'],
+  ['GET', 'kb/projects/:app/tooling?namespace=', 'the project\'s tooling archive, streamed as stored (never unpacked or run)'],
   ['POST', 'kb/namespaces', 'create a new knowledge domain — a namespace seeded with the full corpus model; 409 if it exists (never re-seeds)'],
 ]
 

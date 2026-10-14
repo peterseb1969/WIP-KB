@@ -1354,6 +1354,135 @@ router.get('/library-docs/:slug', async (req, res) => {
 // metadata.custom.write the gateway mints from ('mint' when present, else
 // 'natural' upsert by identity). The schema is the single source — this just
 // surfaces it, so the client never hand-maintains a type list.
+// --- Project brief (DECISION-1, option one) --------------------------------------
+// One read that gives a project's Claude its context at session start, and the data
+// behind the UI's project page. A project is a KB_APP term; every document tagged
+// with that term (resolved term id, so any alias the writer used counts) belongs to
+// it. Caller's key throughout, document-store reads only — no raw reporting SQL,
+// which namespace-scoped keys may not run. Lists carry handles and titles, not
+// bodies: the brief stays small and every item is one `kbc` read away.
+const BRIEF_SECTIONS: Array<{ key: string; type: string; limit: number; open?: boolean }> = [
+  { key: 'open_cases', type: 'CASE_RECORD', limit: 20, open: true },
+  { key: 'decisions', type: 'DESIGN_DECISION', limit: 10 },
+  { key: 'lessons', type: 'LESSON', limit: 10 },
+  { key: 'firesides', type: 'FIRESIDE', limit: 10 },
+  { key: 'sessions', type: 'SESSION', limit: 5 },
+  { key: 'memories', type: 'YAC_MEMORY', limit: 20 },
+  { key: 'documents', type: 'DOCUMENT', limit: 20 },
+]
+
+function briefItem(type: string, d: AnyObj): AnyObj {
+  const x = d.data || {}
+  const handle =
+    type === 'CASE_RECORD' ? `CASE-${x.case_number}` :
+    type === 'DESIGN_DECISION' ? `DECISION-${x.decision_number}` :
+    type === 'LESSON' ? `LESSON-${x.lesson_number}` :
+    type === 'FIRESIDE' ? `FIRESIDE-${x.fireside_number}` :
+    type === 'DOCUMENT' ? `PAPER-${x.paper_number}` :
+    type === 'SESSION' ? x.session_id :
+    type === 'YAC_MEMORY' ? `${x.owner}/${x.mem_key}` : d.document_id
+  const out: AnyObj = { handle, document_id: d.document_id, title: x.title ?? null, updated_at: d.updated_at ?? null }
+  if (type === 'CASE_RECORD') Object.assign(out, { status: x.status ?? null, target_yac: x.target_yac ?? null })
+  if (type === 'SESSION') Object.assign(out, { status: x.status ?? null, started_at: x.started_at ?? null, ended_at: x.ended_at ?? null })
+  if (type === 'YAC_MEMORY') out.description = x.description ?? null
+  if (type === 'DOCUMENT') Object.assign(out, { path: x.path ?? null, synced_from_sha: x.synced_from_sha ?? null })
+  return out
+}
+
+// The project's term and profile, shared by the brief and the tooling download.
+async function projectOf(appQ: string, ns: string, key: string): Promise<{ term: AnyObj; profile: AnyObj | null }> {
+  const tm = await wipReq('GET', `/api/def-store/terminologies/by-value/KB_APP?namespace=${encodeURIComponent(ns)}`, key)
+  const term = await resolveTerm(tm.terminology_id, appQ, key)
+  if (!term?.term_id) throw new WipError(404, `'${appQ}' names no KB_APP term in ${ns}`)
+  let profile: AnyObj | null = null
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${encodeURIComponent(ns)}`, key, {
+      template_id: await templateId('PROJECT', ns, key),
+      filters: [{ field: 'term_references.term_id', operator: 'eq', value: term.term_id }],
+      sort_by: 'updated_at', sort_order: 'desc', page_size: 1,
+    })
+    profile = (d.items ?? [])[0] ?? null
+  } catch {
+    profile = null // no PROJECT type in this domain (not migrated): a brief without a profile
+  }
+  return { term, profile }
+}
+
+// GET /projects/:app/brief?namespace= — the project brief (see above).
+router.get('/projects/:app/brief', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  try {
+    const { term, profile } = await projectOf(req.params.app, ns, key)
+    let tooling: AnyObj | null = null
+    const fileId = profile?.data?.tooling
+    if (typeof fileId === 'string' && fileId) {
+      try {
+        const f = await wipReq('GET', `/api/document-store/files/${encodeURIComponent(fileId)}`, key)
+        tooling = { file_id: fileId, filename: f.filename ?? null, size_bytes: f.size_bytes ?? null, content_type: f.content_type ?? null }
+      } catch {
+        tooling = { file_id: fileId, filename: null, size_bytes: null, content_type: null }
+      }
+    }
+    const sections: AnyObj = {}
+    await Promise.all(BRIEF_SECTIONS.map(async (sec) => {
+      try {
+        const filters: AnyObj[] = [{ field: 'term_references.term_id', operator: 'eq', value: term.term_id }]
+        if (sec.open) filters.push({ field: 'data.status', operator: 'in', value: ['open', 'responded'] })
+        const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${encodeURIComponent(ns)}`, key, {
+          template_id: await templateId(sec.type, ns, key), filters,
+          sort_by: 'updated_at', sort_order: 'desc', page_size: sec.limit,
+        })
+        sections[sec.key] = { total: d.total ?? 0, items: ((d.items ?? []) as AnyObj[]).map((x) => briefItem(sec.type, x)) }
+      } catch {
+        sections[sec.key] = { total: null, items: [], unavailable: true }
+      }
+    }))
+    res.json({
+      app: term.value, namespace: ns, as_of: new Date().toISOString(),
+      project: profile ? {
+        document_id: profile.document_id, title: profile.data?.title ?? null, scope: profile.data?.body ?? null,
+        repo_ids: profile.data?.repo_ids ?? [], tooling, updated_at: profile.updated_at ?? null,
+      } : null,
+      // Stated so an agent reading the brief never takes an empty list for "none exist".
+      notes: [
+        `Everything listed lives in the '${ns}' namespace and is tagged with this project's KB_APP term; untagged documents are not listed.`,
+        'Cases are shared across projects in this domain; the open-case list is only those tagged with this project.',
+        'Documents are mirrors: each lists the commit it was last synced from, which may lag its repository.',
+      ],
+      sections,
+    })
+  } catch (e) {
+    res.status(errStatus(e)).json({ error: (e as Error).message })
+  }
+})
+
+// GET /projects/:app/tooling?namespace= — the project's tooling archive, streamed
+// as stored. Never unpacked or executed here; what to do with it is the caller's call.
+router.get('/projects/:app/tooling', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  try {
+    const { profile } = await projectOf(req.params.app, ns, key)
+    const fileId = profile?.data?.tooling
+    if (typeof fileId !== 'string' || !fileId) {
+      return res.status(404).json({ error: `project '${req.params.app}' has no tooling archive` })
+    }
+    const meta = await wipReq('GET', `/api/document-store/files/${encodeURIComponent(fileId)}`, key)
+    const up = await fetch(`${WIP_BASE}/api/document-store/files/${encodeURIComponent(fileId)}/content`, {
+      headers: { 'X-API-Key': key },
+    })
+    if (!up.ok || !up.body) return res.status(up.status || 502).json({ error: `tooling download failed: ${up.status}` })
+    res.setHeader('Content-Type', meta.content_type || 'application/octet-stream')
+    res.setHeader('Content-Disposition', `attachment; filename="${String(meta.filename || 'tooling').replace(/"/g, '')}"`)
+    res.send(Buffer.from(await up.arrayBuffer()))
+  } catch (e) {
+    res.status(errStatus(e)).json({ error: (e as Error).message })
+  }
+})
+
 router.get('/types', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return

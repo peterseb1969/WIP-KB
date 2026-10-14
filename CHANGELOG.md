@@ -3,6 +3,23 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-14 — Project brief and tooling download (gateway)
+
+- **Added:** `GET /projects/:app/brief` — a project's context in one read: the `PROJECT`
+  profile (scope, repo ids, tooling archive name/size), a where-things-live note, and
+  the project's open cases, newest decisions / lessons / firesides, recent sessions,
+  memories and mirrored documents (with the commit each was synced from). Handles and
+  titles, not bodies. `:app` is any alias of the KB_APP term. Caller's key, document
+  store reads only.
+- **Added:** `GET /projects/:app/tooling` — streams the project's tooling archive as
+  stored; never unpacked or run.
+- Verified on localhost after WIP's typed-names term model (CASE-872 era) landed: term
+  resolution, aliases in responses, the brief, the download and a fresh seed bootstrap
+  all work. Note for vocabulary writes (CASE-828): an alias update still replaces the
+  list, and an alias equal to the term's own value or a duplicate alias is now rejected
+  (`invalid_names`).
+- Not yet: the `kbc case-fetch.py brief` verb and the UI project page.
+
 ## 2026-10-14 — Backfill `app` onto existing documents
 
 - **Added:** `tools/backfill-app.py` + `tools/backfill-app-mapping.json`. Infers a
