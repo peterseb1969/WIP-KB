@@ -130,7 +130,9 @@ function seedDrift(live: TermView[], seed: SeedTerm[]): Drift[] {
     }
     const fields: Array<{ field: string; seed: unknown; live: unknown }> = []
     if (s.label !== t.label) fields.push({ field: 'label', seed: s.label, live: t.label })
-    if ((s.description ?? null) !== (t.description ?? null)) {
+    // An empty description is no description: WIP cannot clear one except by
+    // storing an empty string.
+    if ((s.description || null) !== (t.description || null)) {
       fields.push({ field: 'description', seed: s.description, live: t.description })
     }
     if (s.sort_order !== t.sort_order) fields.push({ field: 'sort_order', seed: s.sort_order, live: t.sort_order })
