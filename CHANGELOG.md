@@ -3,7 +3,7 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
-## 2026-10-15 — Response links on the case page (CASE-829)
+## 2026-10-14 — Response links on the case page (CASE-829)
 
 - **Fixed:** a relationship whose source is a case *response* (e.g. CASE-827#3
   REFERENCES a fireside) was stored but shown nowhere: the case page only asked for the
