@@ -120,3 +120,82 @@ export function patchCaseStatus(
     match: { case_number: caseNumber },
   })
 }
+
+/** A failed gateway read; `status` lets a caller tell "not there" from "broken". */
+export class GatewayError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+  }
+}
+
+/** GET a gateway read; surface the gateway's `{error}` message on failure. */
+async function gwGet<T = unknown>(path: string): Promise<T> {
+  const res = await fetch(`${GW_BASE}${path}`)
+  const text = await res.text()
+  let json: unknown
+  try {
+    json = text ? JSON.parse(text) : {}
+  } catch {
+    json = { error: text }
+  }
+  if (!res.ok) {
+    const msg = (json as { error?: string })?.error || `${res.status} ${res.statusText}`
+    throw new GatewayError(msg, res.status)
+  }
+  return json as T
+}
+
+export interface BriefItem {
+  handle: string
+  document_id: string
+  title: string | null
+  updated_at: string | null
+  status?: string | null
+  target_yac?: string | null
+  started_at?: string | null
+  ended_at?: string | null
+  description?: string | null
+  path?: string | null
+  synced_from_sha?: string | null
+}
+
+export interface BriefSection {
+  total: number | null
+  items: BriefItem[]
+  unavailable?: boolean
+}
+
+export interface ProjectBrief {
+  app: string
+  namespace: string
+  as_of: string
+  project: {
+    document_id: string
+    title: string | null
+    scope: string | null
+    repo_ids: string[]
+    tooling: {
+      file_id: string
+      filename: string | null
+      size_bytes: number | null
+      content_type: string | null
+    } | null
+    updated_at: string | null
+  } | null
+  notes: string[]
+  sections: Record<string, BriefSection>
+}
+
+/**
+ * A project's brief from the gateway's `/projects/:app/brief` — the same read a
+ * project's Claude gets at session start. `app` is any spelling of the project's
+ * KB_APP term; the gateway resolves it.
+ */
+export function fetchProjectBrief(app: string, namespace: string): Promise<ProjectBrief> {
+  return gwGet(`/projects/${encodeURIComponent(app)}/brief?namespace=${encodeURIComponent(namespace)}`)
+}
+
+/** Download link for a project's tooling archive, served as stored. */
+export function projectToolingUrl(app: string, namespace: string): string {
+  return `${GW_BASE}/projects/${encodeURIComponent(app)}/tooling?namespace=${encodeURIComponent(namespace)}`
+}

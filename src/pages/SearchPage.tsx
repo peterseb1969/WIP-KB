@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
+import { ArrowUpRight, ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
 import { fetchCorpusHeaders, type HeaderDoc } from '../lib/reporting'
 import { fetchTopicTree, type TopicNode, type TopicTree } from '../lib/topics'
@@ -338,15 +338,6 @@ export default function SearchPage() {
     staleTime: 5 * 60_000,
   })
   const appTermMap = appTermsQ.data ?? EMPTY_APP_TERMS
-  const appOf = useCallback(
-    (doc: DocItem): string | undefined => {
-      // CASE-422 canonical app: resolve the reporting `app_term_id` (the resolved
-      // KB_APP term) through the term map; fall back to the raw data.app.
-      const canon = doc.data.app_term_id ? appTermMap.get(doc.data.app_term_id) : undefined
-      return canon ?? doc.data.app
-    },
-    [appTermMap],
-  )
 
   const docsById = useMemo(() => {
     const m = new Map<string, DocItem>()
@@ -357,6 +348,33 @@ export default function SearchPage() {
   // Edge (relationship) and structural types are already excluded at the reporting
   // source (fetchCorpusHeaders), so the corpus is the browse/facet set as-is.
   const filterableDocs = useMemo(() => allDocsQ.data ?? [], [allDocsQ.data])
+
+  // case_number → the CASE_RECORD doc, so a response hit can find its parent.
+  const caseByNumber = useMemo(() => {
+    const m = new Map<number, DocItem>()
+    for (const d of filterableDocs) {
+      if (d.template_value !== 'CASE_RECORD') continue
+      if (typeof d.data.case_number === 'number') m.set(d.data.case_number, d)
+    }
+    return m
+  }, [filterableDocs])
+
+  const appOf = useCallback(
+    (doc: DocItem): string | undefined => {
+      // CASE-422 canonical app: resolve the reporting `app_term_id` (the resolved
+      // KB_APP term) through the term map; fall back to the raw data.app.
+      const canon = doc.data.app_term_id ? appTermMap.get(doc.data.app_term_id) : undefined
+      const own = canon ?? doc.data.app
+      if (own || doc.template_value !== 'CASE_RESPONSE') return own
+      // A response carries no project of its own; it belongs to its case's, so a
+      // project filter keeps a case's thread together instead of dropping it.
+      const parent =
+        typeof doc.data.case_number === 'number' ? caseByNumber.get(doc.data.case_number) : undefined
+      if (!parent) return undefined
+      return (parent.data.app_term_id ? appTermMap.get(parent.data.app_term_id) : undefined) ?? parent.data.app
+    },
+    [appTermMap, caseByNumber],
+  )
 
   const allTemplates = useMemo(
     () => Array.from(new Set(filterableDocs.map((d) => d.template_value))).sort(),
@@ -504,16 +522,6 @@ export default function SearchPage() {
     // Present on CASE_RECORD hits whose responses matched the query.
     responseMatches?: ResponseMatch[]
   }
-
-  // case_number → the CASE_RECORD doc, so a response hit can find its parent.
-  const caseByNumber = useMemo(() => {
-    const m = new Map<number, DocItem>()
-    for (const d of filterableDocs) {
-      if (d.template_value !== 'CASE_RECORD') continue
-      if (typeof d.data.case_number === 'number') m.set(d.data.case_number, d)
-    }
-    return m
-  }, [filterableDocs])
 
   const hits: Hit[] = useMemo(() => {
     if (query.trim()) {
@@ -916,7 +924,7 @@ export default function SearchPage() {
               />
             ))}
           </FacetSection>
-          <FacetSection title="App" allOptions={allApps}>
+          <FacetSection title="Project" allOptions={allApps}>
             {allApps.map((p) => (
               <FacetCheckbox
                 key={p}
@@ -924,6 +932,15 @@ export default function SearchPage() {
                 count={facetCounts.p.get(p) ?? 0}
                 checked={pFilter.has(p)}
                 onChange={() => toggleSet('p', pFilter, p)}
+                action={
+                  <Link
+                    to={`/project/${encodeURIComponent(p)}`}
+                    title={`${p} project page`}
+                    className="text-text-muted hover:text-primary"
+                  >
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </Link>
+                }
               />
             ))}
           </FacetSection>
@@ -1228,6 +1245,7 @@ function FacetCheckbox({
   onChange,
   disabled = false,
   hint,
+  action,
 }: {
   label: string
   count?: number
@@ -1238,6 +1256,9 @@ function FacetCheckbox({
   // so the row is not clickable; `hint` says where.
   disabled?: boolean
   hint?: string
+  // Rendered after the count. Links are interactive content, so clicking one
+  // follows it without toggling the row's checkbox.
+  action?: ReactNode
 }) {
   // count === 0 → muted, so "blocks-me (0)" signals "no current match" at a glance
   const countMuted = count === 0
@@ -1261,6 +1282,7 @@ function FacetCheckbox({
           {count}
         </span>
       )}
+      {action}
     </label>
   )
 }

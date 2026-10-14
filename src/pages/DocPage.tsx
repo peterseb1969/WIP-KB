@@ -516,6 +516,16 @@ export default function DocPage() {
               .filter(Boolean)
               .join(' · ')}
           </p>
+          {doc.template_value === 'PROJECT' && typeof data.app === 'string' && data.app && (
+            <p className="mt-2 text-sm">
+              <Link
+                to={`/project/${encodeURIComponent(data.app)}`}
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                Project page: everything tagged {data.app} →
+              </Link>
+            </p>
+          )}
           {Array.isArray(data.tags) && data.tags.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {(data.tags as string[]).map((t) => (

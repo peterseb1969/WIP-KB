@@ -3,6 +3,17 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-14 — Project page
+
+- **Added:** `/project/:app` — a project's profile (title, scope, repositories), its
+  tooling archive as a download, and the documents tagged with it, grouped as in the
+  brief, each linking to its document page. Read-only; same gateway read as
+  `kbc brief`. Respects the knowledge-domain URL prefix.
+- **Added:** links to it from each Project facet entry on Search (arrow icon) and from a
+  `PROJECT` document's page.
+- **Changed:** the Search facet "App" is now "Project". A `CASE_RESPONSE` counts as its
+  case's project, so filtering by project keeps a case's thread instead of dropping it.
+
 ## 2026-10-14 — `kbc case-fetch.py brief` (client 4.3.0)
 
 - **Added:** `brief [<app>] [--namespace NS] [--tooling DIR] [--format text|json]` — the
