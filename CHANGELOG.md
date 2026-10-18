@@ -4,6 +4,15 @@ Human-readable evolution (one entry per logical change, not per commit). Older w
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
 
+
+## 2026-10-19 — Missing API routes answer 404 JSON in production (CASE-888)
+
+- **Fixed:** in production, a request for an API route the server does not have
+  (`/api`, `/auth`, `/wip`, `/server-api`, `/mcp`, any method) fell through to the SPA
+  fallback and got `index.html` with 200. It now gets `404 {"error":"not_found"}`, so a
+  client newer than the server it calls sees a missing route as missing. Page routes
+  (`/doc/…`, `/project/…`, even `/apiary`) still get the SPA. The client's content-type
+  check stays for servers not yet updated.
 ## 2026-10-15 — Client page and playbook catch up with projects and knowledge bases
 
 - **Changed:** the Client page gains a **Projects** section (what a project is, the brief

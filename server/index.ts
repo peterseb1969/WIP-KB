@@ -184,6 +184,20 @@ if (process.env.NODE_ENV === 'production') {
   const __dirname = path.dirname(fileURLToPath(import.meta.url))
   const distPath = path.resolve(__dirname, '..', 'dist')
   router.use(express.static(distPath))
+  // API prefixes never fall through to the SPA: a JSON client asking for a route
+  // this server does not serve gets a 404 it can parse, not index.html with 200
+  // (which reads as a JSON parse error, and makes every "route not on this
+  // instance" branch in a client unreachable). Any method. Registered after every
+  // real route. req.path is relative to the router's mount, so BASE_PATH needs
+  // no handling; the (\/|$) anchor keeps a page like /apiary on the SPA.
+  const API_PREFIXES = /^\/(api|auth|wip|server-api|mcp)(\/|$)/
+  router.use((req, res, next) => {
+    if (API_PREFIXES.test(req.path)) {
+      res.status(404).json({ error: 'not_found', path: req.path })
+      return
+    }
+    next()
+  })
   const indexHtml = path.join(distPath, 'index.html')
   router.get('/', (_req, res) => { res.sendFile(indexHtml) })
   router.get('{*path}', (_req, res) => { res.sendFile(indexHtml) })
