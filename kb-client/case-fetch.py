@@ -411,7 +411,9 @@ _BRIEF_SECTION_TITLES = (
 
 
 def _brief_line(key: str, it: dict) -> str:
-    when = (it.get("updated_at") or "")[:10]
+    # The date the section is ordered by: a session's start, anything else's creation.
+    when = ((it.get("started_at") if key == "sessions" else it.get("created_at"))
+            or it.get("updated_at") or "")[:10]
     parts = [str(it.get("handle") or it.get("document_id") or "?")]
     if key == "open_cases":
         parts.append(f"[{it.get('status') or '?'}]")

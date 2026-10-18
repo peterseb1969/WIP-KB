@@ -56,8 +56,11 @@ function ItemRow({ sectionKey, item }: { sectionKey: string; item: BriefItem }) 
         {item.title || item.description || ''}
         {detail && <span className="text-text-muted"> · {detail}</span>}
       </span>
-      {item.updated_at && (
-        <span className="shrink-0 text-xs tabular-nums text-text-muted">{formatWipDate(item.updated_at)}</span>
+      {/* The date the section is ordered by: a session's start, anything else's creation. */}
+      {(sectionKey === 'sessions' ? item.started_at : item.created_at) && (
+        <span className="shrink-0 text-xs tabular-nums text-text-muted">
+          {formatWipDate(sectionKey === 'sessions' ? item.started_at : item.created_at)}
+        </span>
       )}
     </li>
   )

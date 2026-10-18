@@ -5,6 +5,22 @@ than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
 
 
+
+## 2026-10-19 — Project brief: real ordering, no retired memories (CASE-906; client 4.4.0)
+
+- **Fixed:** every brief section was ordered by `updated_at`, which a migration
+  re-stamps wholesale (the `app` backfill gave ~450 documents the same timestamp), so
+  "Recent sessions" showed May sessions dated 2026-10-14 and could miss the active one.
+  Sessions are now ordered by `started_at`, everything else by `created_at`. The CLI
+  and the project page show that date.
+- **Added:** `YAC_MEMORY.doc_status` (optional `KB_DOC_STATUS` term;
+  `tools/add-memory-doc-status.py` adds it to a live namespace). The memory mirror
+  (`kb-write.py YAC_MEMORY <dir>`) marks the owner's records whose file is gone from
+  the directory as `deprecated`; matched by `document_id`, never by `mem_key`. A single
+  file never retires anything, a file that cannot be parsed still counts as present,
+  and `--no-retire` skips retirement for an incomplete directory. A file that comes
+  back revives its record. The brief leaves deprecated memories out; nothing is
+  deleted.
 ## 2026-10-19 — Missing API routes answer 404 JSON in production (CASE-888)
 
 - **Fixed:** in production, a request for an API route the server does not have

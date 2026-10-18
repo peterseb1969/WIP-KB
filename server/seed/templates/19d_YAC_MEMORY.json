@@ -15,6 +15,7 @@
     { "name": "origin_session", "label": "Origin Session",  "type": "string", "mandatory": false, "description": "The frontmatter originSessionId (the Claude session that first wrote the memory). Provenance, NOT identity." },
     { "name": "session_id",     "label": "Writing Session", "type": "string", "mandatory": false, "description": "The YAC session_id that last mirrored this memory to the KB (e.g. APP-KB-YYYYMMDD-HHMMSS). Provenance, NOT identity." },
     { "name": "repo",           "label": "Repo",            "type": "string", "mandatory": false, "description": "The repo/project the memory belongs to (memory is project-scoped via the projects/<proj>/ path). Optional." },
-    { "name": "app",         "label": "App",         "type": "term",    "mandatory": false, "reference_type": "term", "terminology_ref": "KB_APP" }
+    { "name": "app",         "label": "App",         "type": "term",    "mandatory": false, "reference_type": "term", "terminology_ref": "KB_APP" },
+    { "name": "doc_status",     "label": "Doc Status",      "type": "term",   "mandatory": false, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "description": "Unset while the memory file exists. The memory mirror sets `deprecated` when the owner's memory directory no longer has the file; the record stays as history and the project brief leaves it out. A file that comes back is written again without this field, which makes it live again." }
   ]
 }

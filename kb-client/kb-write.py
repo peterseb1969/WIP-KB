@@ -393,9 +393,62 @@ def cmd_memory(args: argparse.Namespace) -> int:
             sys.stdout.write(json.dumps(result) + "\n")
         else:
             sys.stdout.write(f"  {status:9} {data['mem_key']} ({result.get('document_id', '')})\n")
+    if os.path.isdir(src) and not args.no_retire:
+        # Every file in the directory counts as present, including one that failed
+        # to parse above: only a file that is gone retires its record.
+        present = {os.path.basename(p)[:-3] for p in paths}
+        retired = _retire_missing_memories(owner, present)
+        if retired:
+            counts["retired"] = retired
     summ = ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "nothing"
     sys.stderr.write(f"YAC_MEMORY [{owner}]: {len(paths)} file(s) — {summ}\n")
     return rc
+
+
+def _retire_missing_memories(owner: str, present: set) -> int:
+    """Mark the owner's live YAC_MEMORY records whose file is no longer in the
+    memory directory as doc_status=deprecated (CASE-906). Only called for a whole
+    directory, which the session-end mirror always passes: a single file says
+    nothing about the others. Records stay as history; the project brief leaves
+    retired ones out, and a file that comes back is re-written without the field,
+    which makes it live again.
+
+    Records are grouped by owner (no memory records its repo), so one role must
+    mirror from one memory directory; a second directory for the same role would
+    retire the first one's memories.
+
+    Patches by document_id: the gateway locates a patch target by the FIRST match
+    key only, and mem_key is unique only together with owner. Returns how many
+    records were retired."""
+    stale: list = []
+    page = 1
+    while True:
+        q = urllib.parse.urlencode({"owner": owner, "page": page, "page_size": 100})
+        try:
+            payload = gw_get(f"/read/YAC_MEMORY?{q}") or {}
+        except RuntimeError as e:
+            print(f"YAC_MEMORY: could not list {owner}'s records, nothing retired: {e}", file=sys.stderr)
+            return 0
+        for it in payload.get("items") or []:
+            d = it.get("data") or {}
+            if d.get("mem_key") not in present and d.get("doc_status") != "deprecated":
+                stale.append((d.get("mem_key"), it.get("document_id")))
+        if page >= (payload.get("pages") or 1):
+            break
+        page += 1
+    retired = 0
+    for mem_key, doc_id in stale:
+        try:
+            gw_post("/write/YAC_MEMORY", {"patch": {"doc_status": "deprecated"},
+                                          "match": {"document_id": doc_id}})
+        except RuntimeError as e:
+            # Typically an instance whose YAC_MEMORY has no doc_status field yet:
+            # every patch would fail the same way, so stop at the first.
+            print(f"YAC_MEMORY: could not retire {mem_key}, stopping retirement: {e}", file=sys.stderr)
+            break
+        retired += 1
+        sys.stdout.write(f"  retired   {mem_key} ({doc_id})\n")
+    return retired
 
 
 def build_records(type_: str, args: argparse.Namespace) -> tuple[dict, list]:
@@ -675,6 +728,9 @@ def main() -> int:
     ap.add_argument("--git-backfill", type=int, metavar="N", help="git-stats: last N days")
     ap.add_argument("--git-list-repos", action="store_true", help="git-stats: print the known repo set")
     ap.add_argument("--format", choices=["text", "json"], default="text")
+    ap.add_argument("--no-retire", action="store_true",
+                    help="YAC_MEMORY with a directory: do not mark records whose file is "
+                         "missing as deprecated (use when the directory is not complete)")
     args = ap.parse_args()
 
     try:

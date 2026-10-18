@@ -156,6 +156,7 @@ export interface BriefItem {
   handle: string
   document_id: string
   title: string | null
+  created_at: string | null
   updated_at: string | null
   status?: string | null
   target_yac?: string | null

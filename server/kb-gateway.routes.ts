@@ -1335,14 +1335,23 @@ router.get('/library-docs/:slug', async (req, res) => {
 // it. Caller's key throughout, document-store reads only — no raw reporting SQL,
 // which namespace-scoped keys may not run. Lists carry handles and titles, not
 // bodies: the brief stays small and every item is one `kbc` read away.
-const BRIEF_SECTIONS: Array<{ key: string; type: string; limit: number; open?: boolean }> = [
-  { key: 'open_cases', type: 'CASE_RECORD', limit: 20, open: true },
-  { key: 'decisions', type: 'DESIGN_DECISION', limit: 10 },
-  { key: 'lessons', type: 'LESSON', limit: 10 },
-  { key: 'firesides', type: 'FIRESIDE', limit: 10 },
-  { key: 'sessions', type: 'SESSION', limit: 5 },
-  { key: 'memories', type: 'YAC_MEMORY', limit: 20 },
-  { key: 'documents', type: 'DOCUMENT', limit: 20 },
+// Newest first by when a thing came into being, never by updated_at: a migration
+// re-versions documents wholesale (the DECISION-1 app backfill re-stamped ~450 in
+// one minute), which would make every section's order an artefact of the last
+// migration. created_at is the entity's creation time and survives every version;
+// a session is ordered by when it started. Retired memories (doc_status
+// deprecated, set by the memory mirror when the file is gone) are history, not
+// the project's current memory, so the brief leaves them out. CASE-906.
+const BRIEF_SECTIONS: Array<{
+  key: string; type: string; limit: number; open?: boolean; sortBy: string; liveOnly?: boolean
+}> = [
+  { key: 'open_cases', type: 'CASE_RECORD', limit: 20, open: true, sortBy: 'created_at' },
+  { key: 'decisions', type: 'DESIGN_DECISION', limit: 10, sortBy: 'created_at' },
+  { key: 'lessons', type: 'LESSON', limit: 10, sortBy: 'created_at' },
+  { key: 'firesides', type: 'FIRESIDE', limit: 10, sortBy: 'created_at' },
+  { key: 'sessions', type: 'SESSION', limit: 5, sortBy: 'data.started_at' },
+  { key: 'memories', type: 'YAC_MEMORY', limit: 20, sortBy: 'created_at', liveOnly: true },
+  { key: 'documents', type: 'DOCUMENT', limit: 20, sortBy: 'created_at' },
 ]
 
 function briefItem(type: string, d: AnyObj): AnyObj {
@@ -1355,7 +1364,10 @@ function briefItem(type: string, d: AnyObj): AnyObj {
     type === 'DOCUMENT' ? `PAPER-${x.paper_number}` :
     type === 'SESSION' ? x.session_id :
     type === 'YAC_MEMORY' ? `${x.owner}/${x.mem_key}` : d.document_id
-  const out: AnyObj = { handle, document_id: d.document_id, title: x.title ?? null, updated_at: d.updated_at ?? null }
+  const out: AnyObj = {
+    handle, document_id: d.document_id, title: x.title ?? null,
+    created_at: d.created_at ?? null, updated_at: d.updated_at ?? null,
+  }
   if (type === 'CASE_RECORD') Object.assign(out, { status: x.status ?? null, target_yac: x.target_yac ?? null })
   if (type === 'SESSION') Object.assign(out, { status: x.status ?? null, started_at: x.started_at ?? null, ended_at: x.ended_at ?? null })
   if (type === 'YAC_MEMORY') out.description = x.description ?? null
@@ -1404,9 +1416,11 @@ router.get('/projects/:app/brief', async (req, res) => {
       try {
         const filters: AnyObj[] = [{ field: 'term_references.term_id', operator: 'eq', value: term.term_id }]
         if (sec.open) filters.push({ field: 'data.status', operator: 'in', value: ['open', 'responded'] })
+        // ne also matches documents with no doc_status: every live memory.
+        if (sec.liveOnly) filters.push({ field: 'data.doc_status', operator: 'ne', value: 'deprecated' })
         const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${encodeURIComponent(ns)}`, key, {
           template_id: await templateId(sec.type, ns, key), filters,
-          sort_by: 'updated_at', sort_order: 'desc', page_size: sec.limit,
+          sort_by: sec.sortBy, sort_order: 'desc', page_size: sec.limit,
         })
         sections[sec.key] = { total: d.total ?? 0, items: ((d.items ?? []) as AnyObj[]).map((x) => briefItem(sec.type, x)) }
       } catch {
