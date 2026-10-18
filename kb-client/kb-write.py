@@ -417,9 +417,12 @@ def _retire_missing_memories(owner: str, present: set) -> int:
     mirror from one memory directory; a second directory for the same role would
     retire the first one's memories.
 
-    Patches by document_id: the gateway locates a patch target by the FIRST match
-    key only, and mem_key is unique only together with owner. Returns how many
-    records were retired."""
+    Retires by re-submitting the record's own data plus doc_status, an upsert by
+    its identity (owner, mem_key) that lands on the latest template version. Not
+    a PATCH: a patch validates against the version the document is pinned to,
+    and records written before doc_status existed are pinned to a version that
+    does not declare it (refused as an unknown field). Returns how many records
+    were retired."""
     stale: list = []
     page = 1
     while True:
@@ -432,15 +435,15 @@ def _retire_missing_memories(owner: str, present: set) -> int:
         for it in payload.get("items") or []:
             d = it.get("data") or {}
             if d.get("mem_key") not in present and d.get("doc_status") != "deprecated":
-                stale.append((d.get("mem_key"), it.get("document_id")))
+                stale.append((d, it.get("document_id")))
         if page >= (payload.get("pages") or 1):
             break
         page += 1
     retired = 0
-    for mem_key, doc_id in stale:
+    for data, doc_id in stale:
+        mem_key = data.get("mem_key")
         try:
-            gw_post("/write/YAC_MEMORY", {"patch": {"doc_status": "deprecated"},
-                                          "match": {"document_id": doc_id}})
+            gw_post("/write/YAC_MEMORY", {"data": {**data, "doc_status": "deprecated"}})
         except RuntimeError as e:
             # Typically an instance whose YAC_MEMORY has no doc_status field yet:
             # every patch would fail the same way, so stop at the first.

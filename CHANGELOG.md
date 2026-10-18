@@ -31,7 +31,9 @@ than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 - **Added:** `YAC_MEMORY.doc_status` (optional `KB_DOC_STATUS` term;
   `tools/add-memory-doc-status.py` adds it to a live namespace). The memory mirror
   (`kb-write.py YAC_MEMORY <dir>`) marks the owner's records whose file is gone from
-  the directory as `deprecated`; matched by `document_id`, never by `mem_key`. A single
+  the directory as `deprecated`, by re-submitting each record's data with the field (an
+  upsert by `(owner, mem_key)` onto the latest template version; a PATCH would be
+  validated against the older version the record is pinned to, which lacks the field). A single
   file never retires anything, a file that cannot be parsed still counts as present,
   and `--no-retire` skips retirement for an incomplete directory. A file that comes
   back revives its record. The brief leaves deprecated memories out; nothing is
