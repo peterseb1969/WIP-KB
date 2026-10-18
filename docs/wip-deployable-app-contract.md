@@ -34,11 +34,11 @@ The contract has two halves — what the **source repo** must look like, and wha
 | `Dockerfile.dev` | At the path containing `package.json`. Runs `npm run dev`. **No baked `node_modules`** — the deployer mounts a named volume so dev rebuilds are warm. Alpine + curl. Pattern verbatim from `apps/react-console` and `apps/clintrial-explorer`. |
 | `vite.config.ts` (frontend apps) | `server.host: '0.0.0.0'` (without it Caddy → Vite → ECONNREFUSED inside the container). Dev `proxy` keys prefixed with `BASE_PATH` and pointing at **this app's Express port** (not 3001 by clintrial-copy-paste reflex). `base` derived from `VITE_BASE_PATH || APP_BASE_PATH || '/'`. |
 | `docker-entrypoint-dev.sh` (optional, recommended) | Hash-gated `npm ci` populate so dev container restarts don't re-run `ci` unnecessarily. See `apps/react-console/docker-entrypoint-dev.sh` for the canonical pattern. |
-| `server/index.ts` (Express apps) | All routes mounted on an `express.Router()` under `APP_BASE_PATH`. `app.set('trust proxy', 1)` for HTTPS termination. `requireAuth()` middleware passes through when `OIDC_ISSUER` is unset (apps-only / dev mode). In `NODE_ENV=production`, serve `dist/` statically with a SPA fallback. |
+| `server/index.ts` (Express apps) | All routes mounted on an `express.Router()` under `APP_BASE_PATH`. `app.set('trust proxy', 1)` for HTTPS termination. `requireAuth()` middleware passes through when `OIDC_ISSUER` is unset (apps-only / dev mode). In `NODE_ENV=production`, serve `dist/` statically with a SPA fallback. The fallback excludes the API prefixes: an unmatched route under `/api`, `/auth`, `/wip`, `/server-api` or `/mcp` (plus any prefix the app adds) returns `404` JSON for any method, never `index.html`. |
 | Runtime app-config route (CASE-551) | `GET ${APP_BASE_PATH}/api/app-config` returns the deployment's client-visible config as JSON — at minimum `{"namespace": <WIP_NAMESPACE or null>}`; multi-namespace apps add their extra keys (e.g. `library_namespace`). Allowlist only: never an env dump, never secrets (the response reaches every browser); `Cache-Control: no-store`. The SPA fetches this at boot (scaffold: `src/lib/app-config.ts`) for **every** client-visible per-deployment value — never mirror such values into `VITE_*` build bakes; a bake and runtime env are two sources that drift silently (`VITE_BASE_PATH` is the one deliberate exception — consumed at bundle-emit time, loud when wrong). The scaffold emits the route inline; apps that vendor `@wip/proxy` ≥ 0.4.0 can mount its `appConfigHandler` at the same path. |
 | Client fetches | Every URL prefixed with `import.meta.env.BASE_URL` — *never* bare `/api/...` or `/wip/...`. |
 | `wipProxy` mount order (`@wip/proxy` ≥ 0.5.0) | The proxy streams both directions (O(1) memory in payload size — large archive uploads/downloads pass through flat; no bespoke streaming routes needed). Consequence: it consumes the request as a raw stream, so it must be mounted **before** any body-parsing middleware (`express.json()`, …) that would match the same paths — a parser ahead of the proxy drains the body and an empty stream is forwarded. The deprecated `bodyLimit` option is a no-op. |
-| `Dockerfile` (production) | Multi-stage. Build stage takes `VITE_BASE_PATH` as ARG and bakes it into the static bundle. Production stage runs the server via `tsx server/index.ts` (or your app's entry), exposes the app's port, healthchecks `${APP_BASE_PATH}/api/health`. **If the manifest declares an HTTP healthcheck, the runtime image MUST contain `curl` or `wget`** — the rendered probe is a shell `curl \|\| wget` chain; an image with neither (e.g. `node:*-slim`, distroless — alpine bases get busybox `wget` for free) exits 127 on every probe and reports permanently unhealthy while the app serves fine, and the install's health-wait fails pointing at the app. Fix: install `wget` in the runtime stage (~2 MB), use an alpine base, or drop `spec.healthcheck` — the container then shows plain `Up` with no health status, like the platform router. `wip-deploy check-app-deployability` pre-flights this. |
+| `Dockerfile` (production) | Multi-stage. Build stage takes `VITE_BASE_PATH` as ARG and bakes it into the static bundle. Production stage runs the server via `tsx server/index.ts` (or your app's entry), exposes the app's port, healthchecks `${APP_BASE_PATH}/api/health`. **If the manifest declares an HTTP healthcheck, the runtime image MUST contain `curl` or `wget`** — the rendered probe is a shell `curl \|\| wget` chain; an image with neither (e.g. `node:*-slim`, distroless — alpine bases get busybox `wget` for free) exits 127 on every probe and reports permanently unhealthy while the app serves fine, and the install's health-wait fails pointing at the app. Fix: install `wget` in the runtime stage (~2 MB), use an alpine base, or drop `spec.healthcheck` — the container then shows plain `Up` with no health status, like the platform router. `wip-deploy check-app-deployability` pre-flights this. **The runtime stage must also contain the app's bootstrap seed directory** (`server/seed/` by default, or whatever `SEED_DIR` points at): the bootstrap reads it at runtime, resolved from the working directory. If you bundle the server (e.g. esbuild into `dist/server/`), the bundle does not carry the seeds, and a module-relative seed path no longer points at them — copy the seed dir explicitly. A missing seed dir fails the bootstrap with its resolved path before anything is written. |
 | `.dockerignore` | Excludes `node_modules`, `dist`, `*.log`, `.git`. Be careful with `*.md` — narrow it to `/*.md` and add explicit excludes for `papers/` / `docs/`, **not** an unscoped `*.md` that catches runtime files like `server/prompts/assistant.md`. |
 | Readme | A `## Development with wip-deploy` section documenting the contract surface for human readers. Two paragraphs. Pointers at this paper. |
 
@@ -160,7 +160,7 @@ This one is different from the entries above — it bites when you implement the
 
 **Symptom signature:** `JSONDecodeError: Expecting value: line 1 column 1 (char 0)` (or the JS equivalent) that looks like a parse bug or corrupt data. The real cause is a missing route. Second-order signature: any `if status == 404 → "route not available on this instance"` degradation branch in a client is **dead code against a contract-compliant server** — it compiles, reads correctly, and has never once fired. Do not branch on 404 to detect a missing route; decide on **content-type** (got HTML where JSON was expected). Do not flatten `JSONDecodeError` into "route missing" either — that trades a loud bug for a silent one when an existing route returns malformed JSON.
 
-**Origin:** WIP-KB's read client shipped "unavailable on this instance" messages that were unreachable since the day they were written; found while testing the degradation path for a newly added verb (CASE-831 has the full analysis). Fixed consumer-side in WIP-KB by switching the guard to content-type. The cause-side fix — excluding the API prefixes from the fallback so unmatched `/server-api/*`, `/api/*`, `/wip/*` genuinely 404 while page routes still fall through — is a scaffold change (see the scaffold-gaps table).
+**Origin:** WIP-KB's read client shipped "unavailable on this instance" messages that were unreachable since the day they were written; found while testing the degradation path for a newly added verb (CASE-831 has the full analysis). Fixed consumer-side in WIP-KB by switching the guard to content-type. The cause-side fix — excluding the API prefixes from the fallback so unmatched `/api/*`, `/auth/*`, `/wip/*`, `/server-api/*`, `/mcp/*` return `404` JSON (any method) while page routes still fall through — is now a contract line (source-repo table) and ships in `--preset query` (CASE-834: an `API_PREFIXES` check ahead of the `index.html` fallback). The scaffold copies `server/index.ts` only when it creates an app, so a refresh does not change an existing app's server: apps created earlier keep the catch-all until they add the same check. Keep the client-side content-type guard anyway — it protects against every server not yet updated.
 
 ---
 
@@ -178,6 +178,21 @@ These are platform-side guarantees the contract assumes. They're invariants toda
   *Migration / failure signature:* an app still pinning `file:libs/wip-<lib>-latest.tgz` (a pre-versioned-tarball scaffold) heals on its next `--refresh`. If your container build fails with `npm error code EINTEGRITY` on an `@wip/*` package, that is this — re-run `--refresh` and commit the two files. Do not hand-edit or re-pack a bundled tarball: same version must mean same bytes.
 
 - **External CA trust is auto-injected into app containers (Node-stack)** — when an apps-only install carries a `secrets/external-ca.crt` (seeded by `wip-deploy import-bundle`), the deployer automatically bind-mounts it read-only at **`/etc/ssl/certs/external-ca.crt`** in every app container and sets **`NODE_EXTRA_CA_CERTS`** to that path. You declare nothing — there is no manifest field; the behaviour flips on purely from the CA file's presence (the deployer's `install`/`render` auto-detect it). **Node-stack apps** pick the extra CA up transparently (Node reads `NODE_EXTRA_CA_CERTS`); **Python / Go / Rust apps ignore it** and use their own trust stores (`certifi`, the system pool, …) — harmless either way. Two reservations follow: don't unset `NODE_EXTRA_CA_CERTS`, and don't bind your own file at `/etc/ssl/certs/external-ca.crt`. Backend / full-stack installs never see this — it is apps-only. For the operator-side flow that makes the CA file exist in the first place, see `docs/design/bootstrap-bundle.md`.
+
+- **NATS access is a role, declared in the manifest** — NATS requires authentication, and an app gets a NATS user only by declaring roles:
+
+  ```yaml
+  spec:
+    nats_client:
+      roles: [ingest-producer]   # and/or event-subscriber, replay-subscriber, nats-monitor
+  ```
+
+  The deployer generates the user's password and injects `NATS_URL`, `NATS_USER` and `NATS_PASSWORD`. Connect with them, and set the reply-inbox prefix `_INBOX_<NATS_USER>`: the server lets each user receive replies only on its own prefix, so JetStream publish acks and pulls need it. Raw NATS subject lists in an app manifest are rejected; they are for platform components.
+
+  - **`ingest-producer`** may publish to `wip.ingest.{terminologies,terms,templates,documents}.<action>`. **Every message carries your WIP API key in its `X-API-Key` NATS header.** ingest-gateway writes the item with exactly that key, so your key's namespace grants apply. A message without the header is refused (a 401 result) and nothing is written. Use a key scoped to your namespace: the message, header included, stays in the ingest stream until the stream's size limits drop it. Reading the results stream is not part of the role, because it carries every producer's outcomes.
+  - **`event-subscriber`** may run one durable consumer on `WIP_EVENTS`, **named after your app**, and use no other stream. It receives change events from **every** namespace, so treat it as an admin-level read.
+  - **`replay-subscriber`** receives replayed events with a plain subscription to `wip.replay.<session>.>`. Subscribe before starting the replay. There is no JetStream access to replay streams, so events published while you are disconnected are missed.
+  - **`nats-monitor`** reads JetStream listings for a status page: account info, the stream list (configs and state) and every stream's consumer list (names and pending counts). It cannot read message contents or change any stream or consumer. react-console uses it.
 
 One **non-guarantee** belongs in the same list, because apps have assumed its opposite:
 
@@ -198,6 +213,14 @@ With `BASE_PATH` defaulting to `/` and `import.meta.env.BASE_URL` defaulting to 
 - OIDC stays off.
 
 **Net: zero behavior change in standalone-dev.** The contract pays no tax for being wip-deployable; it pays a one-time scaffold tax of 30 minutes and gives you push-button deployment forever after.
+
+**A browser login for your e2e suite.** Don't share `admin` or `editor`. Ask
+the install's owner for a dedicated Dex user. It's one command on their side,
+`wip-deploy user add e2e --email e2e@wip.local --group wip-editors --name <install>`,
+and the suite then reads its password from
+`~/.wip-deploy/<install>/secrets/dex-password-e2e`. Pick `wip-admins` only if
+the suite manages namespaces, grants or API keys. Details, including which
+writes record the user's email as `created_by`, are in `docs/wip-guide.md` §4.7.
 
 ---
 
@@ -233,7 +256,7 @@ What `--preset query` ships today vs. what this paper recommends:
 | `src/lib/wipBulk.ts` | `fetch('/wip' + path)` | `fetch(\`${import.meta.env.BASE_URL}wip\` + path)` |
 | Inline client fetches | Bare paths | Prefixed with `${import.meta.env.BASE_URL}` |
 | `/api/me` | OIDC session only | Gateway-header sniff → OIDC → anonymous |
-| SPA fallback scope | Catch-all under the base path — missing API routes return 200 HTML | Exclude the API prefixes (`/server-api`, `/api`, `/wip`) so unmatched API paths 404; page routes still fall through to `index.html` |
+| SPA fallback scope | **In scaffold** (CASE-834) — API prefixes excluded; apps created before it keep the catch-all | Exclude the API prefixes (`/api`, `/auth`, `/wip`, `/server-api`, `/mcp`) so unmatched API paths return 404 JSON; page routes still fall through to `index.html` |
 | `Dockerfile.dev` | **In scaffold** | Provided as starter (canonical pattern) |
 | `Dockerfile` (production) | **In scaffold** | Two-stage; `VITE_BASE_PATH` as ARG |
 | `.dockerignore` | **In scaffold** | Provided; narrow `*.md` exclusion called out |

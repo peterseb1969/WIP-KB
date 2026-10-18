@@ -27,7 +27,7 @@ wip-deploy install --preset standard --target compose --hostname wip.local
 What this gives you:
 
 - The eight WIP services: the four core data services (Registry, Def-Store, Template-Store, Document-Store), Auth-Gateway (sits in front for API-key + JWT validation), Reporting-Sync (PostgreSQL projection), Ingest-Gateway (async bulk via NATS, enabled by preset), and the MCP Server (when included via the preset)
-- The supporting infrastructure: MongoDB, PostgreSQL, NATS, MinIO, Dex, Caddy
+- The supporting infrastructure: MongoDB, PostgreSQL, NATS, Garage, Dex, Caddy
 - HTTPS via Caddy on port 8443 (internal/self-signed by default)
 - A starter API key written to the secrets backend
 
@@ -71,7 +71,7 @@ wip-toolkit status --integrity   # adds the heavy referential-integrity scan
 | `headless` | API services only, no UI |
 | `core` | + console + API keys |
 | `analytics` | + OIDC (Dex) + reporting-sync + Postgres |
-| `standard` (default) | + MinIO + MCP server — fully exercisable platform |
+| `standard` (default) | + Garage + MCP server — fully exercisable platform |
 | `full` | + ingest-gateway (async bulk via NATS JetStream) |
 
 You can amend a preset with `--add <module>` and `--remove <module>`. Apps (e.g., `react-console`, `clintrial`) are enabled per-install with `--app <name>` or, in dev mode, `--app-source <name>=<path>`.
@@ -87,7 +87,7 @@ Three security tiers cover the realistic deployment ranges.
 | Tier | Use case | What you get |
 |---|---|---|
 | **Tier 1 — Home Pi** | Local network, trusted users | Random secrets, self-signed TLS (`--tls internal`), single API key |
-| **Tier 2 — Internet-exposed** | Public access, multiple users | Let's Encrypt (`--tls letsencrypt`), per-service / per-app API keys, MongoDB + NATS auth |
+| **Tier 2 — Internet-exposed** | Public access, multiple users | Let's Encrypt (`--tls letsencrypt`), per-service / per-app API keys, NATS and MongoDB authentication (per-service users). |
 | **Tier 3 — Enterprise** | High-security requirements | External secrets manager, mTLS, enterprise OIDC. WIP is wired for these but does not ship a turnkey enterprise install today. |
 
 This guide focuses on Tier 1 and Tier 2 — the ones you can stand up with the bundled tooling.
@@ -140,21 +140,22 @@ WIP's architecture is enterprise-grade in design (OIDC, namespace isolation, aud
 
 Networking is where most operator failures happen. The three callouts below prevent the most expensive ones.
 
-### 3.1 Critical: The Three-Value OIDC Rule
+### 3.1 Critical: `--hostname` is the OIDC issuer
 
-> **The JWT issuer URL must be identical in three places. Mismatch causes 401 errors after a successful login.**
+> **The hostname and HTTPS port you install with become Dex's issuer URL, and every token's `iss` claim. Choose them once, as the name browsers will actually use.**
 >
-> | Where | Variable | Example |
+> `wip-deploy` derives all of a service's token-validation settings from that one value, so they cannot drift apart. Never set them by hand: every apply re-renders them.
+>
+> | Setting | Rendered as | Example |
 > |---|---|---|
-> | `config/dex/config.yaml` | `issuer:` | `https://wip-pi.local:8443/dex` |
-> | `.env` | `WIP_AUTH_JWT_ISSUER_URL` | `https://wip-pi.local:8443/dex` |
-> | `.env` | `VITE_OIDC_AUTHORITY` | `https://wip-pi.local:8443/dex` |
+> | Dex `issuer:` (rendered `config/dex/config.yaml`) | `https://<hostname>[:<https_port>]/dex` | `https://wip-pi.local:8443/dex` |
+> | Services' `WIP_AUTH_JWT_ISSUER_URL` | the same public URL; it is compared against the token's `iss` | `https://wip-pi.local:8443/dex` |
+> | Services' `WIP_AUTH_JWT_JWKS_URI` | Dex's internal address, because services fetch signing keys server-to-server | `http://wip-dex:5556/dex/keys` |
+> | Services' `WIP_AUTH_JWT_AUDIENCE` | every Dex client the deployment registers: the gateway's, plus each app that declares its own | `wip-gateway,dnd` |
 >
-> The token's `iss` claim comes from Dex's `issuer`. Backends validate it against `WIP_AUTH_JWT_ISSUER_URL`. The browser uses `VITE_OIDC_AUTHORITY` for OIDC discovery. All three must match exactly — including scheme, port, and path.
+> Dex sets a token's `aud` to the client that requested it. That is why the audience is a list: a token minted for an app's own client is as valid as the gateway's. A key endpoint that can't be reached refuses the request with 503; a token with the wrong issuer or audience gets 401.
 >
-> **One related variable does *not* match the other three.** `WIP_AUTH_JWT_JWKS_URI` uses the container-internal hostname (e.g., `http://wip-dex:5556/dex/keys`) because services fetch signing keys directly, not through the browser.
->
-> **After changing any of these in `.env`, recreate containers** (`podman-compose down && podman-compose up -d`). A `restart` does not pick up new environment variables — they are read at container creation, not start. See §7.2 for the rotation flow.
+> **To change the hostname**, re-install with the new `--hostname`. The issuer is also baked into the TLS certificate and every registered redirect URI, and tokens minted under the old issuer stop validating.
 
 ### 3.2 Critical: Caddy `handle` vs `handle_path`
 
@@ -174,7 +175,7 @@ Networking is where most operator failures happen. The three callouts below prev
 >
 > WIP services mount under `/api/<svc>/` and expect to see the full path. **Use `handle`.**
 >
-> **The MinIO carve-out.** MinIO's S3 API serves at the root of its own URL space, so the deployer routes `/minio/<bucket>/<key>` to MinIO with `handle_path` to *strip* the `/minio/` prefix — but `/minio/health` and `/minio/admin` keep their prefix. This is in the deployer's generated config (`compose_caddy.py`); you generally don't edit it by hand.
+> **The object-store carve-out.** Garage's S3 API serves at the root of its own URL space, so the deployer routes `/garage/<bucket>/<key>` to Garage with `handle_path` to *strip* the `/garage/` prefix, and restores the upstream Host header (SigV4-presigned URLs are signed against the internal endpoint's Host). This is in the deployer's generated config; you generally don't edit it by hand.
 
 ### 3.3 Critical: Caddy returns 200 + empty body on unmatched paths
 
@@ -194,7 +195,7 @@ Networking is where most operator failures happen. The three callouts below prev
 | 3 | Remote + OIDC | `https://<host>:8443/` | via Caddy on `:8443` | `https://<host>:8443/dex` |
 | 4 | Remote − OIDC | `http://<host>:3000/` | direct on `:8001`–`:8006` | n/a |
 
-Choose by what you need. If you want auth, go with 1 or 3 (and accept the Three-Value OIDC Rule discipline). If you want absolute simplicity for local hacking, scenarios 2 and 4 use API keys only and skip Caddy entirely (services bind to their direct ports, console is on `:3000`).
+Choose by what you need. If you want auth, go with 1 or 3 (and pick `--hostname` deliberately — it becomes the OIDC issuer, §3.1). If you want absolute simplicity for local hacking, scenarios 2 and 4 use API keys only and skip Caddy entirely (services bind to their direct ports, console is on `:3000`).
 
 For scenarios 2 and 4 the console's dev server needs proxy rules (Vite `vite.config.ts → server.proxy`) pointing `/api/registry`, `/api/def-store`, etc. at the matching `localhost:800x`.
 
@@ -214,7 +215,7 @@ WIP has two independent authentication concerns:
 ```
 
 - **API auth** — how clients (browser, scripts, other services) prove identity to WIP's REST API. This is what the rest of this section covers.
-- **DB auth** — how WIP services connect to MongoDB / PostgreSQL / NATS internally. Configured via connection strings (`MONGO_URI`, etc.). It is independent of API auth and not affected by anything below.
+- **DB auth** — how WIP services connect to MongoDB / PostgreSQL / NATS internally. Configured via connection strings (`MONGO_URI`, etc.); NATS and MongoDB credentials are per-service users the deployer generates and injects (`NATS_USER` / `NATS_PASSWORD`, `MONGO_USER` / `MONGO_PASSWORD`). It is independent of API auth and not affected by anything below.
 
 ### 4.2 API auth modes
 
@@ -275,11 +276,11 @@ wip-deploy install --api-keys-file keys.yaml
 ```
 
 Rotate a declared key in place with `wip-deploy rotate-key <name>`: the
-key's secret is regenerated, the spec re-applied, and the fresh
-plaintext printed exactly once. No grace window — the old plaintext
-stops working at apply; services reading a mounted `*_API_KEY_FILE`
-pick up the new value automatically, external holders must be re-handed
-it. (Runtime keys can't rotate in place — revoke + create.)
+key's secret is regenerated, the spec re-applied — restarting the
+services that read the key — and the fresh plaintext printed exactly
+once. No grace window — the old plaintext stops working at apply;
+external holders must be re-handed it. (Runtime keys can't rotate in
+place — revoke + create. All key kinds: §7.2.)
 
 ### 4.4 Runtime API keys: CRUD endpoints
 
@@ -326,48 +327,78 @@ API keys carry a `namespaces` field that scopes their access. The rule is:
 - **Every other key** must declare `namespaces` explicitly. Non-privileged keys without a namespace scope receive 403 on every request.
 - **Single-namespace keys** get a convenience: omit the `namespace` query parameter and the server derives it from the key's scope. Multi-namespace keys must always pass `namespace` explicitly.
 
-### 4.6 Connecting an external IdP — Google as worked example
+### 4.6 External identity providers (Google, Okta, …) — not supported yet
 
-Dex acts as an identity-federation layer. Adding a Google connector lets users sign in with their Google account. The general pattern works for any OIDC connector — see Dex's own docs for connector-specific syntax.
+Dex can federate logins from external providers through its *connectors*, but
+`wip-deploy` has no way to declare one yet: it renders Dex's config with an
+empty connector list. Every apply rewrites that file, including `redeploy`,
+`add-app`, `rotate-key` and `user add`. It also rewrites `.env`, which never
+reaches the Dex container anyway. A hand-added connector therefore disappears
+silently on the next apply. Until spec-level support lands, local Dex users
+(§4.7) are the supported way to log in.
 
-**1. Create OAuth credentials in Google Cloud Console.**
+When support lands, the Google side is unchanged. Create a *Web application*
+OAuth client in Google Cloud Console with the redirect URI
+`https://<your-hostname>:8443/dex/callback`, and pick **Internal** consent for
+Workspace-only users. External users also need a route into WIP groups,
+otherwise per-app group gates keep them out.
 
-- New project (e.g., "WIP Authentication")
-- *APIs & Services → OAuth consent screen* — pick **Internal** if you have a Google Workspace org and want only your org's users; pick **External** otherwise (test users required during dev)
-- *APIs & Services → Credentials → Create credentials → OAuth client ID*, application type **Web application**
-- Authorized redirect URIs: `https://<your-hostname>:8443/dex/callback` (one per environment you'll deploy to)
-- Save the Client ID and Client Secret
+### 4.7 Local users (Dex static users)
 
-**2. Add the connector to `config/dex/config.yaml`:**
+The local-account logins on the Dex screen are **spec configuration**: the
+install's `auth.users` list, declared once and rendered on every apply,
+the same model as the spec-declared API keys in §4.3. Every install starts
+with three:
 
-```yaml
-connectors:
-  - type: google
-    id: google
-    name: "Google"
-    config:
-      clientID: $GOOGLE_CLIENT_ID
-      clientSecret: $GOOGLE_CLIENT_SECRET
-      redirectURI: https://<your-hostname>:8443/dex/callback
-      # Optional — restrict to specific Workspace domain(s)
-      # hostedDomains:
-      #   - yourcompany.com
-```
+| Email | Username | Group |
+|---|---|---|
+| `admin@wip.local` | `admin` | `wip-admins` |
+| `editor@wip.local` | `editor` | `wip-editors` |
+| `viewer@wip.local` | `viewer` | `wip-viewers` |
 
-**3. Set the credentials in `.env`:**
+Each user's password is generated into the install's secret backend as
+`dex-password-<username>` and stays stable across re-applies. On the file
+backend that is `~/.wip-deploy/<name>/secrets/dex-password-<username>`; on
+k8s it is the `dex-password-<username>` key of the `wip-secrets` Secret.
+
+Add, remove and list users with `wip-deploy user`:
 
 ```bash
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
+# Declare a user and apply; the password is printed once and kept in the secret backend
+wip-deploy user add e2e --email e2e@wip.local --group wip-editors --name <install>
+
+# What's declared, and whether each password secret exists yet
+wip-deploy user list --name <install>
+
+# Remove a user: logins stop at apply, and the password secret is deleted
+wip-deploy user remove e2e --name <install>
 ```
 
-**4. Recreate Dex** (env vars are read at container creation):
+- `--group` is the user's authorization group: `wip-admins`, `wip-editors`,
+  `wip-viewers`, or a group an app defines.
+- The username names the password secret, so it must start with a letter or
+  digit and use only letters, digits, `.`, `_` and `-`. Emails must be
+  unique on the install, because Dex identifies static users by email.
+- There is no password-rotate verb. To give a user a fresh password,
+  `remove` it and `add` it again.
+- `remove` refuses to delete the last `wip-admins` user. Add another admin
+  first.
+- `user add` and `user remove` re-render the install's files from the
+  current repo but apply only to Dex: Dex is recreated with the new user
+  set, and every other container keeps running.
 
-```bash
-podman-compose down && podman-compose up -d
-```
+Don't hand-edit the rendered Dex `config.yaml` to add users: it is output,
+and the next render overwrites it. Don't hand-edit `auth.users` in the
+install's `deployment.deployer-state` either: `user add` makes the same
+change with validation and generates the password in the same apply.
 
-The login screen now shows a "Login with Google" option alongside the local-account flow. By default, Google users land in WIP without any group memberships. Mapping Google Workspace groups to WIP groups requires either a custom claims mapper in Dex or post-login group assignment on the WIP side.
+A dedicated user is the clean way to give an automated test suite (e2e,
+Playwright) a browser login. The suite's logins stay separate from real
+users', the user can be removed without touching anyone else, and the suite
+reads its password from the secret file. A write made with the user's own
+OIDC token records its email as `created_by`. A write an app proxies with
+its own API key records `apikey:<key-name>` instead, unless the proxy
+forwards the user's identity and the receiving service trusts proxy headers.
 
 ---
 
@@ -382,7 +413,7 @@ WIP creates a per-service tree under the data directory:
 ├── mongodb/    # MongoDB data files
 ├── postgres/   # PostgreSQL data files
 ├── nats/       # NATS JetStream persistence
-├── minio/      # MinIO object storage
+├── garage/     # Garage object storage
 ├── dex/        # Dex SQLite + state
 └── caddy/      # TLS certificates + runtime config
 ```
@@ -680,7 +711,7 @@ Recommendation: **host-level full-disk encryption**. It's the best balance of se
 
 If host-level encryption isn't possible, the alternatives are weaker but available:
 
-- **MinIO SSE** — server-side encryption for object storage (SSE-S3 with self-managed keys, or SSE-KMS for an external KMS).
+- **Object-store SSE** — server-side encryption for object storage (store-dependent; Garage encrypts via its own layout or disk-level encryption).
 - **MongoDB Community** does not support encryption at rest. Either upgrade to Enterprise or rely on host-level encryption.
 - **PostgreSQL** has no built-in at-rest encryption. `pgcrypto` does column-level encryption inside the database, with the usual key-management trade-offs.
 
@@ -692,32 +723,52 @@ tar czf - "$WIP_DATA_DIR" \
   > backup.tar.gz.gpg
 ```
 
-### 7.2 Key rotation — recreate, don't restart
+### 7.2 Key rotation
 
-> **Environment variables are read at container *creation*, not start.** A `podman-compose restart` keeps the old `.env`. After every secret change you must `podman-compose down && podman-compose up -d` (or the equivalent `wip-deploy` flow) to pick up the new value. This is the single most common rotation mistake.
+Services read their secrets and key files **once, at start**. A rotated key
+reaches them only when they restart, and a plain restart is not enough on
+every target (a compose `restart` keeps the old environment; on k8s a
+`subPath`-mounted file never changes inside a running pod). `wip-deploy`
+handles this: every service's rendered definition carries a hash of the
+secrets and key files it reads, so a rotation re-applies the install and
+restarts exactly the services whose key changed — k8s rolls their pods,
+compose recreates their containers, dev recreates everything. Storage
+services (MongoDB, PostgreSQL, NATS, Garage, Dex) are not restarted this way.
 
-Rotating the master API key (Tier 1 / single-key flow):
+**Three kinds of API key, three procedures:**
 
-```bash
-# 1. Generate a new key
-./scripts/security/generate-api-key.sh --name master-key-v2
+| Key | Where it lives | Rotate with |
+|---|---|---|
+| The install's **master key** (`secrets/api-key`), read by every service and app | install secret | `wip-deploy rotate-key --secret api-key --name <install>` |
+| **Declared keys** (`auth.api_keys`, e.g. agent keys) | install secret + rendered `api-keys.json` | `wip-deploy rotate-key <key-name> --name <install>` |
+| **Runtime keys** (console / `POST /api/registry/api-keys`) | Registry (MongoDB, bcrypt hash) | revoke + create a new one; other services see the change within the 30 s key sync |
 
-# 2. Update .env — replace API_KEY (and the legacy aliases)
-#    API_KEY=<new>
-#    WIP_AUTH_LEGACY_API_KEY=<new>
-#    MASTER_API_KEY=<new>     # legacy compat — services map it to WIP_AUTH_LEGACY_API_KEY
+`rotate-key` prints the new plaintext **once**, names the services the apply
+restarted, and then probes the install's public URL: the Registry must
+accept the new key and refuse the old one, or the command fails (`--no-check`
+skips the probe). There is no grace window — once the apply completes, the
+old value gets 401.
 
-# 3. Recreate (NOT restart)
-podman-compose down && podman-compose up -d
+After rotating:
 
-# 4. Update clients
-# 5. Verify
-curl -k -H "X-API-Key: <new>" https://<host>:8443/api/registry/namespaces
-```
+- Clients that read the key **file** need no config change, but only some
+  re-read it while running: `kbc` reads it on every call and follows at once;
+  an MCP server configured with `WIP_API_KEY_FILE` reads it once at start, so
+  open MCP sessions get 401 until they are reconnected (e.g. `/mcp` in Claude
+  Code); app servers using `apiKeyFile` follow on their next restart.
+- Anyone holding a **copy** of the key (scripts, other machines, people)
+  must be given the new value.
+- For zero downtime with external consumers that cannot switch at once,
+  declare a second key, apply, move consumers over, then remove the first.
 
-The same recreate-don't-restart rule applies to MongoDB / PostgreSQL passwords, the NATS token, and Dex client secrets. The recipe is always: change the secret in its source of truth, update `.env`, `down && up -d`, verify, update clients.
-
-For Tier 2 deployments with per-service keys in `config/api-keys.json`: add the new key, deploy, switch clients, then remove the old key.
+**Not rotatable with `rotate-key`:** MongoDB / PostgreSQL passwords, the
+Garage keys and Dex secrets. These also need a change in the store that
+uses them (the database keeps its own copy of the password), which
+`rotate-key` does not make, so it refuses them. The NATS and MongoDB user
+passwords (`nats-password-<service>`, `mongo-password-<client>`) are refused
+too. The server and the client read the password only at start (MongoDB
+applies a changed one on its next start), and on k8s a changed secret
+restarts neither server, so the two would disagree until both restart.
 
 Rotation cadences worth defaulting to:
 
@@ -725,7 +776,6 @@ Rotation cadences worth defaulting to:
 |---|---|---|
 | API keys | Annually, immediately on compromise | Higher frequency in regulated environments |
 | Database passwords | Annually | Coordinate with maintenance window |
-| NATS token | Annually | Brief disruption while NATS clients reconnect |
 | Dex client secret | Annually | Affects active sessions |
 | TLS (Let's Encrypt) | Automatic | Caddy renews 30 days before expiry |
 
@@ -841,10 +891,10 @@ If using SSH stdio and the connection drops:
 
 | Symptom | Where to look | Likely fix |
 |---|---|---|
-| 401 after a successful Dex login | §3.1 Three-Value OIDC Rule | Match `issuer:` / `WIP_AUTH_JWT_ISSUER_URL` / `VITE_OIDC_AUTHORITY` exactly, recreate containers |
+| 401 after a successful Dex login | The 401's `detail` names the failed check (issuer, audience, expiry); see §3.1 for what each is rendered from | An issuer or audience mismatch means rendered config was hand-edited: `wip-deploy redeploy` |
 | 404 on `/api/<svc>/...` calls | §3.2 Caddy `handle` vs `handle_path` | Use `handle`, not `handle_path` |
 | Health probe says "200" but the service isn't really up | §3.3 Caddy 200-on-unmatched | Validate by content, not just status code |
-| Env change didn't take effect | §7.2 Recreate, don't restart | `podman-compose down && podman-compose up -d` |
+| Env change didn't take effect | §7.2 Key rotation | `wip-deploy redeploy --name <install>` (or `podman-compose down && podman-compose up -d`) — a `restart` keeps the old env |
 | "unable to open database file" on Dex | §5.4 Container user mapping | `podman unshare chown 1001:1001 <data-dir>/dex` |
 | App returns 502 calling WIP from inside its container | §6.3 gotcha 2 | Use `http://wip-caddy:8080`, not `https://wip-caddy:8443` |
 | App's static assets return 404 with MIME-type errors | §6.3 gotcha 1 | Bake `VITE_BASE_PATH` at build time with `--build-arg` |
