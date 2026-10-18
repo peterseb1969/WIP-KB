@@ -6,6 +6,21 @@ than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
 
 
+
+## 2026-10-19 — Mirrors no longer strip a document's project tag
+
+- **Fixed:** session and memory mirrors (natural upserts) replace a record's data, so
+  an `app` tag the source file does not carry was dropped by the next mirror from a
+  repo without `project` in kb.json. The 2026-10-14 backfill had tagged records whose
+  files carry no such field, and within four days 87 `YAC_MEMORY` records on canonical
+  had lost it (all of APP-AA, APP-KB and APP-RC's, 47 of BE-YAC's), as had sessions
+  closed since, so project briefs went thin (KB's newest session read 4 August).
+  The gateway now carries curated fields the writer omits (`topics`, `repo_id`, and
+  now `app`) on the natural-upsert path too, looking the stored document up by its
+  identity fields; an explicit value still wins. `YAC_MEMORY.doc_status` is not
+  carried, so a returning memory file still revives its record.
+- **Repair:** re-run `tools/backfill-app.py` after this is deployed (before it, the
+  next mirror strips the tags again). Localhost: 61 memories + 8 sessions re-tagged.
 ## 2026-10-19 — Project brief: real ordering, no retired memories (CASE-906; client 4.4.0)
 
 - **Fixed:** every brief section was ordered by `updated_at`, which a migration

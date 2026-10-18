@@ -309,7 +309,16 @@ async function findContentTwin(
 // later write falls back to the legacy key, and the state is self-perpetuating:
 // the field that would repair it is exactly the one no longer present. Measured on
 // prod-test — one write from a repo_id-less writer took it off PAPER-1.
-const CURATED_FIELDS = ['topics', 'repo_id']
+//
+// `app` (DECISION-1) is the third: a project tag that writers only send when their
+// repo's kb.json names a project, and that the 2026-10-14 backfill set on records
+// whose source files have no such field. Session and memory mirrors (natural
+// upserts, not mints) then dropped it on their next write: 87 YAC_MEMORY records
+// on canonical within four days, thinning every project brief. So the carry also
+// runs on the natural-upsert path (carryExisting below), not only when minting.
+// Deliberately NOT here: YAC_MEMORY.doc_status. Its retirement must be undone by
+// the next write of a file that came back (CASE-906).
+const CURATED_FIELDS = ['topics', 'repo_id', 'app']
 
 function carryCurated(data: AnyObj, existing: AnyObj | undefined): AnyObj {
   if (!existing?.data) return data
@@ -576,6 +585,10 @@ async function derivedTopics(tpl: AnyObj, data: AnyObj, ns: string, key: string)
 // per-type mint/upsert logic survives in the handlers.
 async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyObj; ns: string; key: string }): Promise<{ document_id: string; result: string; number?: number; synonym?: string }> {
   const { ns, key, metadata } = opts
+  // A natural upsert replaces `data` too, so carry the curated fields here, before
+  // derivedTopics: a derived baseline must not count as the writer's own topics
+  // and so overwrite tags someone curated. (Mint types carry inside mintNumberedDoc.)
+  if (!(await writeConfig(type, ns, key))) data = carryCurated(data, await findByIdentity(type, data, ns, key))
   // Derive here rather than in the route handler so every writer gets the same
   // baseline — the served client, the browser bridge, and anything added later
   // — instead of each having to remember to tag.
@@ -625,6 +638,23 @@ async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyOb
   if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
     throw new WipError(502, `${type} write failed: ${r.error || JSON.stringify(r)}`)
   return { document_id: r.document_id, result: r.status }
+}
+
+// The stored document this write would update, located by the template's
+// identity fields, or undefined: no identity fields (append-only), a write that
+// lacks one of them, or no such document yet. A term-valued identity field is
+// compared by its stored spelling, so an alias that differs finds nothing; the
+// write still lands on the right document (WIP hashes the resolved term), it
+// just carries nothing.
+async function findByIdentity(type: string, data: AnyObj, ns: string, key: string): Promise<AnyObj | undefined> {
+  const idf = ((await getTemplate(type, ns, key)).identity_fields || []) as string[]
+  if (!idf.length || !idf.every((f) => data[f] !== undefined && data[f] !== null && data[f] !== '')) return undefined
+  const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${encodeURIComponent(ns)}`, key, {
+    template_id: await templateId(type, ns, key),
+    filters: idf.map((f) => ({ field: `data.${f}`, operator: 'eq', value: data[f] })),
+    page: 1, page_size: 1,
+  }).catch(() => null)
+  return (q?.items || [])[0]
 }
 
 // Resolve a logical reference to a document_id, generically: query the target
