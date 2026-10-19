@@ -16,16 +16,22 @@ interface Term {
   sort_order: number
   aliases: string[]
   status: string
+  // Taxonomies only (KB_TOPIC): the parent's value, the relation to it, the depth.
+  parent?: string | null
+  relation?: string | null
+  depth?: number
 }
 
 type Drift =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  | { value: string; kind: 'not_in_seed'; seed_entry: Record<string, any> }
+  | { value: string; kind: 'not_in_seed'; seed_entry: Record<string, any>; seed_relationship?: Record<string, any> | null }
   | { value: string; kind: 'not_live' }
   | { value: string; kind: 'differs'; fields: Array<{ field: string; seed: unknown; live: unknown }> }
 
 interface Vocabulary {
   terminology: string
+  // The relation types a new term may use to name its parent; null for a flat list.
+  relations?: string[] | null
   terms?: Term[]
   seed_file?: string
   seed_drift?: Drift[] | null
@@ -86,7 +92,17 @@ function AliasInput({ terminology, term, onDone }: { terminology: string; term: 
   )
 }
 
-function AddTermForm({ terminology, onDone }: { terminology: string; onDone: (msg: string, ok: boolean) => void }) {
+function AddTermForm({
+  vocab,
+  onDone,
+}: {
+  vocab: Vocabulary
+  onDone: (msg: string, ok: boolean) => void
+}) {
+  const terminology = vocab.terminology
+  const relations = vocab.relations ?? []
+  const [parent, setParent] = useState('')
+  const [relation, setRelation] = useState(relations[0] ?? '')
   const [value, setValue] = useState('')
   const [label, setLabel] = useState('')
   const [description, setDescription] = useState('')
@@ -96,8 +112,15 @@ function AddTermForm({ terminology, onDone }: { terminology: string; onDone: (ms
     e.preventDefault()
     setBusy(true)
     try {
-      await vocabPost(`/${terminology}/terms`, { value: value.trim(), label, description, sort_order: sortOrder })
-      onDone(`Added ${value.trim()} to ${terminology}.`, true)
+      const r = await vocabPost(`/${terminology}/terms`, {
+        value: value.trim(),
+        label,
+        description,
+        sort_order: sortOrder,
+        ...(parent ? { parent, relation } : {}),
+      })
+      const where = parent ? ` (${relation} ${parent})` : ''
+      onDone(r.status === 'linked' ? `Linked ${value.trim()}${where}.` : `Added ${value.trim()} to ${terminology}${where}.`, true)
       setValue('')
       setLabel('')
       setDescription('')
@@ -113,6 +136,28 @@ function AddTermForm({ terminology, onDone }: { terminology: string; onDone: (ms
     <form onSubmit={submit} className="mt-3 flex flex-wrap items-center gap-2">
       <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="value" aria-label="Value" className={`${field} w-36`} />
       <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="label (optional)" aria-label="Label" className={`${field} w-36`} />
+      {relations.length > 0 && (
+        <>
+          <select value={relation} onChange={(e) => setRelation(e.target.value)} aria-label="Relation to parent" className={field}>
+            {relations.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+          <select value={parent} onChange={(e) => setParent(e.target.value)} aria-label="Parent" className={`${field} max-w-[14rem]`}>
+            <option value="">no parent (top level)</option>
+            {vocab.terms
+              ?.filter((t) => t.status === 'active')
+              .map((t) => (
+                <option key={t.term_id} value={t.value}>
+                  {'\u00a0\u00a0'.repeat(t.depth ?? 0)}
+                  {t.value}
+                </option>
+              ))}
+          </select>
+        </>
+      )}
       <input
         value={sortOrder}
         onChange={(e) => setSortOrder(e.target.value)}
@@ -170,6 +215,14 @@ function DriftList({ vocab }: { vocab: Vocabulary }) {
                 <pre className="mt-1 overflow-x-auto rounded bg-white/70 px-2 py-1 font-mono text-[11px] text-text">
                   {JSON.stringify(d.seed_entry)}
                 </pre>
+                {d.seed_relationship && (
+                  <>
+                    {'and to ontology.relationships:'}
+                    <pre className="mt-1 overflow-x-auto rounded bg-white/70 px-2 py-1 font-mono text-[11px] text-text">
+                      {JSON.stringify(d.seed_relationship)}
+                    </pre>
+                  </>
+                )}
               </>
             )}
           </li>
@@ -203,9 +256,9 @@ export function VocabularySettings() {
     <section className="mt-6 rounded-lg border border-gray-200 bg-surface p-5">
       <h2 className="font-medium">Vocabulary</h2>
       <p className="mt-1 text-sm text-text/70">
-        Add a project (KB_APP) or a session role (SESSION_ROLE) in the <span className="font-mono">{CORPUS_NS}</span>{' '}
-        knowledge base, or another spelling that should resolve to an existing one. Adding only — renaming and
-        retiring terms stay in the WIP Console.
+        Add a project (KB_APP), a session role (SESSION_ROLE) or a topic (KB_TOPIC, under a parent) in the{' '}
+        <span className="font-mono">{CORPUS_NS}</span> knowledge base, or another spelling that should resolve to an
+        existing one. Adding only — renaming, moving and retiring terms stay in the WIP Console.
       </p>
       {msg && <p className={`mt-3 text-sm ${msg.ok ? 'text-green-700' : 'text-red-700'}`}>{msg.text}</p>}
       {q.isLoading && <p className="mt-4 text-sm text-text-muted">Loading…</p>}
@@ -230,9 +283,14 @@ export function VocabularySettings() {
                   <tbody className="divide-y divide-gray-100">
                     {v.terms?.map((t) => (
                       <tr key={t.term_id} className={t.status !== 'active' ? 'opacity-50' : ''}>
-                        <td className="py-1.5 pr-3 align-top">
+                        <td className="py-1.5 pr-3 align-top" style={{ paddingLeft: `${(t.depth ?? 0) * 1.25}rem` }}>
                           <span className="font-mono">{t.value}</span>
                           {t.label !== t.value && <span className="text-text-muted"> · {t.label}</span>}
+                          {t.parent && (
+                            <span className="ml-1.5 text-xs text-text-muted">
+                              ({t.relation} {t.parent})
+                            </span>
+                          )}
                           {t.description && <div className="text-xs text-text-muted">{t.description}</div>}
                         </td>
                         <td className="py-1.5 pr-3 align-top">
@@ -257,7 +315,7 @@ export function VocabularySettings() {
                   </tbody>
                 </table>
               </div>
-              <AddTermForm terminology={v.terminology} onDone={done} />
+              <AddTermForm vocab={v} onDone={done} />
               <DriftList vocab={v} />
             </>
           )}

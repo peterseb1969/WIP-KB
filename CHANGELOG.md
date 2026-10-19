@@ -9,6 +9,19 @@ than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
 
 
+## 2026-10-19 — UI writes name the signed-in user; KB_TOPIC editable in Settings
+
+- **Changed:** case close/reopen responses and flag-for-YAC records written from the UI
+  are attributed to the signed-in user's email, set server-side by the guards from the
+  gateway's `X-WIP-User` (or the OIDC session), whatever the browser sent. An install
+  without login still records `WEB-UI`. The Author facet lists email authors.
+- **Added:** Settings → Vocabulary edits KB_TOPIC. A new topic may name a parent and the
+  relation to it (`part_of` or `is_a`), stored as a WIP term relation; the list shows
+  the taxonomy as a tree. Adding an existing topic that has no parent, with a parent,
+  links it (the repair for an add whose link failed); cycles are refused. Seed drift
+  now compares each topic's parent link and gives the `ontology.relationships` entry
+  for a topic missing from the seed. Still add-only: no moving or retiring.
+
 ## 2026-10-19 — Attach a project's tooling archive from the client (CASE-889; client 4.6.0)
 
 - **Added:** `kbc kb-write.py PROJECT --tooling PATH` attaches or replaces a project's

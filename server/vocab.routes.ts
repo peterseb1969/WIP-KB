@@ -6,9 +6,12 @@
  * - Admin-only — gated by requireAdmin() at the mount in index.ts.
  * - An allowlist of vocabularies. KB_APP (a project is a KB_APP term) and
  *   SESSION_ROLE (each app YAC needs one) are flat lists where a new value is all
- *   that is needed. KB_TOPIC is not here: a topic needs a parent and a relation
- *   type, and the taxonomy is deprecate-don't-delete.
- * - Add-only. No rename, no deprecate, no delete.
+ *   that is needed. KB_TOPIC is a taxonomy: a new topic may name a parent and the
+ *   relation that links it there (part_of, is_a), stored as a WIP term relation
+ *   from the new topic to its parent, the same shape as the seed's ontology.
+ * - Add-only. No rename, no deprecate, no delete, no re-parenting. The one
+ *   exception repairs an add that half-failed: adding an existing topic that has
+ *   no parent, with a parent, links it.
  * - Scoped to one knowledge domain per request (?namespace=), because every domain
  *   carries its own copy of these vocabularies.
  * - Alias additions are merged here, server-side: WIP's term update REPLACES the
@@ -29,7 +32,11 @@ const SEED_TERMINOLOGIES = join(__dirname, 'seed', 'terminologies')
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
 const NS_DEFAULT = process.env.WIP_NAMESPACE || 'kb'
 
-export const EDITABLE_VOCABULARIES = ['KB_APP', 'SESSION_ROLE'] as const
+export const EDITABLE_VOCABULARIES = ['KB_APP', 'SESSION_ROLE', 'KB_TOPIC'] as const
+
+// The vocabularies that are taxonomies, with the relation types a term may use to
+// name its parent (child → parent, as in the seed file's ontology.relationships).
+const HIERARCHY_RELATIONS: Record<string, readonly string[]> = { KB_TOPIC: ['part_of', 'is_a'] }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObj = Record<string, any>
@@ -48,6 +55,10 @@ interface TermView {
   sort_order: number
   aliases: string[]
   status: string
+  // Taxonomies only: the parent's value, the relation to it, and the depth in the tree.
+  parent?: string | null
+  relation?: string | null
+  depth?: number
 }
 
 interface SeedTerm {
@@ -56,10 +67,12 @@ interface SeedTerm {
   description: string | null
   sort_order: number
   aliases: string[]
+  parent: string | null
+  relation: string | null
 }
 
 type Drift =
-  | { value: string; kind: 'not_in_seed'; seed_entry: AnyObj }
+  | { value: string; kind: 'not_in_seed'; seed_entry: AnyObj; seed_relationship?: AnyObj | null }
   | { value: string; kind: 'not_live' }
   | { value: string; kind: 'differs'; fields: Array<{ field: string; seed: unknown; live: unknown }> }
 
@@ -92,12 +105,16 @@ function toView(t: AnyObj): TermView {
 function readSeed(terminology: string): SeedTerm[] | null {
   try {
     const raw = JSON.parse(readFileSync(join(SEED_TERMINOLOGIES, `${terminology}.json`), 'utf-8'))
+    const links = new Map<string, AnyObj>()
+    for (const r of (raw.ontology?.relationships ?? []) as AnyObj[]) links.set(r.source, r)
     return (raw.terms ?? []).map((t: AnyObj) => ({
       value: t.value,
       label: t.label ?? t.value,
       description: t.description ?? null,
       sort_order: t.sort_order ?? 0,
       aliases: Array.isArray(t.aliases) ? t.aliases : [],
+      parent: links.get(t.value)?.target ?? null,
+      relation: links.get(t.value)?.type ?? null,
     }))
   } catch {
     return null
@@ -110,6 +127,15 @@ function seedEntry(t: TermView): AnyObj {
   if (t.aliases.length) e.aliases = t.aliases
   if (t.description) e.description = t.description
   return e
+}
+
+// The seed's ontology.relationships entry for a term's parent link.
+function seedRelationship(t: TermView): AnyObj | null {
+  return t.parent && t.relation ? { source: t.value, target: t.parent, type: t.relation } : null
+}
+
+function linkText(parent: string | null | undefined, relation: string | null | undefined): string | null {
+  return parent ? `${relation} ${parent}` : null
 }
 
 function resolvedAliases(value: string, aliases: string[]): string[] {
@@ -125,7 +151,7 @@ function seedDrift(live: TermView[], seed: SeedTerm[]): Drift[] {
     if (t.status !== 'active') continue
     const s = seedBy.get(t.value)
     if (!s) {
-      out.push({ value: t.value, kind: 'not_in_seed', seed_entry: seedEntry(t) })
+      out.push({ value: t.value, kind: 'not_in_seed', seed_entry: seedEntry(t), seed_relationship: seedRelationship(t) })
       continue
     }
     const fields: Array<{ field: string; seed: unknown; live: unknown }> = []
@@ -136,6 +162,10 @@ function seedDrift(live: TermView[], seed: SeedTerm[]): Drift[] {
       fields.push({ field: 'description', seed: s.description, live: t.description })
     }
     if (s.sort_order !== t.sort_order) fields.push({ field: 'sort_order', seed: s.sort_order, live: t.sort_order })
+    // Only a taxonomy's terms carry a parent; flat lists leave it undefined.
+    if (t.parent !== undefined && linkText(s.parent, s.relation) !== linkText(t.parent, t.relation)) {
+      fields.push({ field: 'parent', seed: linkText(s.parent, s.relation), live: linkText(t.parent, t.relation) })
+    }
     // Compared as the spellings each side RESOLVES, not as literal lists: WIP
     // matches case-insensitively and drops an alias that only re-cases the value or
     // another alias, while older seed entries still list such variants.
@@ -195,7 +225,47 @@ export default function vocabRoutes(wipKey: string): Router {
     const r = await wip('GET', `/api/def-store/terminologies/${tid}/terms?page_size=1000&namespace=${encodeURIComponent(ns)}`)
     const terms = ((r.items ?? []) as AnyObj[]).map(toView)
     terms.sort((a, b) => a.sort_order - b.sort_order || a.value.localeCompare(b.value))
-    return { terminology_id: tid, terms }
+    if (!HIERARCHY_RELATIONS[terminology]) return { terminology_id: tid, terms }
+    return { terminology_id: tid, terms: treeOrder(terms, await parentLinks(tid, ns)) }
+  }
+
+  // child value → its parent link, from the namespace's term relations whose both
+  // ends are in this terminology (the listing is namespace-wide).
+  async function parentLinks(tid: string, ns: string): Promise<Map<string, { parent: string; relation: string }>> {
+    const links = new Map<string, { parent: string; relation: string }>()
+    for (let page = 1; ; page++) {
+      const r = await wip('GET', `/api/def-store/ontology/term-relations/all?namespace=${encodeURIComponent(ns)}&page_size=1000&page=${page}`)
+      for (const x of (r.items ?? []) as AnyObj[]) {
+        if (x.status !== 'active' || x.source_terminology_id !== tid || x.target_terminology_id !== tid) continue
+        const child = String(x.source_term_value)
+        if (!links.has(child)) links.set(child, { parent: String(x.target_term_value), relation: String(x.relation_type) })
+      }
+      if (page >= (r.pages ?? 1)) return links
+    }
+  }
+
+  // The terms depth-first from the roots, so the list reads as the tree. A term whose
+  // parent is missing or part of a cycle is listed at the end, at depth 0.
+  function treeOrder(terms: TermView[], links: Map<string, { parent: string; relation: string }>): TermView[] {
+    const byValue = new Map(terms.map((t) => [t.value, t]))
+    const children = new Map<string, TermView[]>()
+    for (const t of terms) {
+      const link = links.get(t.value)
+      t.parent = link?.parent ?? null
+      t.relation = link?.relation ?? null
+      if (link && byValue.has(link.parent)) children.set(link.parent, [...(children.get(link.parent) ?? []), t])
+    }
+    const out: TermView[] = []
+    const seen = new Set<string>()
+    const walk = (t: TermView, depth: number) => {
+      if (seen.has(t.value)) return
+      seen.add(t.value)
+      out.push({ ...t, depth })
+      for (const c of children.get(t.value) ?? []) walk(c, depth + 1)
+    }
+    for (const t of terms) if (!t.parent || !byValue.has(t.parent)) walk(t, 0)
+    for (const t of terms) if (!seen.has(t.value)) out.push({ ...t, depth: 0 })
+    return out
   }
 
   function fail(res: Response, e: unknown): void {
@@ -215,6 +285,7 @@ export default function vocabRoutes(wipKey: string): Router {
             return {
               terminology,
               terminology_id,
+              relations: HIERARCHY_RELATIONS[terminology] ?? null,
               terms,
               seed_file: `server/seed/terminologies/${terminology}.json`,
               seed_drift: seed ? seedDrift(terms, seed) : null,
@@ -230,7 +301,8 @@ export default function vocabRoutes(wipKey: string): Router {
     }
   })
 
-  // POST /vocab/:terminology/terms?namespace= {value, label?, description?, sort_order?}
+  // POST /vocab/:terminology/terms?namespace= {value, label?, description?, sort_order?,
+  //   parent?, relation?} — parent and relation for a taxonomy only.
   router.post('/:terminology/terms', async (req, res) => {
     try {
       const ns = nsOf(req)
@@ -238,6 +310,30 @@ export default function vocabRoutes(wipKey: string): Router {
       const b = req.body ?? {}
       const value = typeof b.value === 'string' ? b.value.trim() : ''
       if (!value) throw new HttpError(400, 'value is required')
+      const relations = HIERARCHY_RELATIONS[terminology]
+      const parentValue = typeof b.parent === 'string' ? b.parent.trim() : ''
+      let parent: TermView | null = null
+      let relation = ''
+      if (parentValue) {
+        if (!relations) throw new HttpError(400, `${terminology} is a flat list; its terms have no parent`)
+        relation = typeof b.relation === 'string' ? b.relation.trim() : ''
+        if (!relations.includes(relation)) throw new HttpError(400, `relation must be one of ${relations.join(', ')}`)
+        const current = (await liveTerms(terminology, ns)).terms
+        parent = current.find((t) => t.value === parentValue) ?? null
+        if (!parent || parent.status !== 'active') throw new HttpError(400, `${parentValue} is not an active ${terminology} term`)
+        const existing = current.find((t) => t.value === value)
+        if (existing) {
+          if (existing.parent) throw new HttpError(409, `${value} already exists, under ${existing.parent}`)
+          // Re-parenting is not offered, so this only links a term left without one.
+          for (let p: TermView | undefined = parent; p; p = current.find((t) => t.value === p!.parent)) {
+            if (p.value === value) throw new HttpError(400, `${parentValue} is under ${value}; linking would make a cycle`)
+          }
+          await link(existing, parent, relation, ns)
+          const after = (await liveTerms(terminology, ns)).terms.find((t) => t.value === value) ?? null
+          res.json({ namespace: ns, terminology, status: 'linked', term: after })
+          return
+        }
+      }
       const item: AnyObj = { value }
       if (typeof b.label === 'string' && b.label.trim()) item.label = b.label.trim()
       if (typeof b.description === 'string' && b.description.trim()) item.description = b.description.trim()
@@ -249,13 +345,27 @@ export default function vocabRoutes(wipKey: string): Router {
       const tid = await terminologyId(terminology, ns)
       const r = await wip('POST', `/api/def-store/terminologies/${tid}/terms?namespace=${encodeURIComponent(ns)}`, [item])
       const result = firstResult(r)
-      const { terms } = await liveTerms(terminology, ns)
-      const created = terms.find((t) => t.value === value) ?? null
+      let created = (await liveTerms(terminology, ns)).terms.find((t) => t.value === value) ?? null
+      if (parent && created) {
+        try {
+          await link(created, parent, relation, ns)
+        } catch (e) {
+          throw new HttpError(502, `${value} was added without its parent link (${(e as Error).message}). ` +
+            `Add ${value} again with the same parent to link it.`)
+        }
+        created = (await liveTerms(terminology, ns)).terms.find((t) => t.value === value) ?? created
+      }
       res.status(201).json({ namespace: ns, terminology, status: result.status ?? 'created', term: created })
     } catch (e) {
       fail(res, e)
     }
   })
+
+  async function link(child: TermView, parent: TermView, relation: string, ns: string): Promise<void> {
+    firstResult(await wip('POST', `/api/def-store/ontology/term-relations?namespace=${encodeURIComponent(ns)}`, [
+      { source_term_id: child.term_id, target_term_id: parent.term_id, relation_type: relation },
+    ]))
+  }
 
   // POST /vocab/:terminology/terms/:termId/aliases?namespace= {alias}
   router.post('/:terminology/terms/:termId/aliases', async (req, res) => {
