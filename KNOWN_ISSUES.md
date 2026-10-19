@@ -5,31 +5,23 @@ re-investigate solved problems, "fix" intentional choices, or miss real gaps.
 
 ## Open / deferred
 
-### `app` not backfilled on dev-test
-**Status:** optional · **Severity:** low
-`tools/backfill-app.py` has been applied on canonical, prod-test and localhost. dev-test
-has the template change but its older documents carry no `app`. Run it there only if
-dev-test should match (`KB_TARGET=https://dev-test.internal
-KB_KEYFILE=~/.wip-deploy/dev-test/secrets/api-key python3 tools/backfill-app.py`, then
-`--apply`).
+### Plain `.tar` tooling archives are refused by WIP
+**Status:** known (decision pending) · **Severity:** low
+The PROJECT template's `tooling` field allows `application/zip`, `application/x-tar`,
+`application/gzip` and `application/x-gzip`. WIP's file upload has its own allowlist
+(`document-store` `file_validation.py`, overridable per install with
+`WIP_ALLOWED_MIME_TYPES`), and its default lists only `application/zip` and
+`application/gzip`. So `kb-write.py PROJECT --tooling x.tar` gets WIP's 415, passed
+through by the gateway. `.zip`, `.tar.gz`, `.tgz` and `.gz` work (the client sends
+`application/gzip` for all gzip files). Fix by dropping the two types from the template,
+or by allowing them in an install's allowlist. (CASE-889.)
 
-### `kb_refs` cross-namespace references are not existence-validated
-**Status:** known (BE-YAC) · **Severity:** low
-A field with `array_item_type: reference` (e.g. `LIBRARY_DOC.kb_refs` → corpus docs)
-does **not** validate that the referenced document exists — a bogus id validates
-`valid:true` with an empty `references[]`, unlike a single `reference` field. Used
-deliberately as an unvalidated **soft link** (ids persist; `DocPage` resolves/links
-them, showing the raw id if missing). The open call — BE fix (validate array-item refs)
-vs accept soft links — is tracked in **CASE-550**. Not a blocker.
-
-### Corpus namespace is dual-sourced (server vs client)
-**Status:** known · **Severity:** medium (deploy-time)
-The corpus namespace is configured by **two** vars that must agree: server
-`WIP_NAMESPACE` and client `VITE_KB_NAMESPACE` (baked at build). If they drift,
-`DocPage`'s `canFlag = doc.namespace === CORPUS_NS` silently hides flag-for-YAC and
-writes misroute — no error. Mitigated by matching committed defaults (both `kb`) and a
-deploy-time check; the structural fix (client fetches the namespace from the server at
-runtime) is an ecosystem/scaffold pattern tracked in **CASE-551**. Not a blocker.
+### Tooling uploads are held in memory
+**Status:** known · **Severity:** low
+`POST /projects/:app/tooling` reads the whole archive (up to 100 MB) into memory and
+copies it once more for the multipart upload to WIP. The KB container has no memory
+limit today (a 95 MB upload left the pod at about 110 MiB). A limit below about
+300 MiB would be at risk. Streaming the upload through would remove this.
 
 ### `authored_by` is free-form at write time
 **Status:** deferred · **Severity:** low
@@ -38,29 +30,6 @@ Writers put free-form/composite text into `authored_by` (`"BE-YAC / Peter"`,
 normalization (`docAuthors`, CASE-563). The display fix keeps the facet clean, but the
 root cause — write-time discipline so `authored_by` carries a clean session role — is a
 separate, larger item, not yet filed.
-
-### YAC_MEMORY deletes don't propagate (v1 limitation)
-**Status:** deferred · **Severity:** low
-The session-end fold-in upserts each `memory/*.md`, so adds/edits flow to kb. A
-*pruned* memory (deleted locally) lingers `active` in kb. The fix is a session-end
-reconcile pass (archive kb `YAC_MEMORY` docs for an owner whose `mem_key` is absent
-locally) — a deliberate v2, not a blocker. (CASE-507.)
-
-### Gene-pool `/wip-report` master not yet pushed
-**Status:** deferred (cross-repo coordination) · **Severity:** low
-The session-end YAC_MEMORY fold-in is in APP-KB's local `.claude/commands/wip-report.md`
-(gitignored, so app-local) and in FRanC's `/wake`. The shared scaffold master was
-committed by FRanC but not pushed (`World-in-a-Pie 3a46a2a2`, develop) pending
-BE-YAC/Peter coordination + `setup-backend-agent.sh --refresh`. Until then app-YACs
-use local copies. (CASE-524.)
-
-### `create-app-project.sh --refresh` deletes a load-bearing served file
-**Status:** known (BE-YAC) · **Severity:** medium
-Every `--refresh` deletes `docs/playbooks/case-workflow.md`, which is served by
-`kb-client.routes.ts:37` as the kb-client playbook. **You must
-`git checkout -- docs/playbooks/case-workflow.md` before committing a refresh** and
-not commit the `D` line. Filed CASE-522 (also covers a stale `mcp__wip-kb__`
-allowlist the refresh re-adds).
 
 ### askBar tool-choice is non-deterministic
 **Status:** mitigated · **Severity:** low
@@ -88,11 +57,33 @@ is the current list.
 `vite build` warns the main chunk >500 kB. No `manualChunks`/dynamic-import split
 yet; acceptable for an internal app.
 
+## Resolved (kept so nobody re-investigates)
+
+- **`app` backfill on dev-test**: run 2026-10-19; a later dry run the same day finds nothing
+  left to tag (the remaining untagged documents have no app-YAC author, as on every
+  instance).
+- **`kb_refs` array references not existence-validated** (CASE-550, implemented): WIP
+  now checks each array-of-reference item like a single reference.
+- **Corpus namespace dual-sourced** (CASE-551, implemented): the client reads its
+  namespace from `GET /api/app-config` at boot (`src/lib/namespaces.ts`); no
+  `VITE_KB_NAMESPACE` bake.
+- **YAC_MEMORY deletes don't propagate** (CASE-507/906): a directory mirror retires what
+  that folder mirrored before and has dropped; `--retire` is the whole-owner cleanup.
+- **Gene-pool `/wip-report` memory step not pushed** (CASE-524): the step is on
+  World-in-a-Pie `develop` in both scaffold masters.
+- **`--refresh` deletes `docs/playbooks/case-workflow.md`** (CASE-522, implemented).
+- **UI writes attributed to `WEB-UI`**: since 2026-10-19 the server stamps the signed-in
+  user's email (`server/ui-author.ts`) on case responses and flags written from the UI;
+  `WEB-UI` remains only for an install without login. Older UI writes keep `WEB-UI` or
+  `user`.
+
 ## Intentionally simple (do NOT "fix")
 
-- **Read-mostly UI; one write.** Only flag-for-YAC writes. No editor, no
-  status/assignment/tag buttons — by design (spec §11). If tempted, surface as an
-  open question.
+- **Read-mostly UI; a fixed set of writes.** The browser can write only what the guards
+  admit: flag-for-YAC (`server/wip-proxy-guard.ts`), case close/reopen, topics and the
+  relationship picker's three edge types (`server/kb-ui-guard.ts`), and admin-only
+  vocabulary curation (`server/vocab.routes.ts`). No document editor, no
+  assignment buttons. A new UI write needs a guard entry and Peter's call (spec §11).
 - **Three fixed prepare-prompt buttons.** Clipboard helpers from a const array; no
   per-doc-type variation. Adding a 4th intent = edit the list.
 - **Stateless client.** No local index/DB/prefs cache. Search/indexing is
