@@ -22,7 +22,7 @@
 // - Mounted PUBLIC (before requireAuth) like kb-client.routes; the gateway
 //   browser-auth exemption is the manifest route line (CASE-439 pattern).
 import { createHash } from 'node:crypto'
-import { Router, type Request, type Response } from 'express'
+import express, { Router, type Request, type Response, type NextFunction } from 'express'
 import { createCorpusNamespace } from './lib/bootstrap.js'
 
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
@@ -1496,6 +1496,126 @@ router.get('/projects/:app/tooling', async (req, res) => {
     res.setHeader('Content-Type', meta.content_type || 'application/octet-stream')
     res.setHeader('Content-Disposition', `attachment; filename="${String(meta.filename || 'tooling').replace(/"/g, '')}"`)
     res.send(Buffer.from(await up.arrayBuffer()))
+  } catch (e) {
+    res.status(errStatus(e)).json({ error: (e as Error).message })
+  }
+})
+
+// WIP caps a file field at 100 MB (file_config.max_size_mb), so no tooling archive
+// can be larger; the template's own limit is checked again inside the route.
+const TOOLING_MAX_BYTES = 100 * 1024 * 1024
+const rawArchive = express.raw({ type: () => true, limit: TOOLING_MAX_BYTES })
+// The body parser reports a too-large or broken body through next(err), which
+// Express would answer with an HTML error page; the client expects JSON.
+function readArchive(req: Request, res: Response, next: NextFunction): void {
+  rawArchive(req, res, (err?: unknown) => {
+    if (!err) return next()
+    const e = err as { status?: number; type?: string; message?: string }
+    res.status(e.status || 400).json({
+      error: e.type === 'entity.too.large' ? `archive is larger than ${TOOLING_MAX_BYTES / 1024 / 1024} MB` : `unreadable upload: ${e.message}`,
+    })
+  })
+}
+
+// Soft-delete an upload that no profile will reference. Best effort: false when
+// WIP refused, and the caller reports the file id either way.
+async function discardFile(fileId: string, ns: string, key: string): Promise<boolean> {
+  try {
+    const d = await wipReq('DELETE', `/api/document-store/files?namespace=${encodeURIComponent(ns)}`, key, [{ id: fileId }])
+    return (d.results ?? [])[0]?.status === 'deleted'
+  } catch {
+    return false
+  }
+}
+
+// POST /projects/:app/tooling?namespace= — attach or replace the project's tooling
+// archive. The body is the archive itself, its type in Content-Type and its name in
+// X-Filename (percent-encoded). The archive is checked against the PROJECT
+// template's file config, uploaded with the caller's key (so WIP's namespace write
+// permission decides who may), and linked to the profile. The archive it replaces
+// stays in WIP, unreferenced. If linking fails, the new upload is soft-deleted so
+// nothing is left orphaned, and both ids are reported.
+router.post('/projects/:app/tooling', readArchive, async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const content = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)
+  const contentType = (String(req.header('content-type') || '').split(';')[0] ?? '').trim().toLowerCase()
+  let filename = ''
+  try {
+    filename = decodeURIComponent(String(req.header('x-filename') || '')).replace(/^.*[\\/]/, '').trim()
+  } catch { /* malformed escape: refused below as a missing name */ }
+  if (!content.length) return res.status(400).json({ error: 'the request body must be the archive; it was empty' })
+  if (!filename) return res.status(400).json({ error: 'X-Filename (percent-encoded) must name the archive' })
+  try {
+    const field = await liveField('PROJECT', ns, key, 'tooling')
+    if (!field) return res.status(409).json({ error: `PROJECT in ${ns} has no tooling field` })
+    const fc: AnyObj = field.file_config || {}
+    const allowed: string[] = fc.allowed_types || []
+    if (allowed.length && !allowed.includes(contentType)) {
+      return res.status(415).json({ error: `content type '${contentType || 'unset'}' is not one of ${allowed.join(', ')}` })
+    }
+    const maxBytes = Number(fc.max_size_mb || 100) * 1024 * 1024
+    if (content.length > maxBytes) {
+      return res.status(413).json({ error: `archive is ${content.length} bytes; the limit is ${fc.max_size_mb} MB` })
+    }
+
+    const { term, profile } = await projectOf(String(req.params.app), ns, key)
+    if (!profile) {
+      return res.status(404).json({
+        error: `project '${term.value}' has no PROJECT profile in ${ns}; write it first: kbc kb-write.py PROJECT <profile.md>`,
+      })
+    }
+
+    const form = new FormData()
+    form.append('file', new Blob([new Uint8Array(content)], { type: contentType }), filename)
+    form.append('namespace', ns)
+    form.append('description', `Tooling archive of project ${term.value}`)
+    const up = await fetch(`${WIP_BASE}/api/document-store/files`, { method: 'POST', headers: { 'X-API-Key': key }, body: form })
+    const upText = await up.text()
+    if (!up.ok) {
+      // WIP's own refusal (permission, its upload allowlist, size) is the caller's to
+      // act on; pass the 4xx through rather than calling it an outage.
+      return res.status(up.status >= 400 && up.status < 500 ? up.status : 502)
+        .json({ error: `WIP refused the upload (${up.status}): ${upText.slice(0, 300)}` })
+    }
+    const file = JSON.parse(upText) as AnyObj
+    const fileId = String(file.file_id || '')
+    if (!fileId) return res.status(502).json({ error: `WIP upload answered without a file_id: ${upText.slice(0, 300)}` })
+
+    const replaced = typeof profile.data?.tooling === 'string' && profile.data.tooling ? profile.data.tooling : null
+    let failure = `still conflicting after ${PATCH_MAX_RETRIES} retries`
+    let failStatus = 409
+    let version = profile.version
+    try {
+      for (let attempt = 0; attempt < PATCH_MAX_RETRIES; attempt++) {
+        const d = await wipReq('PATCH', `/api/document-store/documents?namespace=${encodeURIComponent(ns)}`, key,
+          [{ document_id: profile.document_id, patch: { tooling: fileId }, if_match: version }])
+        const r: AnyObj = (d.results || [])[0] || {}
+        if (r.status === 'updated' || r.status === 'unchanged') {
+          return res.json({
+            app: term.value, namespace: ns, document_id: profile.document_id, file_id: fileId,
+            filename: file.filename ?? filename, size_bytes: file.size_bytes ?? content.length,
+            content_type: file.content_type ?? contentType, replaced,
+          })
+        }
+        if (r.error_code !== 'concurrency_conflict') {
+          failure = r.error || JSON.stringify(r)
+          failStatus = statusForErrorCode(r.error_code)
+          break
+        }
+        const cur = await wipReq('GET', `/api/document-store/documents/${profile.document_id}?namespace=${encodeURIComponent(ns)}`, key)
+        version = cur.version
+      }
+    } catch (e) {
+      failure = (e as Error).message
+      failStatus = errStatus(e)
+    }
+    const discarded = await discardFile(fileId, ns, key)
+    res.status(failStatus).json({
+      error: `linking the archive to the profile failed: ${failure}`,
+      document_id: profile.document_id, file_id: fileId, file_discarded: discarded,
+    })
   } catch (e) {
     res.status(errStatus(e)).json({ error: (e as Error).message })
   }

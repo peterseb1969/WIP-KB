@@ -18,6 +18,8 @@ Usage:
   options:
     --field k=v        add/override a data field (repeatable; light type coercion)
     --metadata '{…}'   JSON object merged into the write's metadata
+    --tooling PATH     PROJECT only: attach PATH as the project's tooling archive
+                       (after the profile write, or alone with --match app=<project>)
     --format text|json output shape (default text)
 
 Doc body convention: the markdown after the frontmatter fence becomes data.body
@@ -37,7 +39,7 @@ import subprocess
 import sys
 import urllib.parse
 
-from kb_client_core import DEV_ROOT, NAMESPACE, PROJECT, gw_get, gw_post, targets
+from kb_client_core import DEV_ROOT, NAMESPACE, PROJECT, GatewayRefusal, gw_get, gw_post, gw_post_bytes, targets
 
 
 def _coerce(v: str) -> object:
@@ -760,6 +762,77 @@ def cmd_patch(type_: str, args: argparse.Namespace) -> int:
     return 0
 
 
+# The archive types the PROJECT template's tooling field accepts, by suffix.
+# Longest suffix first, so .tar.gz is not taken for .gz alone.
+TOOLING_TYPES = [(".tar.gz", "application/gzip"), (".tgz", "application/gzip"),
+                 (".gz", "application/gzip"), (".zip", "application/zip"),
+                 (".tar", "application/x-tar")]
+
+
+def cmd_tooling(path: str, app: str, fmt: str) -> int:
+    """Attach or replace a project's tooling archive: the file goes to the gateway
+    as the raw request body (POST /projects/:app/tooling), which uploads it to WIP
+    with this caller's key and links it to the project's profile."""
+    name = os.path.basename(path)
+    ctype = next((t for suffix, t in TOOLING_TYPES if name.lower().endswith(suffix)), None)
+    if ctype is None:
+        print(f"ERROR: {name} is not a .zip, .tar, .tar.gz, .tgz or .gz archive", file=sys.stderr)
+        return 2
+    try:
+        with open(path, "rb") as f:
+            content = f.read()
+    except OSError as e:
+        print(f"ERROR: cannot read {path}: {e}", file=sys.stderr)
+        return 2
+    try:
+        result = gw_post_bytes(f"/projects/{urllib.parse.quote(app, safe='')}/tooling", content, ctype, name)
+    except GatewayRefusal as e:
+        print(f"ERROR: rejected — {e}", file=sys.stderr)
+        return 1
+    if fmt == "json":
+        sys.stdout.write(json.dumps(result, indent=2) + "\n")
+    else:
+        was = f"; replaced {result['replaced']}" if result.get("replaced") else ""
+        sys.stdout.write(f"attached {result.get('filename', name)} ({result.get('size_bytes', len(content))} bytes) "
+                         f"to project {result.get('app', app)} — file {result.get('file_id', '?')}{was}\n")
+    return 0
+
+
+def cmd_project_tooling(args: argparse.Namespace) -> int:
+    """PROJECT --tooling: write the profile first when one is given (so the archive
+    has a profile to link to), then attach the archive to that profile's project.
+    Without a profile, the project comes from --match app=<project> or kb.json's
+    `project`."""
+    if args.type != "PROJECT":
+        print("ERROR: --tooling is for PROJECT only", file=sys.stderr)
+        return 2
+    if args.patch:
+        print("ERROR: --tooling cannot be combined with --patch", file=sys.stderr)
+        return 2
+    match = _parse_fields([args.match]) if args.match else {}
+    if set(match) - {"app"}:
+        print("ERROR: --tooling locates its project by --match app=<project>", file=sys.stderr)
+        return 2
+    app = str(match.get("app") or "")
+    if args.file is not None or args.json is not None:
+        try:
+            data, edges = build_records(args.type, args)
+        except ValueError as e:
+            print(f"ERROR: rejected — {e}", file=sys.stderr)
+            return 1
+        md = json.loads(args.metadata) if args.metadata else None
+        rc = _post_write(args.type, data, edges, md, args.format)
+        if rc not in (0, 3):  # 3 = profile written, an edge rejected: still attach
+            return rc
+        app = str(data.get("app") or app or PROJECT)
+    app = app or PROJECT
+    if not app:
+        print("ERROR: name the project: --match app=<project> (or set \"project\" in .claude/kb.json)",
+              file=sys.stderr)
+        return 2
+    return cmd_tooling(args.tooling, app, args.format)
+
+
 def cmd_edge(args: argparse.Namespace) -> int:
     """Attach one edge between two EXISTING docs (CASE-630) — the sanctioned
     retry for a failed edge intent from a doc write. Idempotent: KB edge types
@@ -794,7 +867,10 @@ def main() -> int:
     ap.add_argument("--edge", action="append", help="edge intent TYPE:target_type:target_key (repeatable)")
     ap.add_argument("--metadata", help="JSON object merged into the write metadata")
     ap.add_argument("--patch", action="append", help="partial-update field k=v (repeatable; with --match)")
-    ap.add_argument("--match", help="locate the doc to patch by k=v")
+    ap.add_argument("--match", help="locate the doc to patch by k=v (with --tooling: app=<project>)")
+    ap.add_argument("--tooling", metavar="PATH",
+                    help="PROJECT only: attach PATH (.zip, .tar, .tar.gz/.tgz, .gz; up to 100 MB) as the "
+                         "project's tooling archive, replacing any earlier one")
     # GIT_STATS_SNAPSHOT source (computed from git, not a file)
     ap.add_argument("--git-repo", help="git-stats: canonical repo name, or 'all'")
     ap.add_argument("--git-date", help="git-stats: snapshot date YYYY-MM-DD (default today)")
@@ -821,6 +897,8 @@ def main() -> int:
             ap.error("a doc TYPE is required (or use --list)")
         if args.type == "EDGE":
             return cmd_edge(args)
+        if args.tooling:
+            return cmd_project_tooling(args)
         if args.type == "YAC_MEMORY" and args.json is None and not args.patch:
             return cmd_memory(args)  # dir/file → one record per memory (CASE-507)
         if args.patch:

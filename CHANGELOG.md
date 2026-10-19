@@ -9,6 +9,22 @@ than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
 
 
+## 2026-10-19 — Attach a project's tooling archive from the client (CASE-889; client 4.6.0)
+
+- **Added:** `kbc kb-write.py PROJECT --tooling PATH` attaches or replaces a project's
+  tooling archive, either alone (`--match app=<project>`, or kb.json's `project`) or
+  in the same command that writes the profile. It posts the archive raw to the new
+  gateway route `POST /projects/:app/tooling`, which checks it against the PROJECT
+  template's file config, uploads it to WIP with the caller's key and links it to the
+  profile. The archive it replaces stays in WIP, unreferenced (the `retain` default).
+  If linking fails, the new upload is soft-deleted and both ids are reported.
+- A project without a profile is refused (write the profile first). A plain `.tar` is
+  refused by WIP's default upload allowlist even though the template lists
+  `application/x-tar`; gzip it. The browser bridge stays closed to the route
+  (`kb-ui-guard` already refuses it); the UI only downloads.
+- The manual two-step route (WIP file API, then `--patch tooling=`) is gone from the
+  Client page and the playbook.
+
 ## 2026-10-19 — Memory retirement that is safe for parallel clones (CASE-906; client 4.5.0)
 
 - **Changed:** a directory mirror (`kb-write.py YAC_MEMORY <dir>`, what session end

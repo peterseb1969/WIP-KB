@@ -435,6 +435,11 @@ kbc case-fetch.py read CASE_RECORD --filter app=<project>
 - **Profile:** `kbc kb-write.py PROJECT --json '{"app": …, "title": …, "body": "<scope>",
   "repo_ids": […], "authored_by": …, "doc_status": "published"}'`. Its identity is `app`,
   so writing again updates the same profile.
+- **Tooling archive:** `kbc kb-write.py PROJECT --tooling ./tooling.zip --match app=<project>`
+  attaches a `.zip`, `.tar.gz` or `.tgz` (up to 100 MB) to an existing profile, or add
+  `--tooling PATH` to the profile write itself. Without `--match` it uses the configured
+  project. A new archive replaces the old one, which stays in WIP unreferenced. It runs
+  with your key, so WIP's write permission on the knowledge base decides who may.
 
 A **knowledge base** is a namespace seeded with the full KB model, with its own
 documents, numbering, vocabularies and relationships; links cannot cross between

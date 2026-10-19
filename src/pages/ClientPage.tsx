@@ -31,10 +31,10 @@ type Role = { role: string; extra?: boolean }
 const FILE_ROLES: Record<string, Role> = {
   'kb-client.sh': { role: 'Runner — fetches/refreshes the bundle; run scripts via it', extra: true },
   'install.sh': { role: 'Bootstrap — `curl | sh` materializes the bundle', extra: true },
-  'kb_client_core.py': { role: 'Shared core — kb.json/API-key resolution + gateway transport (gw_get/gw_post, failover)' },
+  'kb_client_core.py': { role: 'Shared core — kb.json/API-key resolution + gateway transport (gw_get/gw_post/gw_post_bytes, failover)' },
   'case-fetch.py': { role: 'Read — case (body + response thread) / journey / list / fireside / library / edges / flags / read <TYPE> (generic typed read) / search (full-text across a knowledge base + library, --namespace to pick one; --project for one project) / topics (the topic vocabulary writes are validated against) / brief [<app>] (a project\'s context in one read; --tooling DIR saves its tooling archive), all via the gateway' },
   'kb-namespace.py': { role: 'Create a new knowledge base — a namespace seeded with the full KB model, via POST /namespaces' },
-  'kb-write.py': { role: 'The write client — any doc type via POST /write/:type (file/dir/json sources, edges, patch, and git-stats via --git-repo)' },
+  'kb-write.py': { role: 'The write client — any doc type via POST /write/:type (file/dir/json sources, edges, patch, git-stats via --git-repo, and PROJECT --tooling PATH to attach a project\'s tooling archive)' },
   'case-workflow.md': { role: 'Playbook — authoritative case how-to (rendered below)', extra: true },
   'README.md': { role: 'Bundle readme', extra: true },
   'manifest.json': { role: 'Manifest (version_contract, bundle_digest)', extra: true },
@@ -111,6 +111,7 @@ const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
   ['POST', 'kb/edges', 'attach an edge between two EXISTING docs — the sanctioned retry for a failed edge intent'],
   ['GET', 'kb/projects/:app/brief?namespace=', 'a project\'s context in one read: PROJECT profile, open cases, newest decisions/lessons/firesides, recent sessions, memories, mirrored docs (handles + titles); :app = any alias'],
   ['GET', 'kb/projects/:app/tooling?namespace=', 'the project\'s tooling archive, streamed as stored (never unpacked or run)'],
+  ['POST', 'kb/projects/:app/tooling?namespace=', 'attach or replace the project\'s tooling archive: body = the archive, X-Filename = its name; uploaded with your key and linked to the profile (the replaced archive stays in WIP, unreferenced)'],
   ['POST', 'kb/namespaces', 'create a new knowledge base — a namespace seeded with the full KB model; 409 if it exists (never re-seeds)'],
 ]
 
@@ -282,6 +283,16 @@ ${KBC_RUN} case-fetch.py read LESSON --filter app=<project>`}
           same profile:
         </p>
         <Copyable text={PROJECT_PROFILE} label="Copy PROJECT profile command" />
+        <p className="mb-2 mt-3 text-sm text-text-muted">
+          <strong className="text-text">Attach a tooling archive</strong> (.zip, .tar.gz or .tgz, up to
+          100 MB) to an existing profile, or in the same command that writes it. A new archive replaces
+          the old one, which stays in WIP unreferenced:
+        </p>
+        <Copyable
+          text={`${KBC_RUN} kb-write.py PROJECT --tooling ./tooling.zip --match app=<project>
+${KBC_RUN} kb-write.py PROJECT profile.md --tooling ./tooling.zip`}
+          label="Copy tooling commands"
+        />
         <ul className="mt-3 space-y-1.5 text-sm text-text-muted">
           <li>
             • A new project needs its <code className="font-mono text-xs">KB_APP</code> term first. An
@@ -292,10 +303,9 @@ ${KBC_RUN} case-fetch.py read LESSON --filter app=<project>`}
             .
           </li>
           <li>
-            • The client cannot upload files, so it cannot attach a tooling archive yet. Upload the
-            archive through WIP's file API, then set it with{' '}
-            <code className="font-mono text-xs">kb-write.py PROJECT --patch tooling=&lt;file_id&gt; --match document_id=&lt;profile id&gt;</code>{' '}
-            (the profile's id is in <code className="font-mono text-xs">brief --format json</code>).
+            • Attaching runs with your key, so WIP's write permission on the knowledge base decides
+            who may. Without <code className="font-mono text-xs">--match</code> it uses the repository's
+            configured project. A plain .tar is refused by WIP's default upload allowlist; gzip it.
           </li>
         </ul>
       </Section>

@@ -285,3 +285,44 @@ def gw_post(path: str, body: dict, timeout: float = 20) -> dict:
     name, url, key = targets()[0]
     result = _request(url, key, path, "POST", body, timeout)
     return result or {}
+
+
+class GatewayRefusal(RuntimeError):
+    """The gateway answered and said no (a 4xx with its reason) — the caller's to fix,
+    unlike a transport failure."""
+
+
+def gw_post_bytes(path: str, content: bytes, content_type: str, filename: str,
+                  timeout: float = 300) -> dict:
+    """POST a file as the raw request body (its name in X-Filename, percent-encoded),
+    to the primary target only, like gw_post. Returns the parsed JSON answer.
+
+    Unlike _request, a 404 is not read as "route absent": an upload route answers
+    404 for its own reasons (no such project, no profile), and that message is what
+    the caller needs. A route that really is absent answers either the SPA's HTML or
+    the server's bare {"error": "not_found", "path": …}; both raise as such."""
+    _name, url, key = targets()[0]
+    req = urllib.request.Request(
+        _gw_url(url, path), data=content, method="POST",
+        headers={"X-API-Key": read_key(key), "Content-Type": content_type,
+                 "X-Filename": urllib.parse.quote(filename, safe="")})
+    try:
+        resp = urllib.request.urlopen(req, context=_ssl_ctx(), timeout=timeout)
+        status, raw, ctype = resp.status, resp.read(), resp.headers.get("Content-Type") or ""
+    except urllib.error.HTTPError as e:
+        status, raw, ctype = e.code, e.read(), e.headers.get("Content-Type") or ""
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(f"{url} unreachable: {e}") from e
+    absent = RuntimeError(f"{url} has no {path.split('?', 1)[0]} route — the KB there predates this client")
+    if ctype.split(";")[0].strip().lower() != "application/json":
+        if status >= 400:
+            raise RuntimeError(f"HTTP {status} from {url}: {raw[:300].decode('utf-8', 'replace')}")
+        raise absent
+    body = json.loads(raw) if raw else {}
+    if status == 404 and body.get("error") == "not_found" and "path" in body:
+        raise absent
+    if 400 <= status < 500:
+        raise GatewayRefusal(str(body.get("error") or body))
+    if status >= 400:
+        raise RuntimeError(f"HTTP {status} from {url}: {body.get('error') or body}")
+    return body
