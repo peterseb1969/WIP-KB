@@ -410,6 +410,10 @@ def cmd_memory(args: argparse.Namespace) -> int:
             # Explicit whole-owner cleanup: everything of the owner's that this
             # folder lacks. Only for an owner whose folder is its only one.
             retired = _retire_memories(owner, lambda k: k not in present)
+            # This folder's own record starts here, so later default runs retire
+            # what it drops.
+            if rc != 2:
+                _record_mirrored_keys(src, owner, present)
         elif rc == 2:
             # A write failed in transit: leave the folder record alone so the
             # deletions it would reveal are still there next run.
