@@ -12,7 +12,8 @@
  *     registry lookup);
  *   - POST /api/document-store/documents when every item is a FLAG_RECORD or a
  *     FLAGGED_FROM document, checked against those templates' ids in the item's
- *     own namespace.
+ *     own namespace. A FLAG_RECORD's authored_by is set to the signed-in user (see
+ *     ui-author.ts), whatever the browser sent.
  * Everything else is refused with 405 before it reaches WIP.
  *
  * Mounted ahead of wipProxy, which streams the request body upstream as it
@@ -22,6 +23,7 @@
  * allowed create to WIP itself.
  */
 import express, { type Request, type Response, type NextFunction, type RequestHandler } from 'express'
+import { uiAuthor } from './ui-author.js'
 
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
 
@@ -43,9 +45,9 @@ function refuse(res: Response, status: number, error: string): void {
 }
 
 export function wipProxyGuard(wipKey: string): RequestHandler {
-  // The ids of FLAG_RECORD and FLAGGED_FROM in one namespace.
-  async function flagTemplateIds(ns: string): Promise<Set<string>> {
-    const ids = new Set<string>()
+  // Template id → value, for FLAG_RECORD and FLAGGED_FROM in one namespace.
+  async function flagTemplateIds(ns: string): Promise<Map<string, string>> {
+    const ids = new Map<string, string>()
     await Promise.all(
       FLAG_TEMPLATES.map(async (value) => {
         const r = await fetch(
@@ -54,7 +56,7 @@ export function wipProxyGuard(wipKey: string): RequestHandler {
         )
         if (r.ok) {
           const t = await r.json()
-          if (t?.template_id) ids.add(t.template_id)
+          if (t?.template_id) ids.set(t.template_id, value)
         }
       }),
     )
@@ -62,11 +64,11 @@ export function wipProxyGuard(wipKey: string): RequestHandler {
   }
 
   // Forward an already-read document create, relaying WIP's answer as it came.
-  async function forwardCreate(req: Request, res: Response, body: Buffer): Promise<void> {
+  async function forwardCreate(req: Request, res: Response, body: Buffer | string): Promise<void> {
     const upstream = await fetch(`${WIP_BASE}${req.url}`, {
       method: 'POST',
       headers: { 'X-API-Key': wipKey, 'Content-Type': req.headers['content-type'] || 'application/json' },
-      body: new Uint8Array(body),
+      body: typeof body === 'string' ? body : new Uint8Array(body),
     })
     res.status(upstream.status)
     const ct = upstream.headers.get('content-type')
@@ -91,7 +93,7 @@ export function wipProxyGuard(wipKey: string): RequestHandler {
       if (!Array.isArray(items) || items.length === 0) {
         return refuse(res, 400, 'document create body must be a non-empty array')
       }
-      const byNs = new Map<string, Set<string>>()
+      const byNs = new Map<string, Map<string, string>>()
       for (const it of items as Array<Record<string, unknown>>) {
         const ns = typeof it?.namespace === 'string' ? it.namespace : ''
         const tid = typeof it?.template_id === 'string' ? it.template_id : ''
@@ -99,15 +101,19 @@ export function wipProxyGuard(wipKey: string): RequestHandler {
           return refuse(res, 403, 'a document created from the browser must name its namespace and template_id')
         }
         if (!byNs.has(ns)) byNs.set(ns, await flagTemplateIds(ns))
-        if (!byNs.get(ns)!.has(tid)) {
+        const value = byNs.get(ns)!.get(tid)
+        if (!value) {
           return refuse(
             res,
             403,
             'the browser may create only FLAG_RECORD and FLAGGED_FROM documents directly; other writes go through the KB gateway',
           )
         }
+        if (value === 'FLAG_RECORD' && it.data && typeof it.data === 'object') {
+          ;(it.data as Record<string, unknown>).authored_by = uiAuthor(req)
+        }
       }
-      return forwardCreate(req, res, req.body as Buffer)
+      return forwardCreate(req, res, JSON.stringify(items))
     }
     refuse(res, 405, `${req.method} ${path} is not allowed through the KB's WIP proxy; it is read-only apart from flag-for-YAC`)
   }

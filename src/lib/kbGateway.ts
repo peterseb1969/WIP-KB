@@ -7,8 +7,9 @@
 // never re-implements the mint or writes to the document-store directly. This is
 // the human front-end on one shared core, not a second write path.
 //
-// Human-authored writes are attributed to WEB_UI_AUTHOR until a real
-// human-attribution model lands (the open question on CASE-484).
+// Human-authored writes are attributed to the signed-in user: the server's bridge
+// guard replaces the author sent here (server/ui-author.ts). WEB_UI_AUTHOR is only
+// the placeholder for the field, and what an install without login records.
 
 // BASE_URL always ends in `/` (dev `/`, prod `/apps/kb/`); concatenating without
 // a leading slash yields the right URL in both — same pattern as lib/wipBulk.ts.
@@ -68,7 +69,7 @@ export type ResponseKind = 'respond' | 'comment' | 'close' | 'implement'
 /**
  * Append a CASE_RESPONSE to a case's thread via `/write/CASE_RESPONSE`, linked by
  * a RESPONDS_TO edge. The gateway mints response_seq (scoped to the case) and the
- * CASE-<n>#<seq> synonym — the browser sends neither. Attributed to WEB-UI.
+ * CASE-<n>#<seq> synonym — the browser sends neither. The server sets the author.
  */
 export function writeCaseResponse(
   caseNumber: number,

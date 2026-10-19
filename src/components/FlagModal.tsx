@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { wipFetchJson, assertBulkSuccess } from '../lib/wipBulk'
 import { FLAG_INTENTS, DEFAULT_FLAG_INTENT, type FlagIntent } from '../lib/promptTemplates'
 import { CORPUS_NS } from '../lib/namespaces'
+import { WEB_UI_AUTHOR } from '../lib/kbGateway'
 
 interface Props {
   sourceDocId: string
@@ -65,7 +66,8 @@ async function createFlagWithEdge(opts: {
           flagged_document: sourceDocId,
           title,
           body,
-          authored_by: 'user',
+          // Replaced server-side with the signed-in user (server/ui-author.ts).
+          authored_by: WEB_UI_AUTHOR,
           doc_status: 'published',
           target_yac: targetYac,
         },

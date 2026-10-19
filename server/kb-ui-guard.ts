@@ -7,8 +7,9 @@
  * handful of writes, so this admits exactly those and refuses the rest:
  *   - GET / HEAD, which read;
  *   - POST /edges with one of the relationship picker's three edge types;
- *   - POST /write/CASE_RESPONSE creating a close or comment response, attributed to
- *     the web UI and linked to its case by RESPONDS_TO (case close / reopen);
+ *   - POST /write/CASE_RESPONSE creating a close or comment response linked to its
+ *     case by RESPONDS_TO (case close / reopen). Its author is set here to the
+ *     signed-in user (see ui-author.ts), whatever the browser sent;
  *   - POST /write/CASE_RECORD patching only `status` to open or closed, located by
  *     case_number (the other half of close / reopen);
  *   - POST /write/<type> patching only `topics`, located by document_id (the topic
@@ -19,9 +20,7 @@
  * Mounted after the JSON body parser, so req.body is the parsed request.
  */
 import type { Request, Response, NextFunction, RequestHandler } from 'express'
-
-// Must match src/lib/kbGateway.ts WEB_UI_AUTHOR.
-export const WEB_UI_AUTHOR = 'WEB-UI'
+import { uiAuthor } from './ui-author.js'
 
 const UI_EDGE_TYPES = new Set(['REFERENCES', 'RELATES_TO', 'SUPERSEDES'])
 const UI_RESPONSE_KINDS = new Set(['close', 'comment'])
@@ -75,7 +74,6 @@ function refusal(req: Request): string | null {
 
   if (type !== 'CASE_RESPONSE') return `the KB UI does not create ${type} documents`
   const d: AnyObj = isObj(b.data) ? b.data : {}
-  if (d.author !== WEB_UI_AUTHOR) return `a response from the KB UI is attributed to ${WEB_UI_AUTHOR}`
   if (!UI_RESPONSE_KINDS.has(String(d.response_kind))) {
     return `the KB UI writes only close and comment responses`
   }
@@ -92,7 +90,13 @@ function refusal(req: Request): string | null {
 export function kbUiGuard(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
     const why = refusal(req)
-    if (why === null) return next()
+    if (why === null) {
+      // The only document the UI creates through the bridge is a case response.
+      if (req.method === 'POST' && isObj(req.body) && isObj(req.body.data) && req.body.patch === undefined) {
+        req.body.data.author = uiAuthor(req)
+      }
+      return next()
+    }
     res.status(405).json({ error: `Not allowed from the KB UI: ${why}` })
   }
 }

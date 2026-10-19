@@ -240,13 +240,16 @@ function csvSet(s: string | null): Set<string> {
 // quotes, a trailing parenthetical, the -YYYYMMDD[-HHMM(SS)] session suffix (4- OR
 // 6-digit time — the 6-digit HHMMSS form minted by /wip-setup+/wip-wake was the bug
 // that leaked ~79 raw authors), and an "app:" prefix; canonicalise casing; keep only
-// tokens that look like a role.
+// tokens that look like a role, or the email address a UI write records for the
+// signed-in user.
+const EMAIL = /^[^\s@]+@[^\s@]+$/
 function canonRole(t: string): string {
   const l = t.toLowerCase()
   if (l === 'franc') return 'FRanC'
   if (l === 'peter') return 'Peter'
   if (l === 'unknown') return 'unknown'
   if (/^user\d+$/.test(l)) return l.toUpperCase()
+  if (EMAIL.test(l)) return l // a signed-in user, from a UI write
   return t.toUpperCase() // APP-KB, BE-YAC, DOC-YAC, …
 }
 function isRole(t: string): boolean {
@@ -255,6 +258,7 @@ function isRole(t: string): boolean {
     t === 'FRanC' ||
     t === 'unknown' ||
     /^USER\d+$/.test(t) ||
+    EMAIL.test(t) ||
     /^[A-Z]{2,}(?:-[A-Z]{2,})*$/.test(t) // APP-KB, BE-YAC, DOC-YAC (all-caps, letters only)
   )
 }
