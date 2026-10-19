@@ -37,7 +37,7 @@ import subprocess
 import sys
 import urllib.parse
 
-from kb_client_core import DEV_ROOT, PROJECT, gw_get, gw_post
+from kb_client_core import DEV_ROOT, NAMESPACE, PROJECT, gw_get, gw_post, targets
 
 
 def _coerce(v: str) -> object:
@@ -356,7 +356,16 @@ def cmd_memory(args: argparse.Namespace) -> int:
         return 0
     if not paths:
         print(f"YAC_MEMORY: no memory files in {src}", file=sys.stderr)
-        return 0
+        # A folder whose last memory was deleted still has to retire it, so an
+        # empty directory carries on to the default check against its record. An
+        # explicit --retire on an empty folder is far likelier a wrong path than a
+        # wish to retire every memory the owner has, so it is refused.
+        if not os.path.isdir(src) or args.no_retire:
+            return 0
+        if args.retire:
+            print("ERROR: --retire with an empty directory would retire all of the owner's "
+                  "memories; refusing", file=sys.stderr)
+            return 2
     edges = _parse_edges(args.edge)
     md = json.loads(args.metadata) if args.metadata else None
     counts: dict = {}
@@ -393,14 +402,27 @@ def cmd_memory(args: argparse.Namespace) -> int:
             sys.stdout.write(json.dumps(result) + "\n")
         else:
             sys.stdout.write(f"  {status:9} {data['mem_key']} ({result.get('document_id', '')})\n")
-    # Off unless asked for: a directory is complete only for its own folder, and a
-    # role can run in several (BE-YAC mirrors from four parallel clones), so
-    # retiring by absence from one folder retired the others' live memories.
-    if os.path.isdir(src) and args.retire:
+    if os.path.isdir(src) and not args.no_retire:
         # Every file in the directory counts as present, including one that failed
         # to parse above: only a file that is gone retires its record.
         present = {os.path.basename(p)[:-3] for p in paths}
-        retired = _retire_missing_memories(owner, present)
+        if args.retire:
+            # Explicit whole-owner cleanup: everything of the owner's that this
+            # folder lacks. Only for an owner whose folder is its only one.
+            retired = _retire_memories(owner, lambda k: k not in present)
+        elif rc == 2:
+            # A write failed in transit: leave the folder record alone so the
+            # deletions it would reveal are still there next run.
+            retired = 0
+        else:
+            # Default: retire only what THIS folder mirrored last time and has
+            # since dropped. A role mirrored from several folders (BE-YAC runs four
+            # parallel clones) cannot retire another folder's memories this way,
+            # which retiring by absence did.
+            before = _mirrored_keys(src, owner)
+            gone = (before - present) if before is not None else set()
+            retired = _retire_memories(owner, lambda k: k in gone) if gone else 0
+            _record_mirrored_keys(src, owner, present)
         if retired:
             counts["retired"] = retired
     summ = ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "nothing"
@@ -408,17 +430,58 @@ def cmd_memory(args: argparse.Namespace) -> int:
     return rc
 
 
-def _retire_missing_memories(owner: str, present: set) -> int:
-    """Mark the owner's live YAC_MEMORY records whose file is no longer in the
-    memory directory as doc_status=deprecated (CASE-906). Only with --retire and a
-    whole directory: a single file says nothing about the others, and a directory
-    is the whole set only when the owner has no other memory folder. Records stay as history; the project brief leaves
+# The keys a memory folder mirrored last time, per instance, namespace and owner,
+# kept in the folder itself (the mirror reads only *.md, so it is never taken for
+# a memory). It is what lets the default mirror tell "this folder deleted it" from
+# "another folder of the same role has it". CASE-906.
+_MIRROR_RECORD = ".kb-mirrored.json"
+
+
+def _mirror_record_key(owner: str) -> str:
+    name, url, _key = targets()[0]
+    return f"{url}|{NAMESPACE}|{owner}"
+
+
+def _mirrored_keys(folder: str, owner: str) -> set | None:
+    """The keys this folder mirrored for owner last time, or None on its first run."""
+    try:
+        with open(os.path.join(folder, _MIRROR_RECORD), encoding="utf-8") as f:
+            keys = json.load(f).get(_mirror_record_key(owner))
+    except (OSError, ValueError):
+        return None
+    return set(keys) if isinstance(keys, list) else None
+
+
+def _record_mirrored_keys(folder: str, owner: str, keys: set) -> None:
+    path = os.path.join(folder, _MIRROR_RECORD)
+    try:
+        with open(path, encoding="utf-8") as f:
+            rec = json.load(f)
+        if not isinstance(rec, dict):
+            rec = {}
+    except (OSError, ValueError):
+        rec = {}
+    rec[_mirror_record_key(owner)] = sorted(keys)
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(rec, f, indent=1)
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"YAC_MEMORY: could not update {path}: {e}", file=sys.stderr)
+
+
+def _retire_memories(owner: str, should_retire) -> int:
+    """Mark the owner's live YAC_MEMORY records whose mem_key satisfies
+    should_retire as doc_status=deprecated (CASE-906). The caller decides which:
+    by default the keys this folder mirrored last time and no longer has; with
+    --retire, everything the folder lacks. Records stay as history; the project brief leaves
     retired ones out, and a file that comes back is re-written without the field,
     which makes it live again.
 
-    Records are grouped by owner (no memory records its repo), so one role must
-    mirror from one memory directory; a second directory for the same role would
-    retire the first one's memories.
+    Records are grouped by owner, not by folder (no memory records its repo), which
+    is why --retire is only for an owner with a single memory folder; the default
+    predicate (this folder's own dropped keys) is safe with several.
 
     Retires by re-submitting the record's own data plus doc_status, an upsert by
     its identity (owner, mem_key) that lands on the latest template version. Not
@@ -437,7 +500,7 @@ def _retire_missing_memories(owner: str, present: set) -> int:
             return 0
         for it in payload.get("items") or []:
             d = it.get("data") or {}
-            if d.get("mem_key") not in present and d.get("doc_status") != "deprecated":
+            if should_retire(d.get("mem_key")) and d.get("doc_status") != "deprecated":
                 stale.append((d, it.get("document_id")))
         if page >= (payload.get("pages") or 1):
             break
@@ -735,12 +798,14 @@ def main() -> int:
     ap.add_argument("--git-list-repos", action="store_true", help="git-stats: print the known repo set")
     ap.add_argument("--format", choices=["text", "json"], default="text")
     ap.add_argument("--retire", action="store_true",
-                    help="YAC_MEMORY with a directory: also mark the owner's records whose file "
-                         "is missing from it as deprecated. Only when this directory is the "
-                         "owner's ONLY memory folder: a role running in several clones would "
-                         "retire the others' live memories")
+                    help="YAC_MEMORY with a directory: mark EVERY record of the owner whose file "
+                         "this directory lacks as deprecated (one-off cleanup). Only when this "
+                         "directory is the owner's ONLY memory folder: a role running in several "
+                         "clones would retire the others' live memories. Without it, a directory "
+                         "mirror retires only what this folder mirrored before and has dropped")
     ap.add_argument("--no-retire", action="store_true",
-                    help="accepted for compatibility; retirement is now off unless --retire")
+                    help="YAC_MEMORY with a directory: retire nothing this run, and leave the "
+                         "folder's record of mirrored keys unchanged")
     args = ap.parse_args()
 
     try:

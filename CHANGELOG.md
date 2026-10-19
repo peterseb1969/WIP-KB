@@ -8,6 +8,19 @@ than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
 
 
+
+## 2026-10-19 — Memory retirement that is safe for parallel clones (CASE-906; client 4.5.0)
+
+- **Changed:** a directory mirror (`kb-write.py YAC_MEMORY <dir>`, what session end
+  runs) retires again by default, but only the memories **this folder** mirrored last
+  time and no longer has. Each folder keeps that list in `.kb-mirrored.json` (per
+  instance, namespace and owner; the mirror reads only `*.md`). A role mirrored from
+  several clones (BE-YAC runs four) can no longer retire another clone's memories; a
+  key deleted in one clone but kept in another flips once and the other's next mirror
+  revives it. A folder's first run only records; a run with a transport failure
+  neither retires nor records; a folder whose last file was deleted still retires it.
+- `--retire` stays as the explicit whole-owner cleanup for legacy stale memories (and
+  refuses an empty folder); `--no-retire` skips retirement and leaves the record.
 ## 2026-10-19 — Memory retirement is off by default (CASE-906; client 4.4.1)
 
 - **Fixed:** the session-end memory mirror retired every record of the owner whose
