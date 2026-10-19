@@ -62,7 +62,7 @@ Three live WIP installs carry a `kb` namespace. They are near-identical in size,
 
 | Instance | URL | Key file | What it is |
 |---|---|---|---|
-| **sandbox** | `https://localhost:8443` | `~/.wip-deploy/default/secrets/api-key` | Compose install, hotwired to the working tree via `--app-source`. Destructive work goes here. |
+| **sandbox** | `https://localhost:8443` | `~/.wip-deploy/wip-local/secrets/api-key` | Compose install, hotwired to the working tree via `--app-source`. Destructive work goes here. |
 | **prod-test** | `https://prod-test.internal` | `~/.wip-deploy/prod-test/secrets/api-key` | k8s, runs *deployed images*. The rehearsal instance. |
 | **canonical** | `https://kb.internal` | `~/.wip-deploy/kb/secrets/api-key` | Production. `deletion_mode: retain` — see below. |
 
@@ -71,7 +71,7 @@ Three live WIP installs carry a `kb` namespace. They are near-identical in size,
 - **The ladder, in order, no steps skipped:** sandbox (does it work at all?) → prod-test restored to canonical (does it work against *real* data, on the *deployed* image?) → canonical. A change that has not survived a restored prod-test has not been tested, however green the sandbox looked.
 - **Canonical is `deletion_mode: retain`, so nothing written there is ever removed** — a "revert" only marks the row inactive, and a minted `CASE-n` / `PAPER-n` number is consumed permanently. **Reversible is not the same as safe; on canonical the revert does not exist.** Never write to canonical to *test* anything. `.claude/hooks/block-canonical-writes.sh` (PreToolUse, tracked) enforces this: it refuses write-method calls naming `kb.internal` unless prefixed `ALLOW_CANONICAL_WRITE=1`. Reads, `kbc`, query-endpoint POSTs and dry-runs stay free. Origin: LESSON-44 — the rule was in this file and had been read that morning; it still did not reach the moment of the write, which is why the gate fires on the action instead.
 - **`.claude/kb.json`** (`kb_app_url` + `kb_api_key_file`) is the single source of truth for *canonical* — the served KB client reads it, so a rename is one edit there. It does **not** describe the MCP target.
-- **`.env`** carries `WIP_API_KEY_FILE` pointing at the live wip-deploy secrets file (currently `~/.wip-deploy/default/secrets/api-key` — the sandbox's admin key; no plaintext key is baked in). Resolve the key from the file at startup (the `@wip/proxy` `apiKeyFile` option does this), so a key rotation or target-redeploy is picked up on restart instead of stranding a stale `.env`. This deploy key spans all namespaces — pass `namespace` explicitly on calls that need scoping. A least-privilege single-namespace key (which gets automatic namespace derivation) is an optional opt-in via `POST /api/registry/api-keys` with `namespaces` + `grant_permission`.
+- **`.env`** carries `WIP_API_KEY_FILE` pointing at the live wip-deploy secrets file (currently `~/.wip-deploy/wip-local/secrets/api-key` — the sandbox's admin key; no plaintext key is baked in). Resolve the key from the file at startup (the `@wip/proxy` `apiKeyFile` option does this), so a key rotation or target-redeploy is picked up on restart instead of stranding a stale `.env`. This deploy key spans all namespaces — pass `namespace` explicitly on calls that need scoping. A least-privilege single-namespace key (which gets automatic namespace derivation) is an optional opt-in via `POST /api/registry/api-keys` with `namespaces` + `grant_permission`.
 
 ### TLS gotcha for the Node server
 
