@@ -9,6 +9,15 @@ than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
 
 
+## 2026-10-20 — Tooling archives: zip or gzip only (client 4.6.1)
+
+- **Changed:** PROJECT's `tooling` field allows only `application/zip` and
+  `application/gzip` (template v2 via `tools/narrow-tooling-types.py`; seed updated).
+  It listed `application/x-tar` and `application/x-gzip` too, which WIP's default
+  upload allowlist refuses, so a plain `.tar` passed the KB's check and failed at
+  upload. `kb-write.py PROJECT --tooling` now refuses a `.tar` up front and says to
+  gzip it. v1 stays active for existing profiles; none holds a `.tar`.
+
 ## 2026-10-19 — UI writes name the signed-in user; KB_TOPIC editable in Settings
 
 - **Changed:** case close/reopen responses and flag-for-YAC records written from the UI

@@ -762,11 +762,10 @@ def cmd_patch(type_: str, args: argparse.Namespace) -> int:
     return 0
 
 
-# The archive types the PROJECT template's tooling field accepts, by suffix.
-# Longest suffix first, so .tar.gz is not taken for .gz alone.
-TOOLING_TYPES = [(".tar.gz", "application/gzip"), (".tgz", "application/gzip"),
-                 (".gz", "application/gzip"), (".zip", "application/zip"),
-                 (".tar", "application/x-tar")]
+# The archive types the PROJECT template's tooling field accepts, by suffix: the
+# two WIP's upload allowlist stores. A plain .tar is neither; gzip it first.
+TOOLING_TYPES = [(".gz", "application/gzip"), (".tgz", "application/gzip"),
+                 (".zip", "application/zip")]
 
 
 def cmd_tooling(path: str, app: str, fmt: str) -> int:
@@ -776,7 +775,8 @@ def cmd_tooling(path: str, app: str, fmt: str) -> int:
     name = os.path.basename(path)
     ctype = next((t for suffix, t in TOOLING_TYPES if name.lower().endswith(suffix)), None)
     if ctype is None:
-        print(f"ERROR: {name} is not a .zip, .tar, .tar.gz, .tgz or .gz archive", file=sys.stderr)
+        hint = f" — gzip it first: gzip {name}" if name.lower().endswith(".tar") else ""
+        print(f"ERROR: {name} is not a .zip, .tar.gz, .tgz or .gz archive{hint}", file=sys.stderr)
         return 2
     try:
         with open(path, "rb") as f:
@@ -869,7 +869,7 @@ def main() -> int:
     ap.add_argument("--patch", action="append", help="partial-update field k=v (repeatable; with --match)")
     ap.add_argument("--match", help="locate the doc to patch by k=v (with --tooling: app=<project>)")
     ap.add_argument("--tooling", metavar="PATH",
-                    help="PROJECT only: attach PATH (.zip, .tar, .tar.gz/.tgz, .gz; up to 100 MB) as the "
+                    help="PROJECT only: attach PATH (.zip, .tar.gz/.tgz, .gz; up to 100 MB) as the "
                          "project's tooling archive, replacing any earlier one")
     # GIT_STATS_SNAPSHOT source (computed from git, not a file)
     ap.add_argument("--git-repo", help="git-stats: canonical repo name, or 'all'")

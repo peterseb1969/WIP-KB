@@ -5,17 +5,6 @@ re-investigate solved problems, "fix" intentional choices, or miss real gaps.
 
 ## Open / deferred
 
-### Plain `.tar` tooling archives are refused by WIP
-**Status:** known (decision pending) · **Severity:** low
-The PROJECT template's `tooling` field allows `application/zip`, `application/x-tar`,
-`application/gzip` and `application/x-gzip`. WIP's file upload has its own allowlist
-(`document-store` `file_validation.py`, overridable per install with
-`WIP_ALLOWED_MIME_TYPES`), and its default lists only `application/zip` and
-`application/gzip`. So `kb-write.py PROJECT --tooling x.tar` gets WIP's 415, passed
-through by the gateway. `.zip`, `.tar.gz`, `.tgz` and `.gz` work (the client sends
-`application/gzip` for all gzip files). Fix by dropping the two types from the template,
-or by allowing them in an install's allowlist. (CASE-889.)
-
 ### Tooling uploads are held in memory
 **Status:** known · **Severity:** low
 `POST /projects/:app/tooling` reads the whole archive (up to 100 MB) into memory and
@@ -72,6 +61,10 @@ yet; acceptable for an internal app.
 - **Gene-pool `/wip-report` memory step not pushed** (CASE-524): the step is on
   World-in-a-Pie `develop` in both scaffold masters.
 - **`--refresh` deletes `docs/playbooks/case-workflow.md`** (CASE-522, implemented).
+- **Plain `.tar` tooling archives** (CASE-889): PROJECT.tooling now allows only
+  `application/zip` and `application/gzip`, the types WIP's default upload allowlist
+  stores (template v2, `tools/narrow-tooling-types.py`); the client refuses a plain
+  `.tar` with "gzip it first".
 - **UI writes attributed to `WEB-UI`**: since 2026-10-19 the server stamps the signed-in
   user's email (`server/ui-author.ts`) on case responses and flags written from the UI;
   `WEB-UI` remains only for an install without login. Older UI writes keep `WEB-UI` or

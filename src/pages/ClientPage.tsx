@@ -305,7 +305,7 @@ ${KBC_RUN} kb-write.py PROJECT profile.md --tooling ./tooling.zip`}
           <li>
             • Attaching runs with your key, so WIP's write permission on the knowledge base decides
             who may. Without <code className="font-mono text-xs">--match</code> it uses the repository's
-            configured project. A plain .tar is refused by WIP's default upload allowlist; gzip it.
+            configured project. A plain .tar is not accepted; gzip it first.
           </li>
         </ul>
       </Section>

@@ -11,7 +11,7 @@
     { "name": "repo_ids",    "label": "Repositories",  "type": "array",  "array_item_type": "string" },
     { "name": "tooling",     "label": "Project Tooling", "type": "file", "mandatory": false,
       "file_config": { "multiple": false, "max_size_mb": 100,
-                       "allowed_types": ["application/zip", "application/x-tar", "application/gzip", "application/x-gzip"] } },
+                       "allowed_types": ["application/zip", "application/gzip"] } },
     { "name": "authored_by", "label": "Authored By",   "type": "string", "mandatory": true },
     { "name": "doc_status",  "label": "Doc Status",    "type": "term",   "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "draft" }
   ]
