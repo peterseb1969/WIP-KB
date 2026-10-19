@@ -393,7 +393,10 @@ def cmd_memory(args: argparse.Namespace) -> int:
             sys.stdout.write(json.dumps(result) + "\n")
         else:
             sys.stdout.write(f"  {status:9} {data['mem_key']} ({result.get('document_id', '')})\n")
-    if os.path.isdir(src) and not args.no_retire:
+    # Off unless asked for: a directory is complete only for its own folder, and a
+    # role can run in several (BE-YAC mirrors from four parallel clones), so
+    # retiring by absence from one folder retired the others' live memories.
+    if os.path.isdir(src) and args.retire:
         # Every file in the directory counts as present, including one that failed
         # to parse above: only a file that is gone retires its record.
         present = {os.path.basename(p)[:-3] for p in paths}
@@ -407,9 +410,9 @@ def cmd_memory(args: argparse.Namespace) -> int:
 
 def _retire_missing_memories(owner: str, present: set) -> int:
     """Mark the owner's live YAC_MEMORY records whose file is no longer in the
-    memory directory as doc_status=deprecated (CASE-906). Only called for a whole
-    directory, which the session-end mirror always passes: a single file says
-    nothing about the others. Records stay as history; the project brief leaves
+    memory directory as doc_status=deprecated (CASE-906). Only with --retire and a
+    whole directory: a single file says nothing about the others, and a directory
+    is the whole set only when the owner has no other memory folder. Records stay as history; the project brief leaves
     retired ones out, and a file that comes back is re-written without the field,
     which makes it live again.
 
@@ -731,9 +734,13 @@ def main() -> int:
     ap.add_argument("--git-backfill", type=int, metavar="N", help="git-stats: last N days")
     ap.add_argument("--git-list-repos", action="store_true", help="git-stats: print the known repo set")
     ap.add_argument("--format", choices=["text", "json"], default="text")
+    ap.add_argument("--retire", action="store_true",
+                    help="YAC_MEMORY with a directory: also mark the owner's records whose file "
+                         "is missing from it as deprecated. Only when this directory is the "
+                         "owner's ONLY memory folder: a role running in several clones would "
+                         "retire the others' live memories")
     ap.add_argument("--no-retire", action="store_true",
-                    help="YAC_MEMORY with a directory: do not mark records whose file is "
-                         "missing as deprecated (use when the directory is not complete)")
+                    help="accepted for compatibility; retirement is now off unless --retire")
     args = ap.parse_args()
 
     try:

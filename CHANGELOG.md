@@ -7,6 +7,16 @@ than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
 
 
+
+## 2026-10-19 — Memory retirement is off by default (CASE-906; client 4.4.1)
+
+- **Fixed:** the session-end memory mirror retired every record of the owner whose
+  file was missing from the folder it was given. BE-YAC runs as four parallel clones,
+  each with its own memory folder, so each BE-YAC session end retired the other
+  clones' live memories (40 wrongly retired on canonical by 2026-10-19), and the next
+  close from another clone revived its own. Retirement now runs only with `--retire`,
+  for an owner whose folder is its only one. A safe automatic retirement (per-folder
+  record of what it mirrored) is the follow-up.
 ## 2026-10-19 — Mirrors no longer strip a document's project tag
 
 - **Fixed:** session and memory mirrors (natural upserts) replace a record's data, so
