@@ -18,6 +18,7 @@
     { "value": "all-apps",     "label": "all-apps",     "sort_order": 120 },
     { "value": "FR-YAC",       "label": "FR-YAC",       "sort_order": 130 },
     { "value": "pbs-clintrial", "label": "pbs-clintrial", "sort_order": 140 },
-    { "value": "web",          "label": "web",          "sort_order": 150 }
+    { "value": "web",          "label": "web",          "sort_order": 150 },
+    { "value": "wip-cooking",  "label": "wip-cooking",  "sort_order": 160, "aliases": ["Cooking", "cooking"] }
   ]
 }
