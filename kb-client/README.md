@@ -79,16 +79,15 @@ Env:
   the gateway tags the document with `app` when its type has that field and the
   document names none. `search --project <app>` scopes a search to one project.
 - `KB_BASE_URL` — the canonical instance (default `https://kb.internal`).
-- `KB_API_KEY_FILE` — its key file (default `~/.wip-deploy/kb/secrets/api-key`).
-  **One var across the whole bundle** (CASE-444); `KB_KEY_FILE` is accepted as a
-  deprecated alias with a stderr warning. The default key pairs only with the
-  default target: overriding `KB_BASE_URL` without setting `KB_API_KEY_FILE`
-  fails loud instead of silently 401-ing with the canonical instance's key.
-  No `/Users/<user>` literals — defaults derive from `$HOME`.
+- `KB_API_KEY_FILE` — its key file. **No default:** the key is issued when the
+  project is installed and its file name differs per installation, so it comes
+  from `kb_api_key_file` in `.claude/kb.json` or from this variable; with
+  neither set, every call fails loud instead of guessing a path. A leading `~/`
+  is expanded. **One var across the whole bundle** (CASE-444); `KB_KEY_FILE` is
+  accepted as a deprecated alias with a stderr warning.
 - `KB_LOCAL_URL` / `KB_LOCAL_KEY_FILE` — the optional local fast-path instance
-  (`KB_PREFER_LOCAL=1`); defaults `https://localhost:8443` +
-  `~/.wip-deploy/wip-local/secrets/api-key`,
-  same pairing guard.
+  (`KB_PREFER_LOCAL=1`); URL default `https://localhost:8443`, key file has no
+  default (same rule as above).
 - `KB_NAMESPACE` (default `kb`), `KB_VERIFY_TLS` (default `false`),
   `KB_DEV_ROOT` (default `~/Development` — flat-file repo roots).
 - `KB_APP_URL` / `KB_APP_BASE_PATH` — the KB app endpoint (gateway verbs +

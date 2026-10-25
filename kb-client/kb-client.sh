@@ -14,7 +14,7 @@
 # Env (defaults target the canonical kb.internal KB app):
 #   KB_APP_URL        https://kb.internal
 #   KB_APP_BASE_PATH  /apps/kb
-#   KB_API_KEY_FILE   ~/.wip-deploy/kb/secrets/api-key
+#   KB_API_KEY_FILE   no default: from .claude/kb.json, or set it explicitly
 #   KB_CLIENT_CACHE   ~/.cache/wip-kb-client
 #   KB_VERIFY_TLS     false (self-signed dev certs)
 #
@@ -23,11 +23,10 @@
 # served scripts handshake against the instance manifest and refuse to write on
 # schema_version skew because this wrapper exports KB_APP_URL/KB_APP_BASE_PATH.
 #
-# CASE-444 note: KB_API_KEY_FILE is exported ONLY when the caller set it. The
-# served scripts resolve the same default themselves; always exporting the
-# resolved default would defeat their pairing guard (a KB_BASE_URL override
-# must fail loud when no key was explicitly provided, not silently run with
-# the canonical instance's key).
+# CASE-444 note: KB_API_KEY_FILE is exported ONLY when the caller set it (or
+# kb.json supplied it). The key file is per-installation configuration, so
+# neither this wrapper nor the served scripts fall back to a guessed path: with
+# no key configured they fail loud instead of sending some other instance's key.
 set -euo pipefail
 
 # Single source of truth for the target instance: the calling project's
@@ -84,8 +83,13 @@ export KB_APP_URL KB_APP_BASE_PATH KB_VERIFY_TLS
 export KB_BASE_URL="$KB_APP_URL"
 # Wrapper-local key for its own fetch curls; exported when set in env OR derived
 # from kb.json above (paired with the URL, so CASE-444's guard holds).
-KEYFILE="${KB_API_KEY_FILE:-$HOME/.wip-deploy/kb/secrets/api-key}"
-if [ -n "${KB_API_KEY_FILE:-}" ]; then export KB_API_KEY_FILE; fi
+KEYFILE="${KB_API_KEY_FILE:-}"
+KEYFILE="${KEYFILE/#\~/$HOME}"
+if [ -z "$KEYFILE" ]; then
+  echo "kb-client: no KB API key file configured. Set kb_api_key_file in .claude/kb.json, or KB_API_KEY_FILE, to the key file issued when this project was installed." >&2
+  exit 2
+fi
+export KB_API_KEY_FILE="$KEYFILE"
 
 if [ ! -r "$KEYFILE" ]; then echo "kb-client: API key not readable at $KEYFILE" >&2; exit 2; fi
 KEY="$(cat "$KEYFILE")"

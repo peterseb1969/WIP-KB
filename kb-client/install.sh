@@ -1,8 +1,11 @@
 #!/bin/sh
 # install.sh (CASE-440) — bootstrap the served KB client onto this machine.
 #
-#   curl -fsSk -H "X-API-Key: $(cat ~/.wip-deploy/kb/secrets/api-key)" \
-#     https://kb.internal/apps/kb/server-api/kb-client/install | sh
+#   curl -fsSk -H "X-API-Key: $(cat <key-file>)" \
+#     https://<kb-host>/apps/kb/server-api/kb-client/install | KB_API_KEY_FILE=<key-file> sh
+#
+# <key-file> is the KB API key file issued when the project was installed. Run
+# from a project with a .claude/kb.json, the key file is read from there instead.
 #
 # Materializes the version-matched client bundle (loaders + kb-client.sh runner +
 # case-workflow.md) into ${KB_CLIENT_CACHE:-$HOME/.cache/wip-kb-client}, digest-
@@ -13,7 +16,7 @@
 #
 # Env (same family as kb-client.sh):
 #   KB_APP_URL        https://kb.internal      KB_APP_BASE_PATH  /apps/kb
-#   KB_API_KEY_FILE   ~/.wip-deploy/kb/secrets/api-key
+#   KB_API_KEY_FILE   no default: from .claude/kb.json, or set it explicitly
 #   KB_CLIENT_CACHE   ~/.cache/wip-kb-client
 #
 # POSIX sh (curl|sh target) — no bashisms.
@@ -45,7 +48,13 @@ fi
 KB_APP_URL="${KB_APP_URL:-https://kb.internal}"
 KB_APP_BASE_PATH="${KB_APP_BASE_PATH-/apps/kb}"  # `-` not `:-`: explicit empty = root-mounted instance
 KBC="${KB_CLIENT_CACHE:-$HOME/.cache/wip-kb-client}"
-KEYFILE="${KB_API_KEY_FILE:-$HOME/.wip-deploy/kb/secrets/api-key}"
+# The key is per-installation configuration, so there is no default path to guess.
+KEYFILE="${KB_API_KEY_FILE:-}"
+case "$KEYFILE" in "~/"*) KEYFILE="$HOME/${KEYFILE#\~/}" ;; esac
+if [ -z "$KEYFILE" ]; then
+  echo "kb-client install: no KB API key file configured. Set kb_api_key_file in .claude/kb.json, or KB_API_KEY_FILE, to the key file issued when this project was installed." >&2
+  exit 2
+fi
 
 if [ ! -r "$KEYFILE" ]; then
   echo "kb-client install: API key not readable at $KEYFILE (set KB_API_KEY_FILE)" >&2

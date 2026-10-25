@@ -70,20 +70,14 @@ CANONICAL_BASE_URL = "https://kb.internal"   # last-resort fallback (CASE-471 cu
 LOCAL_BASE_URL = "https://localhost:8443"
 
 
-def default_key_path(profile: str) -> Path:
-    """$HOME-derived key path for a wip-deploy profile (e.g. 'kb')."""
-    return Path.home() / ".wip-deploy" / profile / "secrets" / "api-key"
-
-
-def resolve_key_file(base_url: str, base_url_default: str,
-                     default_profile: str, *env_vars: str) -> Path:
+def resolve_key_file(*env_vars: str) -> Path | None:
     """Resolve the API-key file for a target (CASE-444).
 
     env_vars are checked in order; first set one wins. KB_KEY_FILE is accepted
-    anywhere in the list as a deprecated alias (stderr warning). If no env var
-    is set AND the target's base URL was overridden away from its default,
-    fail loud rather than silently pair the default profile's key with a
-    different instance (the silent wrong-key 401 class).
+    anywhere in the list as a deprecated alias (stderr warning). The key file
+    is per-installation configuration (issued when the project is installed),
+    so there is no guessed default: None means "not configured", and read_key
+    fails loud when that target is actually used.
     """
     for var in env_vars:
         val = os.environ.get(var)
@@ -92,24 +86,16 @@ def resolve_key_file(base_url: str, base_url_default: str,
                 print("[kb-client] KB_KEY_FILE is deprecated; use "
                       "KB_API_KEY_FILE (CASE-444)", file=sys.stderr)
             return Path(val).expanduser()
-    if base_url.rstrip("/") != base_url_default.rstrip("/"):
-        raise SystemExit(
-            f"[kb-client] base URL overridden to {base_url} but none of "
-            f"{'/'.join(env_vars)} is set — refusing to fall back to the "
-            f"default '{default_profile}' key for a different instance. "
-            f"Set {env_vars[0]} to that instance's key file. (CASE-444)")
-    return default_key_path(default_profile)
+    return None
 
 
 # --- Target config (resolved once at import) --------------------------------
 # REMOTE = the canonical KB instance (kb.json / KB_BASE_URL). LOCAL = an optional
 # dev instance, tried first only when KB_PREFER_LOCAL=1.
 REMOTE_URL = os.environ.get("KB_BASE_URL") or os.environ.get("KB_APP_URL") or CANONICAL_BASE_URL
-REMOTE_KEY = resolve_key_file(REMOTE_URL, CANONICAL_BASE_URL, "kb",
-                              "KB_API_KEY_FILE", "KB_KEY_FILE")
+REMOTE_KEY = resolve_key_file("KB_API_KEY_FILE", "KB_KEY_FILE")
 LOCAL_URL = os.environ.get("KB_LOCAL_URL", LOCAL_BASE_URL)
-LOCAL_KEY = resolve_key_file(LOCAL_URL, LOCAL_BASE_URL, "wip-local",
-                             "KB_LOCAL_KEY_FILE")
+LOCAL_KEY = resolve_key_file("KB_LOCAL_KEY_FILE")
 NAMESPACE = os.environ.get("KB_NAMESPACE", "kb")
 # Whether the caller CHOSE that namespace, as opposed to inheriting the default.
 # The distinction matters only for cross-namespace endpoints — see _gw_url.
@@ -130,14 +116,19 @@ def _ssl_ctx() -> ssl.SSLContext | None:
     return ctx
 
 
-def read_key(key_file: Path) -> str:
+def read_key(key_file: Path | None) -> str:
+    if key_file is None:
+        raise SystemExit(
+            "[kb-client] no KB API key file configured. Set kb_api_key_file in "
+            ".claude/kb.json, or KB_API_KEY_FILE (KB_LOCAL_KEY_FILE for the local "
+            "instance), to the key file issued when this project was installed.")
     return key_file.read_text().strip()
 
 
-def targets() -> list[tuple[str, str, Path]]:
+def targets() -> list[tuple[str, str, Path | None]]:
     """(name, base_url, key_file) in priority order: local first iff
     KB_PREFER_LOCAL=1, then the canonical remote (always last)."""
-    out: list[tuple[str, str, Path]] = []
+    out: list[tuple[str, str, Path | None]] = []
     if PREFER_LOCAL:
         out.append(("local", LOCAL_URL, LOCAL_KEY))
     out.append(("remote", REMOTE_URL, REMOTE_KEY))

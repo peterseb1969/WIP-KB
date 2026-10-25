@@ -84,7 +84,7 @@ const PROJECT_PROFILE = `${KBC_RUN} kb-write.py PROJECT --json '{
 
 const KB_JSON_SAMPLE = `{
   "kb_app_url": "https://kb.internal",
-  "kb_api_key_file": "~/.wip-deploy/kb/secrets/api-key",
+  "kb_api_key_file": "<the KB API key file issued when your project was installed>",
   "namespace": "kb",
   "project": "<project>"
 }`
@@ -187,7 +187,7 @@ export default function ClientPage() {
   const m = manifestQ.data
   const origin = window.location.origin
   const installUrl = `${origin}${m?.install_endpoint ?? `${KBC}/install`}`
-  const oneLiner = `curl -fsSk -H "X-API-Key: $(cat ~/.wip-deploy/kb/secrets/api-key)" \\\n  ${installUrl} | sh`
+  const oneLiner = `curl -fsSk -H "X-API-Key: $(cat <key-file>)" \\\n  ${installUrl} | KB_API_KEY_FILE=<key-file> sh`
   const readCmd = `bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 471`
   const writeCmd = `bash ~/.cache/wip-kb-client/kb-client.sh kb-write.py DESIGN_DECISION decision.md`
 
@@ -477,8 +477,9 @@ ${KBC_RUN} kb-write.py PROJECT profile.md --tooling ./tooling.zip`}
         <ul className="space-y-1.5 text-sm text-text-muted">
           <li>
             • Every call needs <code className="font-mono text-xs">X-API-Key</code>; the key lives in a
-            file (<code className="font-mono text-xs">{'~/.wip-deploy/<name>/secrets/api-key'}</code>),
-            never pasted as a literal.
+            file that is issued when your project is installed, and is never pasted as a literal. Its
+            path goes in <code className="font-mono text-xs">kb_api_key_file</code> below, and there is
+            no default.
           </li>
           <li>
             • <code className="font-mono text-xs">.claude/kb.json</code> is the single source of truth;
