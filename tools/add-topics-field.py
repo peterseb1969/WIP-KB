@@ -26,7 +26,7 @@ against each doc's PINNED version, and only the new version knows `topics`
 
 Env:
   KB_TARGET    base URL          (default https://localhost:8443 — the sandbox)
-  KB_KEYFILE   admin API key file (default ~/.wip-deploy/default/secrets/api-key)
+  KB_KEYFILE   admin API key file (default: WIP_API_KEY_FILE from .env, sandbox target only)
   KB_TOPIC_ID  KB_TOPIC terminology id (default: the canonical id, which is also
                valid on any ID-preserving restore of canonical — sandbox and
                prod-test. A fresh non-restore instance must run
@@ -39,10 +39,11 @@ import sys
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _keyfile import read_key  # noqa: E402
+
 BASE = os.environ.get("KB_TARGET", "https://localhost:8443")
-KEY = Path(os.environ.get(
-    "KB_KEYFILE", str(Path.home() / ".wip-deploy/default/secrets/api-key")
-)).expanduser().read_text().strip()
+KEY = read_key("KB_KEYFILE", "KB_TARGET")
 CTX = ssl._create_unverified_context()
 KB_TOPIC_ID = os.environ.get("KB_TOPIC_ID", "019f898b-46cd-7392-812e-49ed735224dd")
 

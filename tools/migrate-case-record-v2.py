@@ -27,9 +27,9 @@ SEQUENCING (read before --apply):
 
 Env (mirrors case-fetch.py):
   KB_LOCAL_URL        default https://localhost:8443
-  KB_LOCAL_KEY_FILE   default ~/.wip-deploy/wip-dev-local/secrets/api-key
+  KB_LOCAL_KEY_FILE   required for --target local/both
   KB_BASE_URL         default https://wip-kb.local   (remote canonical)
-  KB_API_KEY_FILE     default ~/.wip-deploy/wip-kb/secrets/api-key
+  KB_API_KEY_FILE     required for --target remote/both
   KB_NAMESPACE        default kb
   KB_VERIFY_TLS       default false
 
@@ -51,11 +51,9 @@ import urllib.request
 from pathlib import Path
 
 REMOTE_URL = os.environ.get("KB_BASE_URL", "https://wip-kb.local")
-REMOTE_KEY = Path(os.environ.get("KB_API_KEY_FILE",
-                                 str(Path.home() / ".wip-deploy/wip-kb/secrets/api-key"))).expanduser()
+REMOTE_KEY = Path(os.environ.get("KB_API_KEY_FILE", "<KB_API_KEY_FILE not set>")).expanduser()
 LOCAL_URL = os.environ.get("KB_LOCAL_URL", "https://localhost:8443")
-LOCAL_KEY = Path(os.environ.get("KB_LOCAL_KEY_FILE",
-                                str(Path.home() / ".wip-deploy/wip-dev-local/secrets/api-key"))).expanduser()
+LOCAL_KEY = Path(os.environ.get("KB_LOCAL_KEY_FILE", "<KB_LOCAL_KEY_FILE not set>")).expanduser()
 NAMESPACE = os.environ.get("KB_NAMESPACE", "kb")
 VERIFY_TLS = os.environ.get("KB_VERIFY_TLS", "false").lower() == "true"
 

@@ -13,7 +13,7 @@
  *
  * Usage:
  *   WIP_BASE_URL=https://localhost:8443 \
- *   WIP_API_KEY="$(cat ~/.wip-deploy/wip-local/secrets/api-key)" \
+ *   WIP_API_KEY="$(cat "$(grep ^WIP_API_KEY_FILE= .env | cut -d= -f2)")" \
  *   NODE_TLS_REJECT_UNAUTHORIZED=0 \
  *   KB_BOOTSTRAP_NAMESPACE=kb-mig-1 \
  *   npx tsx tools/bootstrap-ns.ts

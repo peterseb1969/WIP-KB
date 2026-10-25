@@ -47,7 +47,7 @@ not written. Pass --apply for real.
 
 Env:
   KB_TARGET     base URL           (default https://localhost:8443 — the sandbox)
-  KB_KEYFILE    admin API key file (default ~/.wip-deploy/default/secrets/api-key)
+  KB_KEYFILE    admin API key file (default: WIP_API_KEY_FILE from .env, sandbox target only)
   CLONES_ROOT   directory holding the repo clones (default ~/Development/Amrum)
   KB_TO_VERSION target template version (default: current active DOCUMENT version)
 """
@@ -61,10 +61,11 @@ import sys
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _keyfile import read_key  # noqa: E402
+
 BASE = os.environ.get("KB_TARGET", "https://localhost:8443")
-KEY = Path(os.environ.get(
-    "KB_KEYFILE", str(Path.home() / ".wip-deploy/default/secrets/api-key")
-)).expanduser().read_text().strip()
+KEY = read_key("KB_KEYFILE", "KB_TARGET")
 CLONES = Path(os.environ.get("CLONES_ROOT", str(Path.home() / "Development/Amrum"))).expanduser()
 CTX = ssl._create_unverified_context()
 

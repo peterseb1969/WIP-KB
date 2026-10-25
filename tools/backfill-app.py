@@ -29,7 +29,7 @@ the document's current one, so an apply can only update, never fork. --apply wri
 and aborts on the first item that does not come back as 'updated'.
 
 Usage:
-  KB_TARGET=https://localhost:8443 KB_KEYFILE=~/.wip-deploy/wip-local/secrets/api-key \\
+  KB_TARGET=https://localhost:8443 KB_KEYFILE=<sandbox key file> \\
     python3 tools/backfill-app.py [--apply] [--types SESSION,DOCUMENT] [--namespace kb]
 """
 import argparse
@@ -43,10 +43,11 @@ import urllib.request
 from collections import Counter, defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _keyfile import read_key  # noqa: E402
+
 BASE = os.environ.get("KB_TARGET", "https://localhost:8443")
-KEY = Path(os.environ.get(
-    "KB_KEYFILE", str(Path.home() / ".wip-deploy/wip-local/secrets/api-key")
-)).expanduser().read_text().strip()
+KEY = read_key("KB_KEYFILE", "KB_TARGET")
 CTX = ssl._create_unverified_context()
 MAPPING = Path(__file__).resolve().parent / "backfill-app-mapping.json"
 TYPES = ["SESSION", "YAC_MEMORY", "DOCUMENT", "LESSON", "DESIGN_DECISION", "FIRESIDE"]

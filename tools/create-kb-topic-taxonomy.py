@@ -15,10 +15,10 @@ per-item status is checked and any error aborts the run.
 
 Env:
   KB_TARGET   base URL          (default https://localhost:8443 — the sandbox)
-  KB_KEYFILE  admin API key file (default ~/.wip-deploy/default/secrets/api-key)
+  KB_KEYFILE  admin API key file (default: WIP_API_KEY_FILE from .env, sandbox target only)
 
 To target canonical: KB_TARGET=https://kb.internal \
-                     KB_KEYFILE=~/.wip-deploy/kb/secrets/api-key
+                     KB_KEYFILE=<canonical key file, kb_api_key_file in .claude/kb.json>
 """
 import json
 import os
@@ -27,10 +27,11 @@ import sys
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _keyfile import read_key  # noqa: E402
+
 BASE = os.environ.get("KB_TARGET", "https://localhost:8443")
-KEY = Path(os.environ.get(
-    "KB_KEYFILE", str(Path.home() / ".wip-deploy/default/secrets/api-key")
-)).expanduser().read_text().strip()
+KEY = read_key("KB_KEYFILE", "KB_TARGET")
 NS = os.environ.get("KB_NAMESPACE", "kb")
 CTX = ssl._create_unverified_context()
 

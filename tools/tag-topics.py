@@ -33,7 +33,7 @@ mis-tags; the facet is a navigation aid, not a classification of record.
 
 Env:
   KB_TARGET      base URL          (default https://localhost:8443 — the sandbox)
-  KB_KEYFILE     admin API key file (default ~/.wip-deploy/default/secrets/api-key)
+  KB_KEYFILE     admin API key file (default: WIP_API_KEY_FILE from .env, sandbox target only)
   KB_FROM_VERSION / KB_TO_VERSION   template versions to migrate between
                                     (default 1 -> 2)
 """
@@ -47,10 +47,11 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _keyfile import read_key  # noqa: E402
+
 BASE = os.environ.get("KB_TARGET", "https://localhost:8443")
-KEY = Path(os.environ.get(
-    "KB_KEYFILE", str(Path.home() / ".wip-deploy/default/secrets/api-key")
-)).expanduser().read_text().strip()
+KEY = read_key("KB_KEYFILE", "KB_TARGET")
 CTX = ssl._create_unverified_context()
 FROM_V = int(os.environ.get("KB_FROM_VERSION", "1"))
 TO_V = int(os.environ.get("KB_TO_VERSION", "2"))

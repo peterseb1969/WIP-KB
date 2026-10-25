@@ -310,7 +310,7 @@ def connect_postgres(args):
     port = args.pg_port or int(os.getenv("POSTGRES_PORT", "5432"))
     dbname = args.pg_db or os.getenv("POSTGRES_DB", "wip_reporting")
     user = args.pg_user or os.getenv("WIP_POSTGRES_USER") or os.getenv("POSTGRES_USER", "wip")
-    password = args.pg_password or os.getenv("WIP_POSTGRES_PASSWORD") or os.getenv("POSTGRES_PASSWORD", "wip_dev_password")
+    password = args.pg_password or os.getenv("WIP_POSTGRES_PASSWORD") or os.getenv("POSTGRES_PASSWORD")
 
     try:
         conn = psycopg2.connect(
