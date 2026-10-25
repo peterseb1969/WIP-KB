@@ -89,7 +89,7 @@ Three live WIP installs carry a `kb` namespace. They are near-identical in size,
 
 **Never bootstrap `kb` from your dev workflow.** That's BootstrapGate's job. `kb` exists only when a user (Peter) confirms the bootstrap offer in the running app.
 
-**To clean up `dev-kb` during iteration:** use the namespace management API (`mcp__wip__delete_namespace` with `deletion_mode: retain` semantics, then re-`create_namespace`). Do **not** invoke `tools/dev-delete.py` — it bypasses the API and points at MongoDB directly. Proper NS management is via API.
+**To clean up `dev-kb` during iteration:** use the namespace management API (`mcp__wip__delete_namespace` with `deletion_mode: retain` semantics, then re-`create_namespace`). Never clean up by going to MongoDB or Postgres directly; namespace management is via the API only.
 
 **MCP key derivation note.** The privileged MCP admin key is unrestricted across namespaces, so always pass `namespace` explicitly on MCP tool calls. The runtime key in `.env` is the deploy admin key and spans all namespaces too — WIP cannot derive one for you; pass `namespace` on API calls that need scoping (or set `defaultNamespace` on `@wip/proxy`). Only a single-namespace least-privilege key gets automatic derivation.
 
