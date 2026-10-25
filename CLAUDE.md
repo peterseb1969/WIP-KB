@@ -54,21 +54,23 @@ The spec is authoritative. If FRanC's papers and this CLAUDE.md disagree on anyt
 
 ---
 
-## Backend Target — three instances, and the ladder between them
+## Backend Target — four instances, and the ladder between them
 
 **Verify which instance you are on before every write. `cat .mcp.json` is the check — not this file, not memory.** This section has been wrong before, and an agent that trusted it believed it was reading production while pointed at a sandbox.
 
-Three live WIP installs carry a `kb` namespace. They are near-identical in size, so **a document count will not tell you which one you are talking to**:
+Four live WIP installs carry a `kb` namespace. They are near-identical in size, so **a document count will not tell you which one you are talking to**:
 
 | Instance | URL | Key file comes from | What it is |
 |---|---|---|---|
 | **sandbox** | `https://localhost:8443` | `WIP_API_KEY_FILE` in `.env` (same path in `.mcp.json`) | Compose install, hotwired to the working tree via `--app-source`. Destructive work goes here. |
+| **dev-test** | `https://dev-test.internal` | ask Peter — not configured in this repo | Runs *deployed images*: the first stop after the sandbox, and the first time a change runs from an image instead of the working tree. |
 | **prod-test** | `https://prod-test.internal` | ask Peter — not configured in this repo | k8s, runs *deployed images*. The rehearsal instance. |
 | **canonical** | `https://kb.internal` | `kb_api_key_file` in `.claude/kb.json` | Production. `deletion_mode: retain` — see below. |
 
-- **One MCP server** in `.mcp.json` (local/gitignored): **`wip` → the sandbox at `localhost:8443`**. Tools surface as `mcp__wip__<tool>`. There is no `wip-local` server and no `wip-kb` server; older docs and gene-pool material that say otherwise are stale. If you need canonical or prod-test, use `kbc` or an explicit `curl` with that instance's key file — not MCP.
+- **One MCP server** in `.mcp.json` (local/gitignored): **`wip` → the sandbox at `localhost:8443`**. Tools surface as `mcp__wip__<tool>`. There is no `wip-local` server and no `wip-kb` server; older docs and gene-pool material that say otherwise are stale. If you need dev-test, prod-test or canonical, use `kbc` or an explicit `curl` with that instance's key file — not MCP.
+- **Pointing `kbc` at another instance takes both `KB_APP_URL` and `KB_API_KEY_FILE`.** `KB_APP_URL` is the target; `KB_BASE_URL` is overwritten from `.claude/kb.json`. A key file set without `KB_APP_URL` is paired with `kb.json`'s URL, so the call goes to canonical with the other instance's key. Read before you write, and check which host the output names.
 - **Peter will restore any instance to canonical's state on request — just ask.** This is the single most under-used piece of tooling in this project; an APP-KB-YAC has already been called out for not reaching for it. A restored prod-test is the correct place to rehearse anything whose blast radius you cannot fully predict, and it costs one sentence to get.
-- **The ladder, in order, no steps skipped:** sandbox (does it work at all?) → prod-test restored to canonical (does it work against *real* data, on the *deployed* image?) → canonical. A change that has not survived a restored prod-test has not been tested, however green the sandbox looked.
+- **The ladder, in order, no steps skipped:** sandbox at localhost (does it work at all?) → dev-test (does it work from a *built image*?) → prod-test restored to canonical (does it work against *real* data, on the *deployed* image?) → canonical (`kb.internal`). Peter builds the image and deploys each rung; a hot-wired sandbox needs no redeploy, since it serves the working tree. A change that has not survived a restored prod-test has not been tested, however green the sandbox looked.
 - **Canonical is `deletion_mode: retain`, so nothing written there is ever removed** — a "revert" only marks the row inactive, and a minted `CASE-n` / `PAPER-n` number is consumed permanently. **Reversible is not the same as safe; on canonical the revert does not exist.** Never write to canonical to *test* anything. `.claude/hooks/block-canonical-writes.sh` (PreToolUse, tracked) enforces this: it refuses write-method calls naming `kb.internal` unless prefixed `ALLOW_CANONICAL_WRITE=1`. Reads, `kbc`, query-endpoint POSTs and dry-runs stay free. Origin: LESSON-44 — the rule was in this file and had been read that morning; it still did not reach the moment of the write, which is why the gate fires on the action instead.
 - **Key-file paths are per-installation configuration and never live in tracked files.** The key for each instance is issued when the project is installed and recorded only in the local, gitignored config: `.env` and `.mcp.json` for the sandbox, `.claude/kb.json` for canonical. Read the path from there; do not assume a `~/.wip-deploy/<name>/secrets/api-key` convention, since the file name differs per installation.
 - **`.claude/kb.json`** (`kb_app_url` + `kb_api_key_file`) is the single source of truth for *canonical* — the served KB client reads it, so a rename is one edit there. It is local and gitignored; `.claude/kb.json.example` is the tracked template. It does **not** describe the MCP target.
@@ -174,7 +176,7 @@ Read each template's header comment, fill in the TODOs (namespace = `kb`, app ti
 
 ## MCP
 
-WIP's dev sandbox is accessed via MCP tools (94 tools, 5 resources) under the **`wip`** server, which points at **localhost:8443** — see "Backend Target" for the full three-instance ladder. prod-test and canonical are *not* on MCP; reach them with `kbc` or an explicit `curl`. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
+WIP's dev sandbox is accessed via MCP tools (94 tools, 5 resources) under the **`wip`** server, which points at **localhost:8443** — see "Backend Target" for the full four-instance ladder. dev-test, prod-test and canonical are *not* on MCP; reach them with `kbc` or an explicit `curl`. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
 
 Required reads before writing any code:
 - `wip://conventions` — bulk-first API, identity hashing, versioning
