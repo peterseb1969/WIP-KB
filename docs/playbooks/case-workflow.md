@@ -225,7 +225,14 @@ proposed fix, tell Peter to `/wip-case respond` first and stop.
    don't trust.
 2. **Apply each change**; if quoted "current text" no longer matches, flag and skip it.
 3. **Show the diff** (`git diff`) and let Peter review before committing.
-4. **Record + close:**
+4. **Push, then record + close.** The implement response is where a reader finds the
+   fix, so write it only after the push, and cite each commit hash as it is on the
+   remote (`git log --format='%h %s' <remote>/develop`). If the push was rejected and
+   you rebased, every hash changed. `kb-write.py` refuses an implement response that
+   cites a commit present in your clone but on no remote branch; a hash it cannot find
+   at all, or no hash, only draws a warning. Run it from the repository the commits
+   live in, or pass `--hash-repo PATH`. `--no-hash-check` skips the check for a fix
+   that is not a pushed commit.
 
    ```bash
    kbc kb-write.py CASE_RESPONSE implement.md --edge RESPONDS_TO:CASE_RECORD:<n>

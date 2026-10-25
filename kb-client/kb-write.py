@@ -21,6 +21,12 @@ Usage:
     --tooling PATH     PROJECT only: attach PATH as the project's tooling archive
                        (after the profile write, or alone with --match app=<project>)
     --format text|json output shape (default text)
+    --hash-repo PATH   CASE_RESPONSE implement: check cited commits in PATH, not the cwd
+    --no-hash-check    CASE_RESPONSE implement: skip that check
+
+An implement response (CASE_RESPONSE, response_kind: implement) is refused when
+a commit hash it cites exists locally but is on no remote branch: push first,
+then cite the hash as it is on the remote.
 
 Doc body convention: the markdown after the frontmatter fence becomes data.body
 (unless the frontmatter already sets `body`).
@@ -731,6 +737,48 @@ def cmd_list(fmt: str, namespace: str | None = None) -> int:
     return 0
 
 
+# A commit-shaped token: 7-40 lowercase hex chars standing alone. Hyphens and
+# alphanumerics on either side disqualify it, so UUID segments never match.
+_HASH_RE = re.compile(r"(?<![0-9A-Za-z-])[0-9a-f]{7,40}(?![0-9A-Za-z-])")
+
+
+def _git(repo: str, *argv: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", repo, *argv], capture_output=True, text=True)
+
+
+def check_implement_hashes(body: str, repo: str) -> list[str]:
+    """The commit hashes an implement response cites must exist on the shared
+    branch: a reader follows them to find the fix. A hash taken from a local
+    branch before the push goes dead when the branch is rebased onto a moved
+    remote, yet still resolves in the author's clone, so the check is "resolves
+    here AND is contained in a remote-tracking branch". Returns the hashes that
+    fail it; every weaker signal (a token that is not a commit here, no hash at
+    all, no git repo, no remote) is only reported on stderr."""
+    if _git(repo, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        print(f"note: {repo} is not a git repository — cited commit hashes not checked", file=sys.stderr)
+        return []
+    tokens = [t for t in dict.fromkeys(_HASH_RE.findall(body or ""))
+              if re.search(r"[0-9]", t) and re.search(r"[a-f]", t)]
+    if not tokens:
+        print("WARNING: this implement response cites no commit hash — readers will have to "
+              "search the log for the fix", file=sys.stderr)
+        return []
+    has_remote = bool(_git(repo, "remote").stdout.strip())
+    unpushed = []
+    for h in tokens:
+        if _git(repo, "rev-parse", "--verify", "--quiet", f"{h}^{{commit}}").returncode != 0:
+            print(f"WARNING: {h} is not a commit in {repo} (another repository? then pass "
+                  f"--hash-repo PATH)", file=sys.stderr)
+            continue
+        if not has_remote:
+            print(f"WARNING: {repo} has no remote — cannot confirm {h} is on a shared branch",
+                  file=sys.stderr)
+            continue
+        if not _git(repo, "branch", "-r", "--contains", h).stdout.strip():
+            unpushed.append(h)
+    return unpushed
+
+
 def cmd_write(type_: str, args: argparse.Namespace) -> int:
     try:
         data, edges = build_records(type_, args)
@@ -740,6 +788,16 @@ def cmd_write(type_: str, args: argparse.Namespace) -> int:
     if not data:
         print("ERROR: empty data — nothing to write", file=sys.stderr)
         return 2
+    if (type_ == "CASE_RESPONSE" and data.get("response_kind") == "implement"
+            and not args.no_hash_check):
+        unpushed = check_implement_hashes(str(data.get("body") or ""), args.hash_repo or os.getcwd())
+        if unpushed:
+            for h in unpushed:
+                print(f"ERROR: rejected — commit {h} is on no remote branch. Push first, then cite "
+                      f"the hash as it exists on the remote (git log --format='%h %s' <remote>/develop): "
+                      f"a rebase before the push changes every hash. If you did push, `git fetch` "
+                      f"and retry. Nothing was written.", file=sys.stderr)
+            return 1
     md = json.loads(args.metadata) if args.metadata else None
     if md is not None and not isinstance(md, dict):
         raise SystemExit("ERROR: --metadata must be a JSON object")
@@ -877,6 +935,12 @@ def main() -> int:
     ap.add_argument("--git-backfill", type=int, metavar="N", help="git-stats: last N days")
     ap.add_argument("--git-list-repos", action="store_true", help="git-stats: print the known repo set")
     ap.add_argument("--format", choices=["text", "json"], default="text")
+    ap.add_argument("--hash-repo", metavar="PATH",
+                    help="CASE_RESPONSE implement: check the cited commit hashes in this git "
+                         "repository instead of the current directory")
+    ap.add_argument("--no-hash-check", action="store_true",
+                    help="CASE_RESPONSE implement: skip the check that cited commits are on a "
+                         "remote branch (for a fix that is legitimately not a pushed commit)")
     ap.add_argument("--retire", action="store_true",
                     help="YAC_MEMORY with a directory: mark EVERY record of the owner whose file "
                          "this directory lacks as deprecated (one-off cleanup). Only when this "
