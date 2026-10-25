@@ -794,6 +794,29 @@ hostname sanity, variant vs exposure (a public-shaped install must run
 ports (no datastore/admin ports bypassing Caddy), and security headers on
 public installs. Exit 0 = safe to expose; each failure prints a fix hint.
 
+Add `--live` to also test the running install through its public URL:
+
+```bash
+wip-deploy verify --security --live --name <name>
+```
+
+- Every protected route must refuse a request without credentials, and
+  health probes must answer without one.
+- reporting-sync must run on its unprivileged PostgreSQL roles.
+- The install's **canary** key must be refused by each service's privileged
+  and namespace-scoped routes. The deployer adds the canary to every
+  install as `wip-canary`, with its secret `wip-canary-api-key` beside the
+  master key. It authenticates but is authorized for nothing: no groups,
+  no grants, scoped to a namespace that is never created. A 401 to the
+  canary counts as a failure, because it means a service does not know the
+  key. The admin key sends the same requests and must pass them, which
+  proves each route exists.
+
+The live checks write nothing. Write routes are probed with an invalid
+body, and the permission check answers before validation. A check that
+fails after a platform roll means that build does not enforce what the
+release claims.
+
 ### 7.4 Ongoing health monitoring
 
 Every WIP service exposes `/health`, `/metrics`, and `/health/integrity`, but in a non-techie deployment nobody is watching them. `wip-toolkit status` aggregates these and exits non-zero on anomalies — wire it to cron + email and the install will tell you when something is wrong:
@@ -823,7 +846,7 @@ Override with `--failed-events-warning`, `--consumer-lag-warning`, `--consumer-l
 
 ## 8. MCP Server Setup (AI-assisted development)
 
-WIP ships an MCP server exposing **101 tools and 5 resources** to AI coding assistants. An AI agent can discover templates, query documents, manage terminologies, and import data through tool calls — without reading WIP source code. This section is the operator-side setup; for *what the tools do*, see `docs/mcp-server.md` and the `wip://` resources.
+WIP ships an MCP server exposing **108 tools and 5 resources** to AI coding assistants. An AI agent can discover templates, query documents, manage terminologies, and import data through tool calls — without reading WIP source code. This section is the operator-side setup; for *what the tools do*, see `docs/mcp-server.md` and the `wip://` resources.
 
 ### 8.1 Prerequisites
 

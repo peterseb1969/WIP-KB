@@ -33,7 +33,7 @@ The contract has two halves — what the **source repo** must look like, and wha
 |---|---|
 | `Dockerfile.dev` | At the path containing `package.json`. Runs `npm run dev`. **No baked `node_modules`** — the deployer mounts a named volume so dev rebuilds are warm. Alpine + curl. Pattern verbatim from `apps/react-console` and `apps/clintrial-explorer`. |
 | `vite.config.ts` (frontend apps) | `server.host: '0.0.0.0'` (without it Caddy → Vite → ECONNREFUSED inside the container). Dev `proxy` keys prefixed with `BASE_PATH` and pointing at **this app's Express port** (not 3001 by clintrial-copy-paste reflex). `base` derived from `VITE_BASE_PATH || APP_BASE_PATH || '/'`. |
-| `docker-entrypoint-dev.sh` (optional, recommended) | Hash-gated `npm ci` populate so dev container restarts don't re-run `ci` unnecessarily. See `apps/react-console/docker-entrypoint-dev.sh` for the canonical pattern. |
+| `docker-entrypoint-dev.sh` (optional, recommended) | Hash-gated `npm ci` populate so dev container restarts don't re-run `ci` unnecessarily. The canonical version is `scripts/scaffold-query/docker-entrypoint-dev.sh` in the WIP repo, which `--preset query` copies into new apps. It runs only at container start: see "a dependency change reaches the dev container only when it restarts" below. |
 | `server/index.ts` (Express apps) | All routes mounted on an `express.Router()` under `APP_BASE_PATH`. `app.set('trust proxy', 1)` for HTTPS termination. `requireAuth()` middleware passes through when `OIDC_ISSUER` is unset (apps-only / dev mode). In `NODE_ENV=production`, serve `dist/` statically with a SPA fallback. The fallback excludes the API prefixes: an unmatched route under `/api`, `/auth`, `/wip`, `/server-api` or `/mcp` (plus any prefix the app adds) returns `404` JSON for any method, never `index.html`. |
 | Runtime app-config route (CASE-551) | `GET ${APP_BASE_PATH}/api/app-config` returns the deployment's client-visible config as JSON — at minimum `{"namespace": <WIP_NAMESPACE or null>}`; multi-namespace apps add their extra keys (e.g. `library_namespace`). Allowlist only: never an env dump, never secrets (the response reaches every browser); `Cache-Control: no-store`. The SPA fetches this at boot (scaffold: `src/lib/app-config.ts`) for **every** client-visible per-deployment value — never mirror such values into `VITE_*` build bakes; a bake and runtime env are two sources that drift silently (`VITE_BASE_PATH` is the one deliberate exception — consumed at bundle-emit time, loud when wrong). The scaffold emits the route inline; apps that vendor `@wip/proxy` ≥ 0.4.0 can mount its `appConfigHandler` at the same path. |
 | Client fetches | Every URL prefixed with `import.meta.env.BASE_URL` — *never* bare `/api/...` or `/wip/...`. |
@@ -63,6 +63,8 @@ spec:
     - {path: /apps/<name>, auth_required: true}
   healthcheck:
     endpoint: /apps/<name>/api/health   # MUST be locally answerable, must not require WIP reachable
+    # liveness_endpoint: /apps/<name>/api/livez  # optional, k8s only: set it if `endpoint` checks a
+    #   dependency, so an outage stops routing (readiness) instead of restarting the pod (liveness)
 ```
 
 Port choice: pick one Express port and one Vite port from the `apps/` directory's existing range. RC = 3001/5173, CT = 3002/5174, KB = 3012/5173 (KB collides with RC on Vite; pick fresh), AA = 3014/5180. Coordinate via case-helper if the range gets crowded.
@@ -82,7 +84,7 @@ A future `/check-app-deployability <app-source-dir>` slash command automates thi
 
 ## What breaks when you skip step N
 
-The contract is small. The failure signatures when you skip a step are specific enough to recognize.
+The contract is small. The failure signatures when you skip a step are specific enough to recognize. The entries headed "Followed, not skipped" at the end are different: everything is in place, and the failure comes from how the pieces behave at runtime.
 
 ### Skip 1: no `Dockerfile.dev`
 
@@ -162,6 +164,18 @@ This one is different from the entries above — it bites when you implement the
 
 **Origin:** WIP-KB's read client shipped "unavailable on this instance" messages that were unreachable since the day they were written; found while testing the degradation path for a newly added verb (CASE-831 has the full analysis). Fixed consumer-side in WIP-KB by switching the guard to content-type. The cause-side fix — excluding the API prefixes from the fallback so unmatched `/api/*`, `/auth/*`, `/wip/*`, `/server-api/*`, `/mcp/*` return `404` JSON (any method) while page routes still fall through — is now a contract line (source-repo table) and ships in `--preset query` (CASE-834: an `API_PREFIXES` check ahead of the `index.html` fallback). The scaffold copies `server/index.ts` only when it creates an app, so a refresh does not change an existing app's server: apps created earlier keep the catch-all until they add the same check. Keep the client-side content-type guard anyway — it protects against every server not yet updated.
 
+### Followed, not skipped: a dependency change reaches the dev container only when it restarts
+
+Under `--app-source` the repo is bind-mounted at `/app`, so source, `package.json` and `package-lock.json` change live. `/app/node_modules` is not part of that mount: it is the named volume `<app>-node-modules`, which compose prefixes with the project name (`podman volume ls | grep node-modules` lists them). The volume outlives container recreates on purpose. Only `docker-entrypoint-dev.sh` refills it, by comparing the lockfile's hash with the one it recorded and running `npm ci` on a mismatch. That check runs once, at container start, before the entrypoint hands over to the dev command. Nothing looks at the lockfile again while the container runs.
+
+**Failure:** a commit that changes both source and `package-lock.json` is applied halfway. The dev watcher restarts the server for the source change, but the server still runs against the old dependencies. If the new code needs the new dependency version, the server crashes while starting and stays down. Vite keeps serving the SPA, so nothing looks wrong until an API call is made.
+
+**Symptom signature:** the SPA loads normally. Every API call fails with ECONNREFUSED, and Vite logs `http proxy error` for each one. The container is marked `unhealthy`. The server log ends with a crash at startup that names a dependency. A package's version under `/app/node_modules/<package>/package.json` differs from the version the bind-mounted `package.json` asks for.
+
+**Fix:** `podman restart <container>`. The entrypoint sees the changed lockfile, runs `npm ci`, and starts the server on the new dependencies. An app without `docker-entrypoint-dev.sh` has no such check, so a restart does not help: stop the container, remove its `node-modules` volume, and start it again. This cannot happen to a production image, which installs `node_modules` at build time; that is why it can go unnoticed in dev.
+
+**Origin:** WIP-KB on a local dev install, 2026-07-19. Two commits, applied in the right order in git, first moved the app to `@wip/proxy` 0.4.3 and then used a 0.4.3 feature. The container picked up the second but still had 0.4.2 in its volume. It stayed `unhealthy` for about eight hours before anyone noticed; one restart fixed it. Restarting automatically when the lockfile changes, and making unhealthy app containers visible, are still open in CASE-721.
+
 ---
 
 ## Platform invariants you can rely on
@@ -179,6 +193,15 @@ These are platform-side guarantees the contract assumes. They're invariants toda
 
 - **External CA trust is auto-injected into app containers (Node-stack)** — when an apps-only install carries a `secrets/external-ca.crt` (seeded by `wip-deploy import-bundle`), the deployer automatically bind-mounts it read-only at **`/etc/ssl/certs/external-ca.crt`** in every app container and sets **`NODE_EXTRA_CA_CERTS`** to that path. You declare nothing — there is no manifest field; the behaviour flips on purely from the CA file's presence (the deployer's `install`/`render` auto-detect it). **Node-stack apps** pick the extra CA up transparently (Node reads `NODE_EXTRA_CA_CERTS`); **Python / Go / Rust apps ignore it** and use their own trust stores (`certifi`, the system pool, …) — harmless either way. Two reservations follow: don't unset `NODE_EXTRA_CA_CERTS`, and don't bind your own file at `/etc/ssl/certs/external-ca.crt`. Backend / full-stack installs never see this — it is apps-only. For the operator-side flow that makes the CA file exist in the first place, see `docs/design/bootstrap-bundle.md`.
 
+- **Who may open your app is a route field, enforced by the gateway** — behind the auth-gateway your app runs no OIDC client, so an in-app `ALLOWED_GROUPS` check never executes. Declare the groups on the route instead:
+
+  ```yaml
+  routes:
+    - {path: /apps/<name>, auth_required: true, allowed_groups: [wip-admins]}
+  ```
+
+  The gateway answers 403 to a logged-in user in none of the groups, before any request reaches your app: a short "no access" page for browsers, JSON for API callers. Behind NGINX (k8s) only the status reaches the browser. No session is still a login redirect, and an empty or absent list lets any logged-in user in. Group names may use letters, digits, `.`, `_` and `-`; the field requires `auth_required: true`. Keep `ALLOWED_GROUPS` only if your app also runs its own OIDC client.
+
 - **NATS access is a role, declared in the manifest** — NATS requires authentication, and an app gets a NATS user only by declaring roles:
 
   ```yaml
@@ -189,7 +212,7 @@ These are platform-side guarantees the contract assumes. They're invariants toda
 
   The deployer generates the user's password and injects `NATS_URL`, `NATS_USER` and `NATS_PASSWORD`. Connect with them, and set the reply-inbox prefix `_INBOX_<NATS_USER>`: the server lets each user receive replies only on its own prefix, so JetStream publish acks and pulls need it. Raw NATS subject lists in an app manifest are rejected; they are for platform components.
 
-  - **`ingest-producer`** may publish to `wip.ingest.{terminologies,terms,templates,documents}.<action>`. **Every message carries your WIP API key in its `X-API-Key` NATS header.** ingest-gateway writes the item with exactly that key, so your key's namespace grants apply. A message without the header is refused (a 401 result) and nothing is written. Use a key scoped to your namespace: the message, header included, stays in the ingest stream until the stream's size limits drop it. Reading the results stream is not part of the role, because it carries every producer's outcomes.
+  - **`ingest-producer`** may publish to `wip.ingest.{terminologies,terms,templates,documents}.<action>`. **Every message carries your WIP API key in its `X-API-Key` NATS header.** ingest-gateway writes the item with exactly that key, so your key's namespace grants apply. A message without the header is refused (a 401 result) and nothing is written. Use a key scoped to your namespace: the message, header included, stays in the ingest stream until the stream's size limits drop it. Reading the results stream is not part of the role, because it carries every producer's outcomes. To learn what happened to your items, ask ingest-gateway over HTTP with the same key: `GET /api/ingest-gateway/results/{correlation_id}`, or `POST /api/ingest-gateway/results/lookup` with `{"correlation_ids": [...]}` for several. You see only the outcomes of items submitted with your key; a 404 or `not_found` means not processed yet, never submitted under that key, or already dropped by the results stream's size limits, so poll soon after submitting. Wrap each message as `{"correlation_id": ..., "payload": ...}` so you know the ID to ask for.
   - **`event-subscriber`** may run one durable consumer on `WIP_EVENTS`, **named after your app**, and use no other stream. It receives change events from **every** namespace, so treat it as an admin-level read.
   - **`replay-subscriber`** receives replayed events with a plain subscription to `wip.replay.<session>.>`. Subscribe before starting the replay. There is no JetStream access to replay streams, so events published while you are disconnected are missed.
   - **`nats-monitor`** reads JetStream listings for a status page: account info, the stream list (configs and state) and every stream's consumer list (names and pending counts). It cannot read message contents or change any stream or consumer. react-console uses it.
