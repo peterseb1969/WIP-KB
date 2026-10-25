@@ -12,9 +12,14 @@ dist/
 yac-discussions
 
 # Local/instance-specific — not tracked (durability is the kb mirror for reports;
-# .mcp.json carries instance URLs + key-file paths; commands are refresh-delivered)
+# .mcp.json and .claude/kb.json carry instance URLs + key-file paths that are set
+# per installation; commands are refresh-delivered). .claude/kb.json.example is
+# the tracked template.
 reports/
 .mcp.json
+.claude/kb.json
+.claude/.session-role
+.claude/settings.local.json
 .claude/commands/
 
 # Python (kb-client loaders)

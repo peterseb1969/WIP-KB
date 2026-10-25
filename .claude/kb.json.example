@@ -1,0 +1,6 @@
+{
+  "kb_app_url": "https://<kb-host>",
+  "kb_api_key_file": "<path to the KB API key file issued when this project was installed>",
+  "namespace": "kb",
+  "project": "<project>"
+}
