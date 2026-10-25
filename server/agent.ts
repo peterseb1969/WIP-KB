@@ -236,7 +236,7 @@ function createTransport() {
     cwd,
     env: {
       ...process.env as Record<string, string>,
-      WIP_API_KEY: resolveWipKey() || 'dev_master_key_for_testing',
+      WIP_API_KEY: e.WIP_API_KEY,
       WIP_MCP_MODE: 'readonly',
       PYTHONPATH: join(cwd, 'components/mcp-server/src'),
     },
