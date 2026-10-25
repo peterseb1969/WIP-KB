@@ -24,6 +24,7 @@
 import { createHash } from 'node:crypto'
 import express, { Router, type Request, type Response, type NextFunction } from 'express'
 import { createCorpusNamespace } from './lib/bootstrap.js'
+import { resolveWipKey } from './lib/wip-key.js'
 
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
 // The gateway's default namespace is the KB corpus (cases, decisions, …).
@@ -38,8 +39,9 @@ const NS_LIBRARY = process.env.KB_LIBRARY_NAMESPACE || 'library'
 // key (the cross-namespace key the proxy uses to browse both namespaces) so a
 // namespace-SCOPED caller still sees every writable type — including Library types
 // whose namespace their own key can't LIST (CASE-573). Empty in dev without
-// WIP_API_KEY → the handler falls back to the caller's key (original behaviour).
-const GATEWAY_KEY = process.env.WIP_API_KEY || ''
+// a server key (WIP_API_KEY_FILE / WIP_API_KEY) → the handler falls back to the
+// caller's key (original behaviour).
+const GATEWAY_KEY = resolveWipKey()
 const ALLOC_MAX_RETRIES = 100
 const PATCH_MAX_RETRIES = 3
 

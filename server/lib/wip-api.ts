@@ -11,8 +11,10 @@
  * server-side bootstrap path that runs before any of that exists.
  */
 
+import { resolveWipKey } from './wip-key.js'
+
 const WIP_BASE_URL = process.env.WIP_BASE_URL || 'https://wip-kb.local'
-const WIP_API_KEY = process.env.WIP_API_KEY || ''
+const WIP_API_KEY = resolveWipKey()
 
 // `key` overrides the server's own key. The gateway passes the caller's key so a
 // namespace created from the CLI is created with the caller's authority, never

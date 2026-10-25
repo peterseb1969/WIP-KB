@@ -3,7 +3,6 @@ import express, { Router } from 'express'
 import cors from 'cors'
 import session from 'express-session'
 import path from 'path'
-import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { wipProxy, appConfigHandler } from '@wip/proxy'
 import { initAgent, ask } from './agent.js'
@@ -15,6 +14,7 @@ import { wipProxyGuard } from './wip-proxy-guard.js'
 import { kbUiGuard } from './kb-ui-guard.js'
 import kbClientRoutes from './kb-client.routes.js'
 import kbGatewayRoutes from './kb-gateway.routes.js'
+import { resolveWipKey } from './lib/wip-key.js'
 
 const PORT = parseInt(process.env.PORT || '3012')
 
@@ -24,16 +24,7 @@ const PORT = parseInt(process.env.PORT || '3012')
 // under APP_BASE_PATH so cookies, OIDC redirects, and asset URLs all match.
 const BASE_PATH = (process.env.APP_BASE_PATH || '').replace(/\/$/, '') || '/'
 
-// Resolve the WIP API key once (file preferred, like the /wip proxy) for the
-// browser→gateway bridge below. File-first so a key rotation is picked up on
-// restart rather than stranding a stale inline value.
-function resolveWipKey(): string {
-  const f = process.env.WIP_API_KEY_FILE
-  if (f) {
-    try { return readFileSync(f, 'utf-8').trim() } catch { /* fall back to inline */ }
-  }
-  return process.env.WIP_API_KEY || ''
-}
+// The WIP API key for the browser→gateway bridge below, resolved once at startup.
 const WIP_KEY = resolveWipKey()
 
 const app = express()

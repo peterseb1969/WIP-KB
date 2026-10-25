@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { readFileSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { resolveWipKey } from './lib/wip-key.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -32,7 +33,7 @@ const env = () => ({
   // clamp scoping tool calls to corpus+library.
   WIP_NAMESPACE: process.env.WIP_NAMESPACE || 'kb',
   KB_LIBRARY_NAMESPACE: process.env.KB_LIBRARY_NAMESPACE || 'library',
-  WIP_API_KEY: process.env.WIP_API_KEY || '',
+  WIP_API_KEY: resolveWipKey(),
   MAX_TURNS: parseInt(process.env.MAX_TURNS || '15'),
   SESSION_TTL_MS: parseInt(process.env.SESSION_TTL_MINUTES || '30') * 60_000,
 })
@@ -235,7 +236,7 @@ function createTransport() {
     cwd,
     env: {
       ...process.env as Record<string, string>,
-      WIP_API_KEY: process.env.WIP_API_KEY || 'dev_master_key_for_testing',
+      WIP_API_KEY: resolveWipKey() || 'dev_master_key_for_testing',
       WIP_MCP_MODE: 'readonly',
       PYTHONPATH: join(cwd, 'components/mcp-server/src'),
     },
