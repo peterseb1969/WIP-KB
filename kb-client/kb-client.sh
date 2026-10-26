@@ -12,9 +12,10 @@
 #         bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py list --status open
 #
 # Env (defaults target the canonical kb.internal KB app):
-#   KB_APP_URL        https://kb.internal
+#   KB_APP_URL        https://kb.internal; with KB_API_KEY_FILE, targets another
+#                     instance (set both or neither — never half a pair)
 #   KB_APP_BASE_PATH  /apps/kb
-#   KB_API_KEY_FILE   no default: from .claude/kb.json, or set it explicitly
+#   KB_API_KEY_FILE   no default: from .claude/kb.json, or set it with KB_APP_URL
 #   KB_CLIENT_CACHE   ~/.cache/wip-kb-client
 #   KB_VERIFY_TLS     false (self-signed dev certs)
 #
@@ -35,31 +36,51 @@ set -euo pipefail
 # on — so the file that decides WHETHER a call happens is the file that decides
 # WHERE it lands, regardless of the process's cwd (CASE-755; the gate-vs-target
 # split let a test suite write to production, CASE-736). Without the env var,
-# ./.claude/kb.json (the caller's cwd) keeps governing as before.
-#
-# When the env doesn't already pin the target, derive both values from the file
-# — PAIRED, so a hostname cutover (e.g. wip-kb.local -> kb.internal) is one
-# edit to kb.json and CASE-444's url/key pairing guard stays intact.
-#
-# Fail-closed rule (CASE-755): a kb.json that EXISTS but yields no kb_app_url
-# (empty `{}`, missing key, malformed JSON) means "not configured" and is a
-# hard exit 2 — never a fall-through to the canonical-instance defaults with
-# the canonical key. A genuinely ABSENT kb.json keeps the literal fallbacks
-# below: they are load-bearing for tier-2 clones and interactive use.
+# ./.claude/kb.json (the caller's cwd) keeps governing as before. A hostname
+# cutover (e.g. wip-kb.local -> kb.internal) is one edit to kb.json.
 KBJSON="${CLAUDE_PROJECT_DIR:+$CLAUDE_PROJECT_DIR/.claude/kb.json}"
 KBJSON="${KBJSON:-./.claude/kb.json}"
-if [ -r "$KBJSON" ]; then
-  if [ -z "${KB_APP_URL:-}" ]; then
-    KB_APP_URL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_app_url",""))' "$KBJSON" 2>/dev/null || true)"
-    if [ -z "$KB_APP_URL" ]; then
-      echo "kb-client: $KBJSON exists but yields no kb_app_url — refusing to fall back to the canonical-instance defaults. Fix the file, or set KB_APP_URL explicitly." >&2
-      exit 2
-    fi
+
+# The instance URL and its key always come from ONE source, as a pair, so a key
+# is never sent to an instance it was not issued for (CASE-950):
+#   1. the environment, when KB_APP_URL, KB_BASE_URL or KB_API_KEY_FILE is set:
+#      then BOTH halves must be set there. Half of a pair is never completed
+#      from kb.json — that sends one instance's key to another instance's URL.
+#      KB_BASE_URL is accepted as another name for KB_APP_URL; set both and
+#      they must agree;
+#   2. otherwise kb.json: kb_app_url AND kb_api_key_file;
+#   3. otherwise (no kb.json at all) the canonical default URL, with a key still
+#      required.
+_env_url="${KB_APP_URL:-}"
+_env_base="${KB_BASE_URL:-}"
+if [ -n "$_env_url" ] && [ -n "$_env_base" ] && [ "$_env_url" != "$_env_base" ]; then
+  echo "kb-client: KB_APP_URL ($_env_url) and KB_BASE_URL ($_env_base) disagree — set one, or set both to the same instance." >&2
+  exit 2
+fi
+_env_url="${_env_url:-$_env_base}"
+if [ -n "$_env_url" ] || [ -n "${KB_API_KEY_FILE:-}" ]; then
+  if [ -z "$_env_url" ]; then
+    echo "kb-client: KB_API_KEY_FILE is set but KB_APP_URL is not. Set both to point at another instance, or neither to use .claude/kb.json — half a pair is never completed from kb.json." >&2
+    exit 2
   fi
   if [ -z "${KB_API_KEY_FILE:-}" ]; then
-    _kbj_key="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_api_key_file",""))' "$KBJSON" 2>/dev/null || true)"
-    [ -n "$_kbj_key" ] && KB_API_KEY_FILE="$_kbj_key"
+    echo "kb-client: KB_APP_URL is $_env_url but KB_API_KEY_FILE is not set. Set the key file issued for that instance — kb.json's key is never sent to another instance." >&2
+    exit 2
   fi
+  KB_APP_URL="$_env_url"
+  echo "kb-client: target $KB_APP_URL (from the environment)" >&2
+elif [ -r "$KBJSON" ]; then
+  # Fail-closed rule (CASE-755): a kb.json that EXISTS but does not name both
+  # halves (empty `{}`, a missing key, malformed JSON) means "not configured" and
+  # is a hard exit 2 — never a fall-through to the canonical-instance default.
+  KB_APP_URL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_app_url",""))' "$KBJSON" 2>/dev/null || true)"
+  KB_API_KEY_FILE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_api_key_file",""))' "$KBJSON" 2>/dev/null || true)"
+  if [ -z "$KB_APP_URL" ] || [ -z "$KB_API_KEY_FILE" ]; then
+    echo "kb-client: $KBJSON exists but does not name both kb_app_url and kb_api_key_file — fix the file, or set KB_APP_URL and KB_API_KEY_FILE together." >&2
+    exit 2
+  fi
+fi
+if [ -r "$KBJSON" ]; then
   # Optional: the knowledge domain (namespace) this repo works in. Absent = the
   # instance's default corpus. An explicit KB_NAMESPACE in the env still wins.
   if [ -z "${KB_NAMESPACE:-}" ]; then

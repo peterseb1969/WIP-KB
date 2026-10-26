@@ -2,10 +2,12 @@
 # install.sh (CASE-440) — bootstrap the served KB client onto this machine.
 #
 #   curl -fsSk -H "X-API-Key: $(cat <key-file>)" \
-#     https://<kb-host>/apps/kb/server-api/kb-client/install | KB_API_KEY_FILE=<key-file> sh
+#     https://<kb-host>/apps/kb/server-api/kb-client/install \
+#     | KB_APP_URL=https://<kb-host> KB_API_KEY_FILE=<key-file> sh
 #
 # <key-file> is the KB API key file issued when the project was installed. Run
-# from a project with a .claude/kb.json, the key file is read from there instead.
+# from a project with a .claude/kb.json, leave both variables out and the pair
+# is read from there instead.
 #
 # Materializes the version-matched client bundle (loaders + kb-client.sh runner +
 # case-workflow.md) into ${KB_CLIENT_CACHE:-$HOME/.cache/wip-kb-client}, digest-
@@ -16,32 +18,35 @@
 #
 # Env (same family as kb-client.sh):
 #   KB_APP_URL        https://kb.internal      KB_APP_BASE_PATH  /apps/kb
-#   KB_API_KEY_FILE   no default: from .claude/kb.json, or set it explicitly
+#   KB_API_KEY_FILE   no default: from .claude/kb.json, or set it with KB_APP_URL
 #   KB_CLIENT_CACHE   ~/.cache/wip-kb-client
 #
 # POSIX sh (curl|sh target) — no bashisms.
 set -eu
 
-# When run from a project, derive the instance from its .claude/kb.json (single
-# source of truth; PAIRED url+key so a hostname cutover is one edit). Same
-# resolution rules as kb-client.sh (CASE-755): $CLAUDE_PROJECT_DIR/.claude/kb.json
-# governs when the env var is set, else ./.claude/kb.json; and a kb.json that
-# EXISTS but yields no kb_app_url means "not configured" — exit 2, never a silent
-# fall-through to the canonical-instance defaults with the canonical key. A bare
-# `curl|sh` from a dir with no kb.json keeps the literal fallbacks below.
+# The instance URL and its key come from ONE source, as a pair — the same rule
+# as kb-client.sh (CASE-950), so a key is never sent to an instance it was not
+# issued for:
+#   1. the environment, when KB_APP_URL or KB_API_KEY_FILE is set: then BOTH
+#      must be set there (the one-liner above passes both);
+#   2. otherwise the project's .claude/kb.json ($CLAUDE_PROJECT_DIR's when set,
+#      else the cwd's), which must name both kb_app_url and kb_api_key_file — a
+#      kb.json that exists without both is exit 2 (CASE-755), never a silent
+#      fall-through to the canonical default;
+#   3. otherwise the canonical default URL, with a key still required below.
 KBJSON="${CLAUDE_PROJECT_DIR:+$CLAUDE_PROJECT_DIR/.claude/kb.json}"
 KBJSON="${KBJSON:-./.claude/kb.json}"
-if [ -r "$KBJSON" ]; then
-  if [ -z "${KB_APP_URL:-}" ]; then
-    KB_APP_URL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_app_url",""))' "$KBJSON" 2>/dev/null || true)"
-    if [ -z "$KB_APP_URL" ]; then
-      echo "kb-client install: $KBJSON exists but yields no kb_app_url — refusing to fall back to the canonical-instance defaults. Fix the file, or set KB_APP_URL explicitly." >&2
-      exit 2
-    fi
+if [ -n "${KB_APP_URL:-}" ] || [ -n "${KB_API_KEY_FILE:-}" ]; then
+  if [ -z "${KB_APP_URL:-}" ] || [ -z "${KB_API_KEY_FILE:-}" ]; then
+    echo "kb-client install: set KB_APP_URL and KB_API_KEY_FILE together (the instance you fetched this from, and the key issued for it), or neither to use .claude/kb.json — half a pair is never completed from kb.json." >&2
+    exit 2
   fi
-  if [ -z "${KB_API_KEY_FILE:-}" ]; then
-    _kbj_key="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_api_key_file",""))' "$KBJSON" 2>/dev/null || true)"
-    [ -n "$_kbj_key" ] && KB_API_KEY_FILE="$_kbj_key"
+elif [ -r "$KBJSON" ]; then
+  KB_APP_URL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_app_url",""))' "$KBJSON" 2>/dev/null || true)"
+  KB_API_KEY_FILE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("kb_api_key_file",""))' "$KBJSON" 2>/dev/null || true)"
+  if [ -z "$KB_APP_URL" ] || [ -z "$KB_API_KEY_FILE" ]; then
+    echo "kb-client install: $KBJSON exists but does not name both kb_app_url and kb_api_key_file — fix the file, or set KB_APP_URL and KB_API_KEY_FILE together." >&2
+    exit 2
   fi
 fi
 

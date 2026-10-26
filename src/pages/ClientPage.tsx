@@ -187,7 +187,7 @@ export default function ClientPage() {
   const m = manifestQ.data
   const origin = window.location.origin
   const installUrl = `${origin}${m?.install_endpoint ?? `${KBC}/install`}`
-  const oneLiner = `curl -fsSk -H "X-API-Key: $(cat <key-file>)" \\\n  ${installUrl} | KB_API_KEY_FILE=<key-file> sh`
+  const oneLiner = `curl -fsSk -H "X-API-Key: $(cat <key-file>)" \\\n  ${installUrl} | KB_APP_URL=${origin} KB_API_KEY_FILE=<key-file> sh`
   const readCmd = `bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 471`
   const writeCmd = `bash ~/.cache/wip-kb-client/kb-client.sh kb-write.py DESIGN_DECISION decision.md`
 

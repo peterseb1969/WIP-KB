@@ -36,24 +36,61 @@ from pathlib import Path
 DEV_ROOT = Path(os.environ.get("KB_DEV_ROOT", str(Path.home() / "Development")))
 
 
-# --- Canonical instance resolution (CASE-444 / CASE-471) --------------------
-# Single source of truth: the calling repo's .claude/kb.json. When the env
-# doesn't already pin the instance, inject kb_app_url + kb_api_key_file PAIRED
-# into the environment — so the reads below and resolve_key_file's
-# KB_API_KEY_FILE lookup pick them up exactly like caller-set values (CASE-444's
-# url/key guard stays intact). Mirrors the kb-client.sh wrapper; a hostname
-# cutover is then one edit to kb.json. No-op when the wrapper already exported
-# these, or when run outside a repo with a kb.json.
-def _load_kbjson_into_env() -> None:
-    try:
-        with open(".claude/kb.json", encoding="utf-8") as f:
-            cfg = json.load(f)
-    except Exception:
+# --- Instance resolution (CASE-444 / CASE-471 / CASE-950) ------------------
+# The instance URL and its key always come from ONE source, as a pair, so a key
+# is never sent to an instance it was not issued for. Same rule as the
+# kb-client.sh wrapper, so a direct `python kb-write.py` run behaves alike:
+#   1. the environment, when KB_APP_URL, KB_BASE_URL or KB_API_KEY_FILE
+#      (or its deprecated alias KB_KEY_FILE) is set: then BOTH halves must be
+#      set there. KB_BASE_URL and KB_APP_URL name the same thing; set both and
+#      they must agree;
+#   2. otherwise the project's .claude/kb.json: kb_app_url AND kb_api_key_file
+#      ($CLAUDE_PROJECT_DIR's when set, else the cwd's — the wrapper's choice);
+#   3. otherwise (no kb.json) the canonical default, with read_key failing loud
+#      when no key is configured.
+# A broken pair exits 2 naming what is missing. A hostname cutover stays one
+# edit to kb.json.
+def _kbjson_path() -> Path:
+    root = os.environ.get("CLAUDE_PROJECT_DIR")
+    return (Path(root) if root else Path(".")) / ".claude" / "kb.json"
+
+
+def _fail(msg: str) -> None:
+    print(f"[kb-client] {msg}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+def _resolve_instance() -> None:
+    app_url = os.environ.get("KB_APP_URL", "")
+    base_url = os.environ.get("KB_BASE_URL", "")
+    if app_url and base_url and app_url != base_url:
+        _fail(f"KB_APP_URL ({app_url}) and KB_BASE_URL ({base_url}) disagree — "
+              "set one, or set both to the same instance.")
+    env_url = app_url or base_url
+    env_key = os.environ.get("KB_API_KEY_FILE") or os.environ.get("KB_KEY_FILE")
+    if env_url or env_key:
+        if not env_url:
+            _fail("KB_API_KEY_FILE is set but KB_APP_URL is not. Set both to point at "
+                  "another instance, or neither to use .claude/kb.json — half a pair "
+                  "is never completed from kb.json.")
+        if not env_key:
+            _fail(f"KB_APP_URL is {env_url} but KB_API_KEY_FILE is not set. Set the key "
+                  "file issued for that instance — kb.json's key is never sent to "
+                  "another instance.")
+        os.environ["KB_BASE_URL"] = os.environ["KB_APP_URL"] = env_url
         return
-    if cfg.get("kb_app_url") and not os.environ.get("KB_BASE_URL"):
-        os.environ["KB_BASE_URL"] = cfg["kb_app_url"]
-    if cfg.get("kb_api_key_file") and not os.environ.get("KB_API_KEY_FILE"):
-        os.environ["KB_API_KEY_FILE"] = cfg["kb_api_key_file"]
+    path = _kbjson_path()
+    if not path.exists():
+        return
+    try:
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        cfg = {}
+    if not (isinstance(cfg, dict) and cfg.get("kb_app_url") and cfg.get("kb_api_key_file")):
+        _fail(f"{path} exists but does not name both kb_app_url and kb_api_key_file — "
+              "fix the file, or set KB_APP_URL and KB_API_KEY_FILE together.")
+    os.environ["KB_BASE_URL"] = os.environ["KB_APP_URL"] = cfg["kb_app_url"]
+    os.environ["KB_API_KEY_FILE"] = cfg["kb_api_key_file"]
     # Optional: the knowledge domain this repo works in (DECISION-1). Becomes the
     # client's namespace exactly as if KB_NAMESPACE had been set; env still wins.
     if cfg.get("namespace") and not os.environ.get("KB_NAMESPACE"):
@@ -64,7 +101,7 @@ def _load_kbjson_into_env() -> None:
         os.environ["KB_PROJECT"] = cfg["project"]
 
 
-_load_kbjson_into_env()
+_resolve_instance()
 
 CANONICAL_BASE_URL = "https://kb.internal"   # last-resort fallback (CASE-471 cutover from wip-kb.local)
 LOCAL_BASE_URL = "https://localhost:8443"
@@ -90,7 +127,7 @@ def resolve_key_file(*env_vars: str) -> Path | None:
 
 
 # --- Target config (resolved once at import) --------------------------------
-# REMOTE = the canonical KB instance (kb.json / KB_BASE_URL). LOCAL = an optional
+# REMOTE = the resolved KB instance (see _resolve_instance). LOCAL = an optional
 # dev instance, tried first only when KB_PREFER_LOCAL=1.
 REMOTE_URL = os.environ.get("KB_BASE_URL") or os.environ.get("KB_APP_URL") or CANONICAL_BASE_URL
 REMOTE_KEY = resolve_key_file("KB_API_KEY_FILE", "KB_KEY_FILE")
@@ -267,6 +304,17 @@ def gw_get_bytes(path: str, timeout: float = 60) -> tuple[bytes, str | None] | N
     return None
 
 
+_announced: set[str] = set()
+
+
+def _announce_write(url: str) -> None:
+    """Name the instance a write goes to, once per process, on stderr — so an
+    operator sees where it landed before trusting the result (CASE-950)."""
+    if url not in _announced:
+        _announced.add(url)
+        print(f"[kb-client] writing to {url}", file=sys.stderr)
+
+
 def gw_post(path: str, body: dict, timeout: float = 20) -> dict:
     """POST a gateway endpoint. A write lands on ONE authority — the primary
     target (local iff KB_PREFER_LOCAL, else the canonical remote) — with no
@@ -274,6 +322,7 @@ def gw_post(path: str, body: dict, timeout: float = 20) -> dict:
     RuntimeError on transport / HTTP error. `timeout` is for the rare long write
     (seeding a whole namespace); everything else keeps the 20s default."""
     name, url, key = targets()[0]
+    _announce_write(url)
     result = _request(url, key, path, "POST", body, timeout)
     return result or {}
 
@@ -293,6 +342,7 @@ def gw_post_bytes(path: str, content: bytes, content_type: str, filename: str,
     the caller needs. A route that really is absent answers either the SPA's HTML or
     the server's bare {"error": "not_found", "path": …}; both raise as such."""
     _name, url, key = targets()[0]
+    _announce_write(url)
     req = urllib.request.Request(
         _gw_url(url, path), data=content, method="POST",
         headers={"X-API-Key": read_key(key), "Content-Type": content_type,
