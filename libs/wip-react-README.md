@@ -374,7 +374,6 @@ mutation too, documented under [Specialized Hooks](#usebulkimport).)
 | `useUpdateDocument()` | `{ documentId, patch, ifMatch? }` | `BulkResultItem` | `documents.all` + `documents.detail` + `documents.versions` |
 | `useUpdateDocuments()` | `PatchDocumentRequest[]` | `BulkResponse` | `documents.all` |
 | `useDeleteDocument()` | `{ id, updatedBy? }` | `BulkResultItem` | `documents.all` |
-| `useArchiveDocument()` | `{ id, archivedBy? }` | `BulkResultItem` | `documents.all` |
 
 **Files**
 
@@ -683,7 +682,7 @@ Invalidating a parent key cascades to all children. For example, `queryClient.in
 | Templates | 5 min | Structural changes are rare |
 | Documents | 30 sec | Actively edited, need fresh data |
 | Files | 10 min | Rarely change after upload |
-| Download URLs | 1 min | MinIO pre-signed URLs are time-limited |
+| Download URLs | 1 min | Pre-signed object-storage URLs are time-limited |
 | Registry | 5 min | Namespace config rarely changes |
 | Reporting | 1 min | Activity/integrity data should be recent |
 

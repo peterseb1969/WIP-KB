@@ -19,6 +19,7 @@ reports/
 .mcp.json
 .claude/kb.json
 .claude/.session-role
+.claude/.yac-activity
 .claude/settings.local.json
 .claude/commands/
 

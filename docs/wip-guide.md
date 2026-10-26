@@ -327,21 +327,61 @@ API keys carry a `namespaces` field that scopes their access. The rule is:
 - **Every other key** must declare `namespaces` explicitly. Non-privileged keys without a namespace scope receive 403 on every request.
 - **Single-namespace keys** get a convenience: omit the `namespace` query parameter and the server derives it from the key's scope. Multi-namespace keys must always pass `namespace` explicitly.
 
-### 4.6 External identity providers (Google, Okta, …) — not supported yet
+### 4.6 External identity providers (Google, Okta, …)
 
-Dex can federate logins from external providers through its *connectors*, but
-`wip-deploy` has no way to declare one yet: it renders Dex's config with an
-empty connector list. Every apply rewrites that file, including `redeploy`,
-`add-app`, `rotate-key` and `user add`. It also rewrites `.env`, which never
-reaches the Dex container anyway. A hand-added connector therefore disappears
-silently on the next apply. Until spec-level support lands, local Dex users
-(§4.7) are the supported way to log in.
+Dex federates logins from external providers through its *connectors*. They
+are spec configuration, like the local users in §4.7: declared once with
+`wip-deploy connector`, rendered into Dex's config on every apply, on every
+target.
 
-When support lands, the Google side is unchanged. Create a *Web application*
-OAuth client in Google Cloud Console with the redirect URI
-`https://<your-hostname>:8443/dex/callback`, and pick **Internal** consent for
-Workspace-only users. External users also need a route into WIP groups,
-otherwise per-app group gates keep them out.
+**Add a provider.** Google, as a generic OIDC provider:
+
+```bash
+wip-deploy connector add google --type oidc --display-name "Google" \
+  --config issuer=https://accounts.google.com \
+  --config clientID=<client-id>.apps.googleusercontent.com \
+  --secret-file ./google-client-secret       # or --secret-file - to read stdin
+```
+
+- `--config KEY=VALUE` is Dex's own connector schema
+  (<https://dexidp.io/docs/connectors/>), passed through. Values are read as
+  YAML scalars, so `true` is a boolean and `[a, b]` a list; `--config-file`
+  takes a whole mapping.
+- **The redirect URI is derived**, not configured: `<issuer>/callback`, e.g.
+  `https://<your-hostname>:8443/dex/callback`. The command prints it; register
+  exactly that URL with the provider. In Google Cloud Console: a *Web
+  application* OAuth client, with **Internal** consent for Workspace-only users.
+- **The client secret is yours to supply.** It is stored in the install's
+  secret backend as `dex-connector-<id>`, never in the spec and never on the
+  command line. The deployer never generates it: an apply with a declared
+  connector whose secret is missing stops and says how to supply it. Rotate it
+  with `wip-deploy connector set-secret <id> --secret-file …`.
+- `--secret-key` names the config key Dex reads the secret from: `clientSecret`
+  (the default) for OAuth and OIDC providers, `bindPW` for LDAP, or `none` for
+  a connector without a secret.
+
+`wip-deploy connector list` shows the declared connectors, and
+`connector remove <id>` removes one together with its secret.
+
+**Groups.** A federated user's groups are whatever their provider sends, with
+two rules applied by every service and by the gateway:
+
+- **`wip-admins` and `wip-services` are never granted to a federated login.**
+  Administrators are always local users (§4.7). If a provider sends either
+  group, it is dropped.
+- **Group mappings** grant WIP groups by verified email or by domain, since
+  most providers send no groups WIP knows. Per-app group gates (route
+  `allowed_groups`) depend on them:
+
+```bash
+wip-deploy group-map add --email-domain example.com --group wip-editors
+wip-deploy group-map add --email ana@partner.org --group wip-viewers
+wip-deploy group-map list
+```
+
+A mapping trusts the email the provider asserts, so declare connectors only
+for providers you trust to verify it. A token that marks the email unverified
+gets no mapped groups.
 
 ### 4.7 Local users (Dex static users)
 
@@ -367,6 +407,9 @@ Add, remove and list users with `wip-deploy user`:
 # Declare a user and apply; the password is printed once and kept in the secret backend
 wip-deploy user add e2e --email e2e@wip.local --group wip-editors --name <install>
 
+# Change a user's groups in place; the password is kept
+wip-deploy user set-groups e2e --group wip-editors,wip-admins --name <install>
+
 # What's declared, and whether each password secret exists yet
 wip-deploy user list --name <install>
 
@@ -374,16 +417,19 @@ wip-deploy user list --name <install>
 wip-deploy user remove e2e --name <install>
 ```
 
-- `--group` is the user's authorization group: `wip-admins`, `wip-editors`,
-  `wip-viewers`, or a group an app defines.
+- `--group` is the user's authorization group, or a comma-separated list
+  of groups: `wip-admins`, `wip-editors`, `wip-viewers`, or groups an app
+  defines. Dex puts every group into the login's token.
+- `set-groups` replaces the user's whole group set. Tokens issued before
+  the apply carry the old groups; a fresh login picks up the new ones.
 - The username names the password secret, so it must start with a letter or
   digit and use only letters, digits, `.`, `_` and `-`. Emails must be
   unique on the install, because Dex identifies static users by email.
 - There is no password-rotate verb. To give a user a fresh password,
   `remove` it and `add` it again.
-- `remove` refuses to delete the last `wip-admins` user. Add another admin
-  first.
-- `user add` and `user remove` re-render the install's files from the
+- `remove` refuses to delete the last `wip-admins` user, and `set-groups`
+  refuses to take `wip-admins` away from it. Add another admin first.
+- `user add`, `user set-groups` and `user remove` re-render the install's files from the
   current repo but apply only to Dex: Dex is recreated with the new user
   set, and every other container keeps running.
 
@@ -743,8 +789,11 @@ services (MongoDB, PostgreSQL, NATS, Garage, Dex) are not restarted this way.
 | **Declared keys** (`auth.api_keys`, e.g. agent keys) | install secret + rendered `api-keys.json` | `wip-deploy rotate-key <key-name> --name <install>` |
 | **Runtime keys** (console / `POST /api/registry/api-keys`) | Registry (MongoDB, bcrypt hash) | revoke + create a new one; other services see the change within the 30 s key sync |
 
-`rotate-key` prints the new plaintext **once**, names the services the apply
-restarted, and then probes the install's public URL: the Registry must
+`rotate-key` names the secret file that holds the new value
+(`~/.wip-deploy/<name>/secrets/<secret>`), not the value itself, so the key
+does not land in a terminal log or an agent's transcript; `--show-key` also
+prints the plaintext once. It then names the services the apply
+restarted, and probes the install's public URL: the Registry must
 accept the new key and refuse the old one, or the command fails (`--no-check`
 skips the probe). There is no grace window — once the apply completes, the
 old value gets 401.
@@ -752,10 +801,10 @@ old value gets 401.
 After rotating:
 
 - Clients that read the key **file** need no config change, but only some
-  re-read it while running: `kbc` reads it on every call and follows at once;
-  an MCP server configured with `WIP_API_KEY_FILE` reads it once at start, so
-  open MCP sessions get 401 until they are reconnected (e.g. `/mcp` in Claude
-  Code); app servers using `apiKeyFile` follow on their next restart.
+  re-read it while running: `kbc` reads it on every call and an MCP server
+  configured with `WIP_API_KEY_FILE` re-reads it when it changes, so both
+  follow at once; app servers using `apiKeyFile` follow on their next
+  restart.
 - Anyone holding a **copy** of the key (scripts, other machines, people)
   must be given the new value.
 - For zero downtime with external consumers that cannot switch at once,
@@ -778,6 +827,26 @@ Rotation cadences worth defaulting to:
 | Database passwords | Annually | Coordinate with maintenance window |
 | Dex client secret | Annually | Affects active sessions |
 | TLS (Let's Encrypt) | Automatic | Caddy renews 30 days before expiry |
+
+**The secret store travels with the install, whole.** An install's
+`secrets/` folder holds the passwords its datastores were set up with. Every
+apply records a short fingerprint of each secret it ran with in
+`deployment.deployer-state` (never the values) and, before generating
+anything, checks the folder against that record, and on k8s against the live
+`wip-secrets` Secret too. If a known secret is missing, or holds a different
+value, the apply stops and names the secrets, instead of generating
+passwords the running datastores do not hold. To recover:
+
+- copy the install's complete `~/.wip-deploy/<name>/` from the machine that
+  last drove it, `secrets/` included;
+- on k8s, `wip-deploy secrets pull --name <install>` writes the running
+  values from the cluster into the folder;
+- if the folder is right and only the record is stale (say, the folder was
+  restored from a backup), `wip-deploy secrets accept --name <install>`
+  records it.
+
+A secret the install has never had, such as one a platform upgrade or a new
+app introduces, is still generated, and the apply prints its name.
 
 ### 7.3 Validate before exposing
 
