@@ -8,7 +8,7 @@
   "fields": [
     { "name": "title",       "label": "Title",        "type": "string",  "mandatory": true, "full_text_indexed": true },
     { "name": "body",        "label": "Body",         "type": "string",  "mandatory": true, "full_text_indexed": true },
-    { "name": "authored_by", "label": "Authored By",  "type": "string",  "mandatory": true },
+    { "name": "authored_by", "label": "Authored By",  "type": "string",  "mandatory": true, "validation": {"pattern": "^(?:[A-Za-z][A-Za-z0-9-]*-[0-9]{8}-[0-9]{4}(?:[0-9]{2})?|[^@\\s]+@[^@\\s]+|WEB-UI)$"} },
     { "name": "doc_status",  "label": "Doc Status",   "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "draft" },
     { "name": "tags",        "label": "Tags",         "type": "array",   "array_item_type": "string" },
     { "name": "root",        "label": "Root",         "type": "boolean", "default_value": false },
@@ -19,7 +19,7 @@
     { "name": "severity",    "label": "Severity",     "type": "string",  "mandatory": false },
     { "name": "type",        "label": "Type",         "type": "string",  "mandatory": false },
     { "name": "component",   "label": "Component",    "type": "string",  "mandatory": false },
-    { "name": "filed_by",    "label": "Filed By",     "type": "string",  "mandatory": false },
+    { "name": "filed_by",    "label": "Filed By",     "type": "string",  "mandatory": false, "validation": {"pattern": "^(?:[A-Za-z][A-Za-z0-9-]*-[0-9]{8}-[0-9]{4}(?:[0-9]{2})?|[^@\\s]+@[^@\\s]+|WEB-UI)$"} },
     { "name": "app",         "label": "App",          "type": "term",    "mandatory": false, "reference_type": "term", "terminology_ref": "KB_APP" },
     { "name": "topics",      "label": "Topics",       "type": "array",   "mandatory": false, "array_item_type": "term", "array_terminology_ref": "KB_TOPIC" }
   ]
