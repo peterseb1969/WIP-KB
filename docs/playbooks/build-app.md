@@ -5,11 +5,9 @@ Full procedure for the `/build-app` slash command. The slash command stub at `.c
 ## Before Writing Any Code
 
 1. Run `/wip-status` to confirm all terminologies and templates from Phase 3 are intact.
-2. Read `docs/WIP_DevGuardrails.md` — all seven guides apply in this phase.
-   - Note: Guide 1 (App Gateway & Portal) is not yet implemented — apps don't yet register via manifests or appear on a portal page. However, the **API proxy already exists**: Caddy routes `/api/def-store/*`, `/api/template-store/*`, etc. to the correct service ports. Your app should use Caddy (e.g., `baseUrl: ''` in browser, `baseUrl: 'https://hostname:8443'` in Node.js) — never direct service ports.
-3. Read `libs/wip-client/README.md` and `libs/wip-react/README.md` — understand @wip/client and @wip/react APIs.
-4. Read `docs/WIP_PoNIFs.md` — especially PoNIF #4 (bulk-first 200 OK) and PoNIF #3 (document identity). These affect every @wip/client call.
-5. Confirm the app name, gateway path, and internal port with the user.
+2. Read `docs/cards/build.md` — the pinned stack, providers, proxy, `baseUrl`, UI and bootstrap rules, and the client-side consequences of PoNIF #3 (document identity) and PoNIF #4 (bulk-first 200 OK).
+3. Open the depth documents when the card does not answer a question: `docs/WIP_DevGuardrails.md` (all seven guides), the @wip/client and @wip/react READMEs, `docs/WIP_PoNIFs.md`.
+4. Confirm the app name, gateway path, and internal port with the user.
 
 ## UX Proposal — GATE (requires user approval)
 
@@ -52,7 +50,7 @@ Use the app skeleton from Guide 3 of the guardrails:
 - Create `.env.example` with WIP connection variables
 - Set up `vite.config.ts` with configurable base path
 - Set up `tailwind.config.ts` with shared design tokens from Guide 2
-- Install dependencies: react, @wip/client, @wip/react, tailwind, shadcn/ui components
+- Install dependencies: the pinned stack in `docs/technology-stack.md` (react, the vendored @wip/client and @wip/react, @tanstack/react-query, tailwind) — no component library
 - Create the WipProvider + QueryClientProvider setup in App.tsx
 
 ### Step 2: Build core pages
@@ -60,15 +58,15 @@ For each major feature of the app:
 - Use `@wip/react` hooks for data fetching (useDocuments, useTemplate, useTerminology)
 - Use `@wip/react` mutations for data creation (useCreateDocument)
 - Handle errors using the WipError hierarchy — map to user-facing messages per Guide 6
-- Use shadcn/ui components with Tailwind styling per Guide 2 design tokens
+- Build components from the Tailwind shapes in `docs/ui-guidance.md`, using the design tokens
 - Ensure responsive layout (works at 375px width and up)
 
 ### Step 3: Build data entry forms
 Follow Guide 5 (Data Entry Patterns):
 - For simple forms: use `useFormSchema()` to auto-generate from template
 - For specialized UIs (e.g., receipt scanning): build custom forms using @wip/client types
-- Term fields -> searchable dropdown populated from `useTerminology()`
-- Reference fields -> search input using `wip.utils.resolveReference()`
+- Term fields -> searchable dropdown populated from `useTerms(terminologyId)` (`useTerminology` returns the terminology itself, not its terms)
+- Reference fields -> search input using `resolveReference(client, …)` (a standalone `@wip/client` export)
 - File fields -> upload zone using `useUploadFile()`, then link FILE-XXXXXX to document immediately (never leave files unlinked — they become orphans)
 - Always handle: required field validation, term resolution errors, reference resolution errors
 
@@ -84,7 +82,7 @@ If the app imports files (CSV, PDF, XLSX):
 **Only then** write the parser, mapping raw extracted fields to WIP template fields. Document every mapping in IMPORT_FORMATS.md as you go, not after the fact.
 
 ### Step 4: Build list/table views
-- Use `useDocuments(templateCode, filters)` for paginated document lists
+- Use `useDocuments({ template_value, namespace, page, page_size })` for paginated document lists, and `useQueryDocuments(query)` when filtering on field values
 - Provide filtering by key fields (date ranges, categories, etc.)
 - Show loading states, empty states, and error states
 

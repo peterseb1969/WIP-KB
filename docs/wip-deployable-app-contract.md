@@ -58,7 +58,7 @@ spec:
       - {name: NODE_ENV,       source: {literal: "production"}}
     optional:
       - {name: MCP_URL,            source: {literal: "http://wip-router:8080/mcp"}}  # if app uses MCP
-      - {name: ANTHROPIC_API_KEY,  source: {from_secret: anthropic-api-key}}         # if app uses Claude
+      - {name: ANTHROPIC_API_KEY,  source: {from_secret: anthropic-api-key, supplied_by: operator}}  # if app uses Claude
   routes:
     - {path: /apps/<name>, auth_required: true}
   healthcheck:
@@ -66,6 +66,8 @@ spec:
     # liveness_endpoint: /apps/<name>/api/livez  # optional, k8s only: set it if `endpoint` checks a
     #   dependency, so an outage stops routing (readiness) instead of restarting the pod (liveness)
 ```
+
+A secret the deployer cannot make up, such as an API key for an outside service, is declared `supplied_by: operator` on an **optional** var. The deployer never generates it: it fills the var whenever the operator has put the secret in the install's store (`~/.wip-deploy/<install>/secrets/anthropic-api-key`) and prints a `note:` naming the app, the var and the expected file when it is absent. Without the marker, an optional `from_secret` is filled only when the deployer itself generates that secret for an active component, so an operator-placed key would never reach the app.
 
 Port choice: pick one Express port and one Vite port from the `apps/` directory's existing range. RC = 3001/5173, CT = 3002/5174, KB = 3012/5173 (KB collides with RC on Vite; pick fresh), AA = 3014/5180. Coordinate via case-helper if the range gets crowded.
 
@@ -78,7 +80,7 @@ open https://localhost:8443/apps/<name>/
 
 The SPA must load. `curl -sk https://localhost:8443/apps/<name>/api/health` must return `{"status":"ok",...}`. `curl -sk https://localhost:8443/apps/<name>/api/app-config` must return JSON carrying a `namespace` key — the deployment's WIP namespace or `null` (proves the runtime config source the client boots from, CASE-551). `curl -sk https://localhost:8443/apps/<name>/wip/api/registry/namespaces` must return the WIP install's namespaces (proves the server-side proxy works). Container must be marked healthy by podman within 30s, no manual env patching, no `--force-recreate` dance. If any of these fail, the contract has a gap — file a case naming which step broke.
 
-A future `/check-app-deployability <app-source-dir>` slash command automates this verification — it parses the manifest, greps the source repo, and reports each contract item with ✓ / ✗.
+`wip-deploy check-app-deployability <app-source-dir>` (add `--manifest <path>` when the manifest is not found automatically) automates the source-side half of this verification — it parses the manifest, greps the source repo, and reports each contract item with ✓ / ✗.
 
 ---
 
@@ -273,17 +275,17 @@ What `--preset query` ships today vs. what this paper recommends:
 
 | Surface | Scaffold today | Recommended |
 |---|---|---|
-| `server/index.ts` | Routes mounted on `app`, no `BASE_PATH` | Router mounted under `APP_BASE_PATH` |
-| `vite.config.ts` | No `base`; raw dev proxy paths; default `localhost` host binding | `base: VITE_BASE_PATH \|\| APP_BASE_PATH \|\| '/'`, prefixed dev proxy, `server.host: '0.0.0.0'` |
-| `src/main.tsx` (WipClient) | `baseUrl: '/wip'` | `baseUrl: \`${import.meta.env.BASE_URL}wip\`` |
-| `src/lib/wipBulk.ts` | `fetch('/wip' + path)` | `fetch(\`${import.meta.env.BASE_URL}wip\` + path)` |
-| Inline client fetches | Bare paths | Prefixed with `${import.meta.env.BASE_URL}` |
+| `server/index.ts` | **In scaffold** — routes on an `express.Router()` mounted under `APP_BASE_PATH` | Router mounted under `APP_BASE_PATH` |
+| `vite.config.ts` | **In scaffold** — `base` from `VITE_BASE_PATH \|\| APP_BASE_PATH`, prefixed dev proxy, `host: '0.0.0.0'` | `base: VITE_BASE_PATH \|\| APP_BASE_PATH \|\| '/'`, prefixed dev proxy, `server.host: '0.0.0.0'` |
+| `src/main.tsx` (WipClient) | No WipClient (the query preset's SPA talks to its own server) — an app that adds one | `baseUrl: \`${import.meta.env.BASE_URL}wip\`` |
+| `src/lib/wipBulk.ts` | Not in scaffold — an app that adds a raw fetch helper | `fetch(\`${import.meta.env.BASE_URL}wip\` + path)` |
+| Inline client fetches | **In scaffold** — prefixed with `import.meta.env.BASE_URL` | Prefixed with `${import.meta.env.BASE_URL}` |
 | `/api/me` | OIDC session only | Gateway-header sniff → OIDC → anonymous |
 | SPA fallback scope | **In scaffold** (CASE-834) — API prefixes excluded; apps created before it keep the catch-all | Exclude the API prefixes (`/api`, `/auth`, `/wip`, `/server-api`, `/mcp`) so unmatched API paths return 404 JSON; page routes still fall through to `index.html` |
 | `Dockerfile.dev` | **In scaffold** | Provided as starter (canonical pattern) |
-| `Dockerfile` (production) | **In scaffold** | Two-stage; `VITE_BASE_PATH` as ARG |
+| `Dockerfile` (production) | **In scaffold** — two-stage, `VITE_BASE_PATH` as ARG, `wget` installed in the `node:22-slim` runtime | Two-stage; `VITE_BASE_PATH` as ARG; `curl` or `wget` in the runtime stage if the manifest declares a healthcheck |
 | `.dockerignore` | **In scaffold** | Provided; narrow `*.md` exclusion called out |
-| `apps/<name>/wip-app.yaml` | **In scaffold** | Provided alongside source-repo files; declares both ports + required env |
+| `apps/<name>/wip-app.yaml` | Not generated — written by hand in the WIP repo | Provided alongside source-repo files; declares both ports + required env |
 
 These are mechanical scaffold edits. The right move is filing a case (BE-YAC owns the scaffold today) to fold each into `--preset query` so the next APP-YAC doesn't relearn them.
 
@@ -294,7 +296,7 @@ These are mechanical scaffold edits. The right move is filing a case (BE-YAC own
 1. Run the scaffold (`--preset query` or the variant you're using).
 2. Before writing a single feature, do the contract — both halves. Source repo + `apps/<name>/wip-app.yaml`. 30 minutes total.
 3. Run the verification: `wip-deploy install --target dev --app <name> --app-source <name>=<your-repo>`. SPA must load on the first try.
-4. Once `/check-app-deployability` ships, run it against your repo before committing scaffold output. It catches the gaps mechanically.
+4. Run `wip-deploy check-app-deployability <your-repo>` before committing scaffold output. It catches the gaps mechanically.
 5. If something breaks, find the failure signature in the "What breaks when you skip step N" annex. File a case if the signature isn't there yet — that's how this paper stays current.
 6. Write your first feature. The scaffold is now permanent platform; the integration surface won't come back.
 
