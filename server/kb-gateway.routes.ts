@@ -91,6 +91,14 @@ function statusForErrorCode(code?: string): number {
   return (code && ERROR_CODE_STATUS[code]) || 502
 }
 
+// A per-item write result that is neither created nor updated, as an error with
+// the status its error_code earns: a value WIP refused (validation_failed → 422)
+// is the caller's to fix and must not read as the backend failing.
+function writeError(what: string, r: AnyObj): WipError {
+  const status = statusForErrorCode(r.error_code)
+  return new WipError(status, `${what} ${status < 500 ? 'refused' : 'failed'}: ${r.error || JSON.stringify(r)}`)
+}
+
 async function wipReq(method: string, path: string, key: string, body?: unknown): Promise<AnyObj> {
   const resp = await fetch(`${WIP_BASE}${path}`, {
     method,
@@ -389,7 +397,7 @@ async function mintNumberedDoc(opts: {
     }])
     const r = (d.results || [])[0] || {}
     if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
-      throw new WipError(502, `${templateValue} update at ${numberField}=${explicit} failed: ${r.error || JSON.stringify(r)}`)
+      throw writeError(`${templateValue} update at ${numberField}=${explicit}`, r)
     return {
       number: Number(explicit), synonym: buildSynonym(synCfg, Number(explicit), data),
       document_id: r.document_id, result: r.status,
@@ -408,7 +416,7 @@ async function mintNumberedDoc(opts: {
       }])
       const r = (d.results || [])[0] || {}
       if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
-        throw new WipError(502, `${templateValue} re-mint failed: ${r.error || JSON.stringify(r)}`)
+        throw writeError(`${templateValue} re-mint`, r)
       return { number: num, synonym: buildSynonym(synCfg, num, data), document_id: r.document_id, result: r.status }
     }
   }
@@ -444,7 +452,7 @@ async function mintNumberedDoc(opts: {
     if (r.status === 'created' || r.status === 'updated')
       return { number: n, synonym, document_id: r.document_id, result: r.status }
     if (r.error_code === 'synonym_conflict' || /different entry/.test(r.error || '')) { n += 1; continue }
-    throw new WipError(502, `${templateValue} mint failed at ${synonym}: ${r.error || JSON.stringify(r)}`)
+    throw writeError(`${templateValue} mint at ${synonym}`, r)
   }
   throw new WipError(503, `${templateValue} allocation exhausted ${ALLOC_MAX_RETRIES} retries`)
 }
@@ -638,7 +646,7 @@ async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyOb
   }])
   const r = (d.results || [])[0] || {}
   if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
-    throw new WipError(502, `${type} write failed: ${r.error || JSON.stringify(r)}`)
+    throw writeError(`${type} write`, r)
   return { document_id: r.document_id, result: r.status }
 }
 

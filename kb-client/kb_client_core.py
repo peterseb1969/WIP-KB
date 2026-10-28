@@ -226,7 +226,18 @@ def _request(base_url: str, key_file: Path, path: str,
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
-        snippet = e.read()[:300].decode("utf-8", errors="replace")
+        raw_err = e.read()
+        snippet = raw_err[:300].decode("utf-8", errors="replace")
+        # A JSON 4xx is the gateway refusing the request for a stated reason (a
+        # value WIP rejects, a missing case): the caller's to fix, not a transport
+        # failure, and retrying it gets the same answer.
+        if 400 <= e.code < 500 and (e.headers.get("Content-Type") or "").startswith("application/json"):
+            try:
+                body = json.loads(raw_err)
+            except json.JSONDecodeError:
+                body = None
+            if isinstance(body, dict):
+                raise GatewayRefusal(str(body.get("error") or body)) from e
         raise RuntimeError(f"HTTP {e.code} from {base_url}: {snippet}") from e
     except (urllib.error.URLError, OSError) as e:
         raise RuntimeError(f"{base_url} unreachable: {e}") from e

@@ -1012,6 +1012,9 @@ def main() -> int:
         if args.patch:
             return cmd_patch(args.type, args)
         return cmd_write(args.type, args)
+    except GatewayRefusal as e:
+        print(f"ERROR: rejected — {e}", file=sys.stderr)
+        return 1
     except RuntimeError as e:
         print(f"ERROR: transport failure: {e}", file=sys.stderr)
         return 2
