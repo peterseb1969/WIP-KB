@@ -24,6 +24,10 @@ Usage:
     --hash-repo PATH   CASE_RESPONSE implement: check cited commits in PATH, not the cwd
     --no-hash-check    CASE_RESPONSE implement: skip that check
 
+Case attribution (CASE_RECORD filed_by / authored_by, CASE_RESPONSE author) is
+filled from .claude/.session-id when omitted; a typed value that is not a session
+ID is refused. --field values win unchecked.
+
 An implement response (CASE_RESPONSE, response_kind: implement) is refused when
 a commit hash it cites exists locally but is on no remote branch: push first,
 then cite the hash as it is on the remote.
@@ -737,6 +741,40 @@ def cmd_list(fmt: str, namespace: str | None = None) -> int:
     return 0
 
 
+# Which session wrote a case record or response is a mechanical fact, so the
+# client fills it from the repo's session sentinel instead of trusting a value an
+# agent typed: a typed value has arrived as the literal text of the command meant
+# to produce it. A value the agent did type must at least have a session ID's
+# shape — <ROLE>-YYYYMMDD-HHMMSS, or HHMM in sessions from before seconds
+# precision; roles are mixed-case (FRanC). Values passed with --field are
+# explicit (imports writing on behalf of another session) and win unchecked.
+ATTRIBUTION_FIELDS = {"CASE_RECORD": ("filed_by", "authored_by"), "CASE_RESPONSE": ("author",)}
+SESSION_ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]*-[0-9]{8}-[0-9]{4}([0-9]{2})?")
+SESSION_SENTINEL = ".claude/.session-id"
+
+
+def fill_attribution(type_: str, data: dict, explicit: set[str]) -> None:
+    """Fill or check the session attribution of a CASE_RECORD / CASE_RESPONSE in
+    place. Raises ValueError (a client-side rejection) for a value that is not a
+    session ID, or when a field is missing and there is no sentinel to fill it."""
+    for field in ATTRIBUTION_FIELDS.get(type_, ()):
+        if field in explicit:
+            continue
+        value = data.get(field)
+        value = value.strip() if isinstance(value, str) else value
+        if value in (None, ""):
+            sid = _read_local(SESSION_SENTINEL)
+            if not sid or not SESSION_ID_RE.fullmatch(sid):
+                raise ValueError(
+                    f"{field} is not set and {SESSION_SENTINEL} holds no session ID — "
+                    f"run /wip-setup (new session) or /wip-wake (continuation) first")
+            data[field] = sid
+        elif not (isinstance(value, str) and SESSION_ID_RE.fullmatch(value)):
+            raise ValueError(
+                f"{field}: {value!r} is not a session ID — omit {field}; the client fills "
+                f"it from {SESSION_SENTINEL}")
+
+
 # A commit-shaped token: 7-40 lowercase hex chars standing alone. Hyphens and
 # alphanumerics on either side disqualify it, so UUID segments never match.
 _HASH_RE = re.compile(r"(?<![0-9A-Za-z-])[0-9a-f]{7,40}(?![0-9A-Za-z-])")
@@ -788,6 +826,12 @@ def cmd_write(type_: str, args: argparse.Namespace) -> int:
     if not data:
         print("ERROR: empty data — nothing to write", file=sys.stderr)
         return 2
+    explicit = {kv.split("=", 1)[0].strip() for kv in (args.field or []) if "=" in kv}
+    try:
+        fill_attribution(type_, data, explicit)
+    except ValueError as e:
+        print(f"ERROR: rejected — {e}", file=sys.stderr)
+        return 1
     if (type_ == "CASE_RESPONSE" and data.get("response_kind") == "implement"
             and not args.no_hash_check):
         unpushed = check_implement_hashes(str(data.get("body") or ""), args.hash_repo or os.getcwd())

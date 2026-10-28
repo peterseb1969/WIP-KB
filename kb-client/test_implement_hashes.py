@@ -108,7 +108,7 @@ md = os.path.join(tmp, "implement.md")
 
 def write(kind, no_check=False):
     with open(md, "w") as f:
-        f.write(f"---\ncase_number: 1\nresponse_kind: {kind}\nauthor: t\n"
+        f.write(f"---\ncase_number: 1\nresponse_kind: {kind}\nauthor: APP-KB-20261028-221500\n"
                 f"doc_status: published\n---\nFixed in {local}.\n")
     args = argparse.Namespace(file=md, json=None, field=None, edge=None, metadata=None,
                               format="text", hash_repo=work, no_hash_check=no_check)

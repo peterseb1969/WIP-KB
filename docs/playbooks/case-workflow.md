@@ -21,7 +21,9 @@ which talks only to the KB **gateway** (never the document-store backend).
 
 ## Prerequisites
 
-A session ID (see YAC Reporting in CLAUDE.md).
+A session ID in `.claude/.session-id` (minted by `/wip-setup` or `/wip-wake`; see YAC Reporting in CLAUDE.md).
+
+**Attribution is filled by the client — do not type it.** `kb-write.py` fills `filed_by` / `authored_by` on a `CASE_RECORD` and `author` on a `CASE_RESPONSE` from `.claude/.session-id`. Leave those keys out of the frontmatter. A value you do type must be a session ID, or the write is refused; an unexpanded `$(cat …)` once reached the KB as the literal attribution of a case.
 
 ## The served KB client (one-time, self-refreshing)
 
@@ -71,8 +73,6 @@ thread intact instead of a duplicate filing.
    ```markdown
    ---
    title: <short case title>
-   authored_by: <your session ID>
-   filed_by: <your session ID>
    doc_status: published
    status: open
    type: <bug | question | request | platform-gap>
@@ -175,7 +175,7 @@ Then, two writes — the response doc + the status transition:
 
 ```bash
 # 1) the response (compose response.md: body markdown; frontmatter sets the fields)
-#    response.md frontmatter: case_number: <n> / response_kind: respond / author: <id> / doc_status: published
+#    response.md frontmatter: case_number: <n> / response_kind: respond / doc_status: published
 kbc kb-write.py CASE_RESPONSE response.md --edge RESPONDS_TO:CASE_RECORD:<n>
 # -> created CASE-<n>#<seq>  edges: RESPONDS_TO→<n>=linked
 
@@ -194,7 +194,7 @@ A comment is a CASE_RESPONSE with `response_kind: comment` and **no** status cha
 
 ```bash
 kbc kb-write.py CASE_RESPONSE comment.md --edge RESPONDS_TO:CASE_RECORD:<n>
-# comment.md frontmatter: case_number: <n> / response_kind: comment / author: <id> / doc_status: published
+# comment.md frontmatter: case_number: <n> / response_kind: comment / doc_status: published
 ```
 
 ---
@@ -206,7 +206,7 @@ Compose the resolution rationale, then response + transition:
 
 ```bash
 kbc kb-write.py CASE_RESPONSE close.md --edge RESPONDS_TO:CASE_RECORD:<n>
-#   close.md frontmatter: case_number: <n> / response_kind: close / author: <id> / doc_status: published
+#   close.md frontmatter: case_number: <n> / response_kind: close / doc_status: published
 kbc kb-write.py CASE_RECORD --patch status=closed --match case_number=<n>
 ```
 
@@ -236,7 +236,7 @@ proposed fix, tell Peter to `/wip-case respond` first and stop.
 
    ```bash
    kbc kb-write.py CASE_RESPONSE implement.md --edge RESPONDS_TO:CASE_RECORD:<n>
-   #   implement.md frontmatter: case_number: <n> / response_kind: implement / author: <id> / doc_status: published
+   #   implement.md frontmatter: case_number: <n> / response_kind: implement / doc_status: published
    kbc kb-write.py CASE_RECORD --patch status=implemented --match case_number=<n>
    ```
 
@@ -254,7 +254,7 @@ strands the next reader.
 
 ```bash
 kbc kb-write.py CASE_RESPONSE reopen.md --edge RESPONDS_TO:CASE_RECORD:<n>
-#   reopen.md frontmatter: case_number: <n> / response_kind: comment / author: <id> / doc_status: published
+#   reopen.md frontmatter: case_number: <n> / response_kind: comment / doc_status: published
 #   body: why this is coming back (what regressed / which premise fell)
 kbc kb-write.py CASE_RECORD --patch status=open --match case_number=<n>
 ```
