@@ -9,7 +9,8 @@
     "dev:server": "NODE_TLS_REJECT_UNAUTHORIZED=0 tsx watch server/index.ts",
     "build": "vite build",
     "start": "tsx server/index.ts",
-    "test": "python3 kb-client/test_parse_frontmatter.py && python3 kb-client/test_verb_parity.py && python3 kb-client/test_implement_hashes.py && python3 kb-client/test_instance_pairing.py && python3 kb-client/test_attribution.py"
+    "test": "python3 kb-client/test_parse_frontmatter.py && python3 kb-client/test_verb_parity.py && python3 kb-client/test_implement_hashes.py && python3 kb-client/test_instance_pairing.py && python3 kb-client/test_attribution.py && python3 kb-client/test_patch_match.py",
+    "test:gateway": "node --test server/lib/patch-match.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",

@@ -25,6 +25,7 @@ import { createHash } from 'node:crypto'
 import express, { Router, type Request, type Response, type NextFunction } from 'express'
 import { createCorpusNamespace } from './lib/bootstrap.js'
 import { resolveWipKey } from './lib/wip-key.js'
+import { MATCH_PAGE_SIZE, describeMatch, matchFilters, resolveMatch, validateMatch } from './lib/patch-match.js'
 
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
 // The gateway's default namespace is the KB corpus (cases, decisions, …).
@@ -738,9 +739,11 @@ function callerKey(req: Request, res: Response): string | null {
 // mint or natural-upsert per the type's WRITE_POLICY, then links any edge-intents.
 // Two shapes:
 //   create/upsert: { data: {...}, metadata?, edges?: [{type, target_type, target_key}] }
-//   partial patch: { patch: {...}, match: {<field>: value} } — resolve the doc by
-//                  the match field, apply an RFC-7396 merge patch (if_match + retry
-//                  on concurrency). Used for field updates like a case status change.
+//   partial patch: { patch: {...}, match: {<field>: value, ...} } — resolve the ONE
+//                  doc every match field names (AND; a match several docs satisfy
+//                  is refused with 409), apply an RFC-7396 merge patch (if_match +
+//                  retry on concurrency). Used for field updates like a case status
+//                  change.
 // Each edge is written source(the new doc) -> target(resolved by the target
 // type's identity field). Unresolved targets are reported, not fatal.
 router.post('/write/:type', async (req, res) => {
@@ -761,11 +764,12 @@ router.post('/write/:type', async (req, res) => {
   // --- patch mode: partial update of an existing doc, located by a match field ---
   if (b.patch && typeof b.patch === 'object' && !Array.isArray(b.patch)) {
     const match: AnyObj = b.match || {}
-    const mf = Object.keys(match)[0]
-    if (!mf) {
-      res.status(422).json({ error: 'patch requires match: {<field>: value} to locate the doc' })
+    const problem = validateMatch(match)
+    if (problem) {
+      res.status(problem.status).json({ error: problem.error })
       return
     }
+    const where = describeMatch(match)
     try {
       for (let attempt = 0; attempt < PATCH_MAX_RETRIES; attempt++) {
         // match on document_id fetches directly — the escape hatch for types
@@ -773,17 +777,29 @@ router.post('/write/:type', async (req, res) => {
         // where no single data field locates the doc. The flags dispatcher
         // consumes a flag by the id the /flags projection returned.
         let doc: AnyObj | undefined
-        if (mf === 'document_id') {
+        if ('document_id' in match) {
           try {
-            doc = await wipReq('GET', `/api/document-store/documents/${match[mf]}?namespace=${ns}`, key)
+            doc = await wipReq('GET', `/api/document-store/documents/${match.document_id}?namespace=${ns}`, key)
           } catch { /* not found → 404 below */ }
         } else {
+          // Every match field filters; the query (active documents) must find
+          // exactly one document. An ambiguous match is refused, never resolved
+          // to whichever document the query happened to return first.
           const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
-            { template_id: type, filters: [{ field: `data.${mf}`, operator: 'eq', value: match[mf] }], page: 1, page_size: 1 })
-          doc = (q.items || [])[0]
+            { template_id: type, filters: matchFilters(match), page: 1, page_size: MATCH_PAGE_SIZE })
+          const outcome = resolveMatch((q.items || []) as AnyObj[], Number(q.total ?? 0))
+          if (outcome.kind === 'ambiguous') {
+            res.status(409).json({
+              error_code: 'ambiguous_match',
+              error: `${type} where ${where} matches ${outcome.count} documents in ${ns} — `
+                + 'name the type\'s identity in full (every --match field) or match on document_id',
+            })
+            return
+          }
+          if (outcome.kind === 'one') doc = outcome.doc
         }
         if (!doc) {
-          res.status(404).json({ error: `${type} where ${mf}=${match[mf]} not found in ${ns}` })
+          res.status(404).json({ error: `${type} where ${where} not found in ${ns}` })
           return
         }
         const d = await wipReq('PATCH', `/api/document-store/documents?namespace=${ns}`, key,

@@ -3,6 +3,23 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-29 — A patch changes exactly the one document its match names (CASE-972)
+
+- **Fixed:** a patch write (`kb-write.py <TYPE> --patch … --match k=v`) could change the
+  wrong document. The client sent only the last `--match`, the gateway read only the
+  match's first key, and it patched the first hit without checking how many matched.
+  Correcting one case response by `--match case_number=959 --match response_seq=3`
+  replaced the text of another case's response.
+- **Changed:**
+  - `--match` repeats, and every pair is sent.
+  - The gateway filters on every match key (AND) and refuses a match that several
+    documents satisfy with **409** `ambiguous_match`; no hit is still 404.
+  - `document_id` must stand alone (422 otherwise).
+  - Several active versions of one document count as one match.
+- **Tests:** `kb-client/test_patch_match.py` (in `npm test`), and
+  `server/lib/patch-match.test.ts` (`npm run test:gateway`, plain `node --test`; not in
+  CI, whose runner may lack a Node that runs TypeScript directly).
+
 
 
 

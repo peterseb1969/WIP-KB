@@ -55,6 +55,13 @@ synonym, scoped `CASE-<n>#<seq>` for responses, and persists edges. Status-trans
 *validity* is enforced here in the playbook (compose only a legal transition); the
 gateway is pure persistence.
 
+**A patch names exactly one document.** `--patch … --match k=v` changes the one
+document its `--match` fields name together; `--match` repeats, and every field is
+sent. A match that several documents satisfy is refused with 409 (`ambiguous_match`),
+never applied to whichever came first. `case_number` alone names a `CASE_RECORD`; a
+response needs both fields (`--match case_number=<n> --match response_seq=<seq>`), or
+its `document_id`.
+
 Legal transitions: `open → {responded, closed, implemented}`,
 `responded → {closed, implemented}`, and the reopen path
 `closed → open` / `implemented → open` — so "terminal" means "resting

@@ -35,7 +35,8 @@ one-shot JSON bundle — or `/files/<name>` per file) and runs it, refreshing on
 One generic write path; per-type behaviour is **data**, not code:
 
 - **Write surface:** `POST /write/:type` only. `{data, edges?}` creates / mints /
-  upserts; `{patch, match:{field:value}}` partial-updates. Edge-intents
+  upserts; `{patch, match:{field:value, …}}` partial-updates the ONE doc every match
+  field names together (409 when several match; `document_id` stands alone). Edge-intents
   (`CONTINUES_FROM`, `RESPONDS_TO`, `REFERENCES`) resolve by the target's identity
   field. The gateway parses no files — the client owns all source parsing + validation.
 - **Identity:** mint types carry a KB-allocated number + synonym defined by a

@@ -850,9 +850,11 @@ def cmd_write(type_: str, args: argparse.Namespace) -> int:
 
 def cmd_patch(type_: str, args: argparse.Namespace) -> int:
     """Partial update of an existing doc: --patch k=v (repeatable) located by
-    --match k=v. Posts { patch, match } to /write/:type (e.g. a case status change)."""
+    --match k=v (repeatable). Posts { patch, match } to /write/:type (e.g. a case
+    status change). Every match field is sent; together they must name exactly
+    one document, or the gateway refuses with 409 instead of guessing."""
     patch = _parse_fields(args.patch)
-    match = _parse_fields([args.match]) if args.match else {}
+    match = _parse_fields(args.match)
     if not patch or not match:
         print("ERROR: --patch k=v and --match k=v are both required", file=sys.stderr)
         return 2
@@ -911,7 +913,7 @@ def cmd_project_tooling(args: argparse.Namespace) -> int:
     if args.patch:
         print("ERROR: --tooling cannot be combined with --patch", file=sys.stderr)
         return 2
-    match = _parse_fields([args.match]) if args.match else {}
+    match = _parse_fields(args.match)
     if set(match) - {"app"}:
         print("ERROR: --tooling locates its project by --match app=<project>", file=sys.stderr)
         return 2
@@ -969,7 +971,10 @@ def main() -> int:
     ap.add_argument("--edge", action="append", help="edge intent TYPE:target_type:target_key (repeatable)")
     ap.add_argument("--metadata", help="JSON object merged into the write metadata")
     ap.add_argument("--patch", action="append", help="partial-update field k=v (repeatable; with --match)")
-    ap.add_argument("--match", help="locate the doc to patch by k=v (with --tooling: app=<project>)")
+    ap.add_argument("--match", action="append",
+                    help="locate the doc to patch by k=v (repeatable; together the fields must "
+                         "name exactly ONE doc, e.g. --match case_number=959 --match response_seq=3, "
+                         "or --match document_id=<id>; with --tooling: app=<project>)")
     ap.add_argument("--tooling", metavar="PATH",
                     help="PROJECT only: attach PATH (.zip, .tar.gz/.tgz, .gz; up to 100 MB) as the "
                          "project's tooling archive, replacing any earlier one")
