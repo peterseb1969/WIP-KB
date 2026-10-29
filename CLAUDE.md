@@ -130,7 +130,7 @@ If you feel tempted to add a button that changes a status, an assignment, or a t
 
 Per spec §5 and §6, you create these as templates and edge-type definitions during bootstrap. APP-KB-YAC owns the structured-field shapes; the spec defines the *types*, not the fields. Bias minimal — start with title/body/origin, add fields when use reveals the need (spec §5 explicitly calls out the JIRA-creep risk).
 
-**9 doc types:** `CASE_RECORD`, `DESIGN_DECISION`, `LESSON`, `FIRESIDE`, `JOURNEY_ENTRY`, `GIT_STATS_SNAPSHOT`, `AGENT_IDENTITY` (reference), `FLAG_RECORD`, `BOOTSTRAP_RECORD`.
+**9 doc types:** `CASE_RECORD`, `DESIGN_DECISION`, `LESSON`, `FIRESIDE`, `JOURNEY_ENTRY`, `GIT_STATS_SNAPSHOT`, `AGENT_IDENTITY` (reference), `FLAG_RECORD`, `KB_BOOTSTRAP_RECORD`.
 
 **10 edges:** `IMPACTS`, `REALIZES`, `LEARNED_FROM`, `DECIDED_BY`, `SUPERSEDES`, `FLAGGED_FROM`, `AGENT_PARTICIPATED`, `FROM_DAY`, `REFERENCES`, `RELATES_TO`.
 
@@ -161,7 +161,7 @@ Every WIP-consuming app must follow **offer-on-empty / use-on-exists** at runtim
 
 1. **Namespace missing on launch** → show the user an explicit bootstrap offer. Do **not** auto-bootstrap silently. The user can either confirm bootstrap or restore from backup via the WIP console / `wip-deploy` first and reload.
 2. **Namespace exists on launch** → use it as-is. **No** schema reconciliation, **no** "templates differ" check, **no** merge logic. Rolling redeploys against an existing namespace must come up clean.
-3. **On user-initiated bootstrap** → write one **`BOOTSTRAP_RECORD`** audit doc capturing: `bootstrap_id`, `app_version`, `bootstrapped_at`, `commit_sha`, `templates_created`, `edge_types_created`, `terminologies_created`. This is the provenance trail any future YAC reading the namespace can rely on.
+3. **On user-initiated bootstrap** → write one **`KB_BOOTSTRAP_RECORD`** audit doc (the template value is namespace-prefixed — `BOOTSTRAP_RECORD_VALUE` in `server/lib/bootstrap.ts` derives it; a shared literal value made every app-to-app merge collide on this one template) capturing: `bootstrap_id`, `app_version`, `bootstrapped_at`, `commit_sha`, `templates_created`, `edge_types_created`, `terminologies_created`. This is the provenance trail any future YAC reading the namespace can rely on.
 
 **Restore is not an app concern.** The bootstrap UI mentions restore as an alternative the user may prefer; it does not provide UI for it. Restore is console-initiated.
 
@@ -170,13 +170,13 @@ Every WIP-consuming app must follow **offer-on-empty / use-on-exists** at runtim
 - `bootstrap.routes.ts.template` — Express `GET /server-api/bootstrap/status` and `POST /server-api/bootstrap/run` (SSE streaming)
 - `BootstrapGate.tsx.template` — React component rendering the four states (checking / unreachable / needs-bootstrap / bootstrapping / error / ready)
 
-Read each template's header comment, fill in the TODOs (namespace = `kb`, app title), drop a `BOOTSTRAP_RECORD` template into `server/seed/templates/`, and you're done.
+Read each template's header comment, fill in the TODOs (namespace = `kb`, app title), drop the `KB_BOOTSTRAP_RECORD` template into `server/seed/templates/` (here `11_KB_BOOTSTRAP_RECORD.json`; its value must match `BOOTSTRAP_RECORD_VALUE`), and you're done.
 
 ---
 
 ## MCP
 
-WIP's dev sandbox is accessed via MCP tools (94 tools, 5 resources) under the **`wip`** server, which points at **localhost:8443** — see "Backend Target" for the full four-instance ladder. dev-test, prod-test and canonical are *not* on MCP; reach them with `kbc` or an explicit `curl`. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
+WIP's dev sandbox is accessed via MCP tools (108 tools, 5 resources) under the **`wip`** server, which points at **localhost:8443** — see "Backend Target" for the full four-instance ladder. dev-test, prod-test and canonical are *not* on MCP; reach them with `kbc` or an explicit `curl`. Always pass `namespace` explicitly on MCP tool calls (the privileged admin key is cross-namespace).
 
 Required reads before writing any code:
 - `wip://conventions` — bulk-first API, identity hashing, versioning
@@ -199,14 +199,14 @@ Use `@wip/client`, `@wip/react`, and `@wip/proxy` for app code:
 - `libs/wip-react-README.md` — React hooks (TanStack Query, 30+ hooks)
 - `libs/wip-proxy-README.md` — Express middleware for WIP API proxying with auth injection
 
-Install from tarballs in `libs/`:
+Install from tarballs in `libs/`, with `@tanstack/react-query`, the peer dependency that powers `@wip/react`'s hooks (install it explicitly):
 ```bash
-npm install ./libs/wip-client-*.tgz ./libs/wip-react-*.tgz ./libs/wip-proxy-*.tgz
+npm install ./libs/wip-client-*.tgz ./libs/wip-react-*.tgz ./libs/wip-proxy-*.tgz @tanstack/react-query
 ```
 
 Two gotchas:
-- **`@wip/client` baseUrl in browser apps behind a Vite proxy:** use `baseUrl: '/wip'` (resolved to `window.location.origin + '/wip'`). Do NOT use a bare relative path without the client resolving it — `new URL('/wip/...')` throws without a protocol.
-- **`@wip/react` providers:** hooks require BOTH `QueryClientProvider` (from `@tanstack/react-query`) AND `WipProvider` (from `@wip/react`). Missing either causes silent failure — hooks mount but never fetch, no errors.
+- **`@wip/client` baseUrl in browser apps behind the `@wip/proxy` mount:** use ``baseUrl: `${import.meta.env.BASE_URL}wip` `` (as `src/lib/wipClient.ts` does). The deployed app lives under `/apps/kb/`, so a bare `'/wip'` works only for an app served at `/`. Do NOT use a bare relative path without the client resolving it — `new URL('/wip/...')` throws without a protocol.
+- **`@wip/react` providers:** hooks require BOTH `QueryClientProvider` (from `@tanstack/react-query`) AND `WipProvider` (from `@wip/react`). Missing either breaks every hook: outside `WipProvider`, `useWipClient` throws "useWipClient must be used within a <WipProvider>"; outside `QueryClientProvider`, TanStack's hooks throw that no QueryClient is set.
 
 ---
 
@@ -219,9 +219,12 @@ Two gotchas:
 3. **Verify** with `wip-deploy install --target dev --app kb --app-source kb=~/Development/WIP-KB` — SPA must load at `https://localhost:8443/apps/kb/` on the first try, container healthy, no manual env patching.
 4. **If something breaks**, find the failure signature in the paper's "What breaks when you skip step N" annex.
 
+The contract is target-agnostic — compose, k8s, and apps-only installs satisfy the same contract.
+
 Companion canonical docs for UI/stack decisions: `docs/technology-stack.md` (v1 stack + forbidden choices) and `docs/ui-guidance.md` (palette tokens, typography, component shapes) — read before any architecture or visual call.
 
 Also bundled in `docs/`, and easy to miss because nothing else here points at them:
+- `docs/Vision.md` — WIP's theses and design principles; the drift-correction mechanism when work bends toward a use case at the expense of the generic engine. Read first.
 - `docs/AI-Assisted-Development.md` — 4-phase process, data model design guide, PoNIFs quick reference
 - `docs/WIP_PoNIFs.md` — full guide to WIP's 8 non-intuitive behaviours
 - `docs/WIP_DevGuardrails.md` — UI stack, app skeleton, testing conventions
@@ -232,16 +235,19 @@ Also bundled in `docs/`, and easy to miss because nothing else here points at th
 
 ## WIP Toolkit
 
-`wip-toolkit` is a CLI for backup, export, import, and data migration. Install from the wheel in `libs/`:
+`wip-toolkit` is a CLI for backup, export, restore, and data migration. Install it together with the `wip-archive` wheel it depends on, both from `libs/`, in one command:
 
 ```bash
-pip install libs/wip_toolkit-*.whl
+pip install libs/wip_archive-*.whl libs/wip_toolkit-*.whl
 ```
+
+`wip-archive` is not on PyPI, so the toolkit wheel alone cannot resolve its dependency — and naming both local files keeps pip from ever looking for that name elsewhere.
 
 Key commands:
 - `wip-toolkit export <namespace> <output.zip>` — Export namespace to archive
-- `wip-toolkit import <archive.zip> --mode fresh` — Import with new IDs (cross-namespace)
-- `wip-toolkit import <archive.zip> --mode restore` — Restore with original IDs (disaster recovery)
+- `wip-toolkit restore <archive.zip> --mode fresh --target-namespace <ns>` — Restore with new IDs beside the original (the server's restore engine does the work)
+- `wip-toolkit restore <archive.zip>` — Restore with original IDs into an empty namespace (disaster recovery); `--mode merge` merges into one that holds data
+- `wip-toolkit inspect <archive.zip>` — Analyse an archive offline
 
 Remote WIP instances:
 ```bash
@@ -315,6 +321,8 @@ You will be replaced. This session ends when context fills or the task completes
 **Context window awareness:** check `cat .claude-context-pct` periodically.
 - **Past 50%:** ensure session report and dead-ends section are written. Halfway to replacement.
 - **Past 75%:** stop working and write your session summary. The next YAC picks up faster from a clean summary than from a half-finished sprawl.
+
+When stopping for any reason, write a clear status report: what's done, what's left, what's blocking, and what didn't work (dead ends).
 
 ---
 
