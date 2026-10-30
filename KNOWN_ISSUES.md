@@ -5,6 +5,16 @@ re-investigate solved problems, "fix" intentional choices, or miss real gaps.
 
 ## Open / deferred
 
+### Doc view: keep the document's identity visible while scrolling
+**Status:** backlog · **Severity:** low
+Requested by Peter, 2026-10-30. On a long document page, the header that says which
+document this is scrolls away, so at the bottom of a long case or paper nothing on
+screen names it. Wanted: a compact strip that stays fixed at the top while scrolling
+and shows the handle (e.g. `CASE-957`), the document title and the document ID. Today
+the only sticky element in the UI is the facet sidebar on the search page
+(`SearchPage.tsx`); `DocPage.tsx` has none. The strip is a reading aid only: no
+buttons that change status, assignment or tags (spec §11).
+
 ### Tooling uploads are held in memory
 **Status:** known · **Severity:** low
 `POST /projects/:app/tooling` reads the whole archive (up to 100 MB) into memory and
