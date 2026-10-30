@@ -5,7 +5,7 @@ import session from 'express-session'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { wipProxy, appConfigHandler } from '@wip/proxy'
-import { initAgent, ask } from './agent.js'
+import { startAgent, ask } from './agent.js'
 import { initAuth, requireAuth, requireAdmin, handleCallback, handleLogout } from './auth.js'
 import bootstrapRoutes from './bootstrap.routes.js'
 import configRoutes from './config.routes.js'
@@ -150,7 +150,7 @@ router.post('/api/ask', async (req, res) => {
     res.json(result)
   } catch (err: any) {
     console.error('Ask error:', err)
-    res.status(500).json({ error: err.message || 'Internal error' })
+    res.status(err.status === 503 ? 503 : 500).json({ error: err.message || 'Internal error' })
   }
 })
 
@@ -199,13 +199,15 @@ app.use(BASE_PATH, router)
 
 async function main() {
   await initAuth()
-  await initAgent()
   app.listen(PORT, () => {
     console.log(`wip-kb backend listening on http://localhost:${PORT}`)
     if (BASE_PATH !== '/') {
       console.log(`  base path: ${BASE_PATH}`)
     }
   })
+  // The askBar's MCP connection comes up in the background, with retries: the
+  // UI and the KB gateway never use MCP, so they must not wait for it.
+  startAgent()
 }
 
 main().catch(err => {

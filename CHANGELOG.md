@@ -3,6 +3,25 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-31 — The KB starts even when the platform's MCP server is not ready (CASE-1001)
+
+- **Fixed:** after a redeploy the KB's server could exit for good. It connected the
+  askBar's MCP client before listening, with no retry, and the MCP server answers 503 while
+  it cannot reach the Registry; one such answer reached `process.exit(1)`, and the
+  container stayed up (Vite) with no server behind it.
+- **Changed:**
+  - The server listens first; the askBar's MCP connection comes up in the background and
+    retries transient failures (503, refused connections, timeouts) with growing delays
+    (1 s → 30 s, indefinitely). A rejected key (401/403) stops and is logged.
+  - The MCP client is published only after it has connected and listed its tools, so
+    "agent ready" is never reported for a dead connection.
+  - While it connects, `/api/ask` answers 503 with the reason; `/api/health` is unchanged
+    and stays independent of the platform (deployable-app contract).
+- **Checked:** on the sandbox with the Registry stopped: the server came up, the health
+  check answered 200, the askBar 503; after the Registry started, the agent connected on
+  its fourth attempt and the askBar answered again.
+- **Tests:** `server/lib/agent-retry.test.ts` (`npm run test:gateway`).
+
 ## 2026-10-30 — The doc view keeps the document's identity in sight
 
 - **Added:** on a long document, once its header scrolls away, a strip fixed to the top of
