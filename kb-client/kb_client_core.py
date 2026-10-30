@@ -224,9 +224,21 @@ def _request(base_url: str, key_file: Path, path: str,
     try:
         resp = urllib.request.urlopen(req, context=_ssl_ctx(), timeout=timeout)
     except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
         raw_err = e.read()
+        if e.code == 404:
+            # On a read, 404 means "not here" (no such case, or a route this
+            # instance lacks) and callers branch on None. On a write it is the
+            # gateway saying the document a patch names does not exist: returning
+            # None there made a status change that changed nothing look like
+            # success. The server's own route-absent answer carries `path`.
+            if method != "GET" and (e.headers.get("Content-Type") or "").startswith("application/json"):
+                try:
+                    body = json.loads(raw_err)
+                except json.JSONDecodeError:
+                    body = None
+                if isinstance(body, dict) and not (body.get("error") == "not_found" and "path" in body):
+                    raise GatewayRefusal(str(body.get("error") or body)) from e
+            return None
         snippet = raw_err[:300].decode("utf-8", errors="replace")
         # A JSON 4xx is the gateway refusing the request for a stated reason (a
         # value WIP rejects, a missing case): the caller's to fix, not a transport

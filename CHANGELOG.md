@@ -3,6 +3,17 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-30 — A patch that matches nothing is reported, not passed off as success
+
+- **Fixed:** a patch whose match names no document (`kb-write.py CASE_RECORD --patch
+  status=… --match case_number=<missing>`) printed `? ()` and exited **0**. The gateway
+  answered 404, and the client read every 404 as "route absent". A write's 404 that
+  carries the gateway's reason now prints `rejected — … not found` and exits 1. Reads
+  are unchanged (a missing case is still "not found"), and so is the server's own
+  route-absent answer. Client 4.10.0.
+- **Tests:** `kb-client/test_write_404.py` (in `npm test`), against a local stand-in
+  gateway.
+
 ## 2026-10-29 — A patch changes exactly the one document its match names (CASE-972)
 
 - **Fixed:** a patch write (`kb-write.py <TYPE> --patch … --match k=v`) could change the
