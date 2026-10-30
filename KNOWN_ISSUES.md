@@ -5,16 +5,6 @@ re-investigate solved problems, "fix" intentional choices, or miss real gaps.
 
 ## Open / deferred
 
-### Doc view: keep the document's identity visible while scrolling
-**Status:** backlog · **Severity:** low
-Requested by Peter, 2026-10-30. On a long document page, the header that says which
-document this is scrolls away, so at the bottom of a long case or paper nothing on
-screen names it. Wanted: a compact strip that stays fixed at the top while scrolling
-and shows the handle (e.g. `CASE-957`), the document title and the document ID. Today
-the only sticky element in the UI is the facet sidebar on the search page
-(`SearchPage.tsx`); `DocPage.tsx` has none. The strip is a reading aid only: no
-buttons that change status, assignment or tags (spec §11).
-
 ### Tooling uploads are held in memory
 **Status:** known · **Severity:** low
 `POST /projects/:app/tooling` reads the whole archive (up to 100 MB) into memory and
@@ -57,6 +47,13 @@ is the current list.
 yet; acceptable for an internal app.
 
 ## Resolved (kept so nobody re-investigates)
+
+### Doc view: the document's identity scrolled away on long pages
+**Status:** resolved 2026-10-30 · Requested by Peter.
+A strip fixed to the top of the viewport (`src/components/DocIdentityStrip.tsx`) appears
+once the doc header has scrolled out of view and shows the handle (`CASE-<n>`,
+`CASE-<n>#<seq>` for a response, else the template), the title and the document ID with a
+copy button. A reading aid only: nothing in it changes the document (spec §11).
 
 - **`app` backfill on dev-test**: run 2026-10-19; a later dry run the same day finds nothing
   left to tag (the remaining untagged documents have no app-YAC author, as on every

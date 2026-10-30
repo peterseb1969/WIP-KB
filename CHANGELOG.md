@@ -3,6 +3,15 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-10-30 — The doc view keeps the document's identity in sight
+
+- **Added:** on a long document, once its header scrolls away, a strip fixed to the top of
+  the window names it: the handle (`CASE-957`, `CASE-957#2` for a response, or the
+  document's type), the title, and the document ID with a copy button. It hides again
+  when the header is back in view. Reading aid only; it changes nothing.
+- **Checked:** in Chrome against the sandbox, on CASE-957 and on a response of it: absent at
+  the top of the page, present at the bottom with the right handle.
+
 ## 2026-10-30 — A patch that matches nothing is reported, not passed off as success
 
 - **Fixed:** a patch whose match names no document (`kb-write.py CASE_RECORD --patch

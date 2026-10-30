@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useDocument, useTemplate } from '@wip/react'
@@ -10,6 +10,7 @@ import { FlagModal, QuickFlagButton } from '../components/FlagModal'
 import { RelationshipGraph } from '../components/RelationshipGraph'
 import { RelationshipPicker } from '../components/RelationshipPicker'
 import { CaseActions } from '../components/CaseActions'
+import { DocIdentityStrip } from '../components/DocIdentityStrip'
 import { TopicPicker } from '../components/TopicPicker'
 import { CaseThread, type ResponseDoc, type ResponseLink } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
@@ -70,6 +71,7 @@ export default function DocPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [flagOpen, setFlagOpen] = useState(false)
+  const headerRef = useRef<HTMLElement>(null)
   const { data: doc, isLoading: docLoading, error: docError } = useDocument(id)
   const { data: template } = useTemplate(doc?.template_id ?? '')
 
@@ -439,8 +441,19 @@ export default function DocPage() {
   const hasEdges = incomingEdges.length > 0 || outgoing.length > 0
   const hasGraph = hasEdges || responseEdges.length > 0
 
+  const displayTitle =
+    (selfParsed.caseNumber !== null ? selfParsed.slug : docLabel(data, '')) || '(untitled)'
+  // The handle the strip leads with: a case's CASE-<n>, a response's
+  // CASE-<n>#<seq>, else the document's type.
+  const responseSeq = typeof data.response_seq === 'number' ? data.response_seq : null
+  const handle =
+    selfParsed.caseNumber !== null
+      ? `CASE-${selfParsed.caseNumber}${doc.template_value === 'CASE_RESPONSE' && responseSeq !== null ? `#${responseSeq}` : ''}`
+      : doc.template_value || 'DOCUMENT'
+
   return (
     <>
+      <DocIdentityStrip headerRef={headerRef} handle={handle} title={displayTitle} documentId={id} />
       {hasGraph && (
         <RelationshipGraph
           selfId={id}
@@ -509,7 +522,7 @@ export default function DocPage() {
             </span>
           </div>
         )}
-        <header className="mb-6">
+        <header ref={headerRef} className="mb-6">
           <div className="mb-3 flex items-center gap-3">
             <button
               type="button"
@@ -537,10 +550,7 @@ export default function DocPage() {
                 CASE-{selfParsed.caseNumber}
               </span>
             )}
-            <span>
-              {(selfParsed.caseNumber !== null ? selfParsed.slug : docLabel(data, '')) ||
-                '(untitled)'}
-            </span>
+            <span>{displayTitle}</span>
           </h1>
           <p className="mt-1.5 text-xs text-text-muted">
             {[
