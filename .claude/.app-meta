@@ -2,6 +2,7 @@
 # regenerate CLAUDE.md. Edit deliberately if the app's metadata changes.
 APP_NAME="KB"
 APP_SLUG="kb"
-DEV_NAMESPACE="dev-kb"
+APP_NAMESPACE="dev-kb"
 PRESET="standard"
+PROFILE="full"
 ROLE_PREFIX="APP-KB"

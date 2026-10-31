@@ -40,7 +40,7 @@ Documentation should be explicit: *"Inactive means retired, not deleted. Retired
 
 **Default, not absolute.** "Nothing ever dies" is the platform **default** (namespace `deletion_mode: "retain"`), not a physical law. Three guarded deviations exist:
 
-- A namespace explicitly flipped to `deletion_mode: "full"` (the `wip` namespace refuses it; `retain` → `full` requires `confirm_enable_deletion=true`) accepts `hard_delete=true` on delete operations across the stores — the record is **permanently removed**, and existing references to it will **not** resolve.
+- A namespace explicitly flipped to `deletion_mode: "full"` (the `wip` namespace refuses it; `retain` → `full` requires `confirm_enable_deletion=true`) accepts `hard_delete=true` on delete operations across the stores — the record is **permanently removed**. A document that other documents still reference (in any namespace, of any version or status) is refused with `error_code: invalid_state`, `details.rule: "referenced"`, and `details.referrers` lists them; documents hard-deleted in the same request do not count. `force=true` deletes anyway, and those references then **no longer resolve**.
 - Independent of `deletion_mode`: terms in **mutable terminologies** and **binary files** are hard-deletable.
 - Privileged and internal: a trusted-service rollback primitive (wip-admins / wip-services only) can hard-delete a just-reserved, uncommitted entry, bypassing the `deletion_mode` gate — crash-recovery cleanup, not an agent-facing verb.
 
@@ -206,6 +206,21 @@ This is a deliberate exception to PoNIF #2 ("Template Versioning — Update Does
 **Sensible default:** `template.versioned` defaults to `true` — the conservative default that preserves history. Code reading documents should check `template.versioned` (or equivalently, that `get_document_versions` returns more than one row) before assuming history exists. If you need history on a relationship, build the edge type with `versioned: true`. The flag is immutable after creation, so the choice is permanent — pick deliberately.
 
 See `docs/design/document-relationships.md` §"Versioning" for the rationale and the implementation contract.
+
+### 9. Closed by Default — Referencing Another Namespace Needs Read
+
+**What it does:** A reference from one namespace into another passes two gates. The referencing namespace's `isolation_mode` decides what it may reference: `open` (the default) means any namespace, `strict` means only itself and its `allowed_external_refs`. The referenced namespace's `inbound_references` decides who may reference it: `closed` (the default for every namespace) accepts a reference only from a writer whose key can read it, and `open` accepts any writer. `wip` is always open. Only references a write adds are checked; references the previous version already held carry over.
+
+**Why it's powerful:** A namespace's data is no longer reachable merely because someone can write somewhere else. An app with a narrowly scoped key cannot point its documents at another app's entities unless it was given read on them, and a namespace that wants to be a shared library opens itself explicitly.
+
+**Why it's non-intuitive:** The same reference succeeds with one key and fails with another. And a refusal looks exactly like a reference whose target does not exist: a closed namespace does not confirm its contents to a writer who cannot read it, so the error never says "permission".
+
+**What goes wrong:**
+
+- An app developer tests with an admin key, which passes every gate, and the deployed app's scoped key then fails on every cross-namespace reference with "not found".
+- Debugging "not found" by checking that the target exists (with an admin key) finds it, and the real cause stays hidden.
+
+**Sensible default:** Develop with the same scoped key the app will run with. When a cross-namespace reference reports "not found" and the target exists, give the writing key read on the target's namespace, or open that namespace's `inbound_references` if it is meant to be a shared library.
 
 ---
 

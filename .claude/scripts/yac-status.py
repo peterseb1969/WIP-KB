@@ -84,6 +84,12 @@ WIP_COMMAND_RE = re.compile(r"^\s*/?(wip-[a-z][\w-]*)\b\s*(.*)$", re.IGNORECASE 
 CASE_VERB_RE = re.compile(r"(\w+)\s+(?:CASE-)?(\d+)\b", re.IGNORECASE)
 # A first argument shown beside the command name: one short word, no prose.
 SHOWN_ARG_RE = re.compile(r"[A-Za-z][\w.-]{0,23}")
+# The shell tool's name per harness: Claude Code, Qwen Code. Both send the
+# command line as tool_input.command.
+SHELL_TOOLS = ("Bash", "run_shell_command")
+# The skill tool's name per harness: Claude Code, Qwen Code. Both send the
+# skill's name as tool_input.skill; only Claude Code also sends its args.
+SKILL_TOOLS = ("Skill", "skill")
 PATCH_RE = re.compile(
     r"CASE_RECORD\s+--patch\s+status=(\w+)\s+--match\s+case_number=(?:CASE-)?(\d+)"
 )
@@ -156,20 +162,31 @@ def handle_hook(payload: dict) -> None:
     cdir = claude_dir(payload)
     event = payload.get("hook_event_name")
     if event == "UserPromptSubmit":
-        activity = wip_activity(payload.get("prompt") or "")
+        prompt = payload.get("prompt") or ""
+        if not prompt.strip():
+            # Qwen Code also fires this hook with an empty prompt on its own
+            # turns; that says nothing about what the YAC is working on.
+            return
+        activity = wip_activity(prompt)
+        if not activity:
+            # Qwen Code sends a slash command expanded into the command's
+            # text, with the typed command appended as the last line.
+            last = prompt.rstrip().rsplit("\n", 1)[-1].strip()
+            if last.startswith("/"):
+                activity = wip_activity(last)
         if activity:
             write_activity(cdir, activity)
         else:
             # Not a /wip-* command: whatever the line showed is no longer
             # what this YAC is doing.
             (cdir / ACTIVITY_FILE).unlink(missing_ok=True)
-    elif event == "PreToolUse" and payload.get("tool_name") == "Skill":
+    elif event == "PreToolUse" and payload.get("tool_name") in SKILL_TOOLS:
         tool_input = payload.get("tool_input") or {}
         skill = (tool_input.get("skill") or "").lstrip("/")
         activity = wip_activity(f"/{skill} {tool_input.get('args') or ''}")
         if activity:
             write_activity(cdir, activity)
-    elif event == "PostToolUse" and payload.get("tool_name") == "Bash":
+    elif event == "PostToolUse" and payload.get("tool_name") in SHELL_TOOLS:
         command = (payload.get("tool_input") or {}).get("command") or ""
         patch = PATCH_RE.search(command)
         if patch and patch.group(1) in DONE_LABELS:
@@ -183,15 +200,27 @@ def age(seconds: int) -> str:
 
 
 def context_usage(payload: dict) -> tuple[float | None, int | None, int | None]:
-    """(percent used, tokens used, window size) from the status-line payload."""
+    """(percent used, tokens used, window size) from the status-line payload.
+
+    The tokens must be what the context holds NOW, because the slim stop rule
+    compares them with an absolute limit. `total_input_tokens` is not that in
+    every harness: Qwen Code sends the sum over every request of the session
+    (500k at 6% full), so it is the last resort. In order: `current_usage`
+    when it is a number (Qwen Code), else the harness's own fill percentage
+    times the window size (Claude Code), else `total_input_tokens`.
+    """
     window = payload.get("context_window") or {}
     used = window.get("used_percentage")
-    tokens = window.get("total_input_tokens")
     size = window.get("context_window_size")
+    current = window.get("current_usage")
+    if isinstance(current, (int, float)) and not isinstance(current, bool):
+        tokens = int(current)
+    elif used is not None and size:
+        tokens = int(used * size / 100)
+    else:
+        tokens = window.get("total_input_tokens")
     if used is None and tokens and size:
         used = tokens * 100 / size
-    if tokens is None and used is not None and size:
-        tokens = int(used * size / 100)
     return used, tokens, size
 
 
@@ -215,7 +244,10 @@ def context_part(payload: dict, cdir: Path) -> str:
         part += f" ({tokens // 1000}k/{size // 1000}k)"
     if context_warning(cdir, used, tokens):
         part = f"{RED}{part}{RESET}"
-    return part
+    # The profile sets the warning threshold; showing it makes a profile lost
+    # to a refresh visible instead of a silently different threshold.
+    profile = app_profile(cdir)
+    return f"{profile} {part}" if profile else part
 
 
 def write_context_file(payload: dict, cdir: Path) -> None:

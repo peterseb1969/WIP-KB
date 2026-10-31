@@ -1,9 +1,9 @@
 <!-- card-sources: what this card condenses; checked by components/mcp-server/tests/test_card_drift.py
 docs/Vision.md sha256:d48669c11fbfe408 reviewed:a66e110f
-wip://ponifs sha256:5c8bc104858a9cb9 reviewed:ea985986
+wip://ponifs sha256:ce7da4c122478465 reviewed:c4423374
 wip://development-guide sha256:d44cd305a3b84d3e reviewed:a66e110f
-scaffold/templates/claude-md/app.md sha256:6d9732fc394e514e reviewed:ea985986
-docs/slash-commands/app-builder/wip-design-model.md sha256:3485f5c0cd3f136b reviewed:a66e110f
+scaffold/templates/claude-md/app.md sha256:ce6f1c0aa58c6a8b reviewed:70de3aa3
+docs/slash-commands/app-builder/wip-design-model.md sha256:88c3300b894dc3ca reviewed:809f9059
 -->
 # WIP core card — reread on every wake
 
@@ -33,10 +33,10 @@ timestamps come from `date`, your session ID from `.claude/.session-id`, counts 
 from WIP.
 
 ## Namespaces
-Develop in your dev namespace (named in CLAUDE.md under "Dev Namespace"). MCP calls run
-with an admin key that spans namespaces: always pass `namespace=` explicitly.
+Work in your app's namespace (CLAUDE.md, "Namespace"), the same name on every install. MCP
+calls run with an admin key that spans namespaces: always pass `namespace=` explicitly.
 
-## The eight PoNIFs (WIP behaves unconventionally here — on purpose)
+## The nine PoNIFs (WIP behaves unconventionally here — on purpose)
 1. Nothing ever dies: inactive = retired, still resolves for existing references.
 2. Re-creating a template makes a new version; the old one stays active — deactivate it.
 3. Identity fields decide create-vs-update. No timestamps or per-run data in them;
@@ -46,6 +46,8 @@ with an admin key that spans namespaces: always pass `namespace=` explicitly.
 6. "Latest active" template lookups are cached ~5 s — pass template_version explicitly.
 7. Edge types are templates with usage: relationship — different rules; check `usage`.
 8. A template with versioned: false (typically an edge type) overwrites in place — no history.
+9. Another namespace is closed by default: referencing it needs read on it, and a refusal
+   reads as "not found". References a document already holds carry over.
 
 ## WIP's principles, in one line each
 Prefer deactivation over deletion · references must resolve, and any synonym works like

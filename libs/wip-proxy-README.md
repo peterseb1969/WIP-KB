@@ -19,16 +19,44 @@ app.use(wipProxy({
 }))
 
 // Or mount at /wip — frontend uses @wip/client with baseUrl: '/wip'
-app.use('/wip', wipProxy({
+const proxy = wipProxy({
   baseUrl: process.env.WIP_BASE_URL || 'https://localhost:8443',
-  apiKey: process.env.WIP_API_KEY,
+  apiKey: process.env.WIP_API_KEY,          // set by wip-deploy
+  apiKeyFile: process.env.WIP_API_KEY_FILE, // the rotation-aware source, when run outside it
+  onMissingKey: 'unavailable',
+})
+app.use('/wip', proxy)
+```
+
+### A missing key costs `/wip`, not the app
+
+`wipProxy()` is usually called while the server module loads. With the
+default `onMissingKey: 'throw'`, a configuration that yields no key stops the
+process before `listen()`, and the app's health endpoint goes with it.
+With `onMissingKey: 'unavailable'` the proxy's routes answer **503**
+`{"error": <reason>, "error_code": "wip_proxy_unavailable"}` instead, one
+warning is logged at startup, and the rest of the app serves normally. The
+reason is the exact message the throw would carry: which file failed, and
+that no inline key was set.
+
+The returned router carries the same reason, so the app can show it in its
+runtime config:
+
+```typescript
+router.get('/api/app-config', appConfigHandler({
+  namespace: process.env.WIP_NAMESPACE ?? null,
+  wip_proxy: proxy.unavailableReason ? 'unavailable' : 'available',
 }))
 ```
+
+Pass an unset source as `undefined` (as `process.env.X` already is), not
+`process.env.X || ''`: an empty string is no key, so `apiKey: process.env.WIP_API_KEY || ''`
+looks like a fallback and gives none.
 
 ## What It Does
 
 - **API proxy:** `GET|POST|PUT|DELETE /api/{service}/*` forwarded to WIP with API key injected
-- **File proxy:** `GET /files/:fileId/content` proxies file downloads (resolves MinIO URLs server-side, following redirects so internal storage URLs never reach the browser)
+- **File proxy:** `GET /files/:fileId/content` proxies file downloads (resolves object-storage URLs server-side, following redirects so internal storage URLs never reach the browser)
 - **Streaming both directions:** request bodies pipe into the upstream and upstream responses pipe back out, with backpressure — proxy memory is O(1) in payload size, so multi-GB archive uploads/downloads pass through flat. Built on `node:http` deliberately: a `fetch`-based streamed request body still buffers whole inside undici (its backpressure never reaches the source socket)
 - **Header forwarding:** Propagates `content-type`, `content-disposition`, `content-length` from upstream
 - **Error handling:** WIP's own responses — including 4xx/5xx — are forwarded verbatim (status, headers, body). Proxy-level failures to reach WIP return `502` with structured error JSON when nothing has been sent yet; a failure mid-stream destroys the connection (a truncated transfer is the honest signal once bytes have flowed). API-route redirects are forwarded to the client, not followed — a streamed request body cannot be replayed on a 307
@@ -65,6 +93,54 @@ app.use(express.json())             // parsers after, or scoped to app routes
 | `extraHeaders` | `Record<string, string>` | `{}` | Additional headers forwarded upstream |
 | `forwardIdentity` | `boolean` | `false` | Forward `X-WIP-User`, `X-WIP-Groups`, `X-WIP-Auth-Method` from the incoming request |
 | `defaultNamespace` | `string` | — | Namespace appended to the documents query endpoint when the caller hasn't scoped it (guards the multi-namespace-key silent-zero-rows trap) |
+| `onMissingKey` | `'throw' \| 'unavailable'` | `'throw'` | When no source yields a key: throw at construction, or answer 503 on the proxy's routes (see *A missing key costs `/wip`, not the app*) |
+
+## Other Exports
+
+Beyond `wipProxy`, the package exports four building blocks:
+
+### `appConfigHandler(entries)`
+
+Express handler serving deploy-time values to the browser as JSON (the
+runtime app-config pattern — client-visible values fetched at runtime, not
+baked into the build). Takes an `AppConfigEntries` object, or a function
+returning one to re-read values per request; responds with
+`Cache-Control: no-store` so a redeploy's new values are never pinned by a
+CDN or browser.
+
+**The response is an allowlist by construction** — exactly the entries you
+pass, nothing else. Never spread `process.env` into it (the same env holds
+`WIP_API_KEY`) and never include secrets: this JSON is served to every
+browser that can reach the app.
+
+```typescript
+app.get('/app-config', appConfigHandler({
+  wipNamespace: process.env.WIP_NAMESPACE ?? null,
+  appVersion: process.env.APP_VERSION ?? null,
+}))
+```
+
+### `resolveApiKey(options)`
+
+The key-resolution used by `wipProxy` itself, exported for apps that need
+the upstream key outside the proxy (e.g. a server-side script sharing the
+proxy's config). Prefers `apiKeyFile` (read once at startup — the
+rotation-aware source); a missing/unreadable/empty file falls back to the
+inline `apiKey` with a startup warning. Throws, naming every attempted
+source, when nothing yields a key — a misconfigured proxy fails loudly at
+construction instead of silently 401-ing every upstream call.
+
+### `WIP_API_PREFIXES`
+
+The list of `/api/<service>` route prefixes the proxy forwards (the same
+six listed under *Proxied Services*). Useful for mounting your own
+middleware around exactly the proxied surface.
+
+### `prefixPattern(prefix)`
+
+Anchored `RegExp` for a service prefix and everything under it —
+`/api/def-store` and `/api/def-store/terminologies` match,
+`/api/def-store-evil` does not. Exported for route-matching tests.
 
 ## Frontend Configuration
 

@@ -78,6 +78,55 @@ You can amend a preset with `--add <module>` and `--remove <module>`. Apps (e.g.
 
 > **Legacy paths.** v1's `scripts/setup.sh` and `scripts/setup-wip.sh` were retired and **deleted**; only `wip-deploy` ships today. Older external docs may still reference them — ignore those references and use `wip-deploy` for all installs.
 
+### Upgrading to a new tag
+
+The install's saved spec (`~/.wip-deploy/<name>/deployment.deployer-state`) records which image tags it runs. Change it only through the commands below, never by editing the file.
+
+**1. See what runs, and why.** `images` is read-only:
+
+```bash
+wip-deploy images --name wip
+```
+
+It prints each service's image, and in SOURCE the rule that decided its tag:
+
+| SOURCE | Meaning |
+|---|---|
+| `pin` | a per-service tag: `--image-tag NAME=TAG`, `add-app --tag` or `app-deploy --tag` |
+| `base` | the install-wide `--tag` |
+| `manifest` | the tag in the component's or app's manifest (used when no `--tag` is set) |
+| `latest` | nothing set a tag |
+| `upstream` | an infrastructure image's own version (mongo, postgres, dex…); the install-wide tag never changes it |
+| `source` | dev target only: built locally as `<name>:dev`; no tag applies |
+
+**2. Preview the roll.** Add the new tag. Nothing changes yet:
+
+```bash
+wip-deploy images --name wip --tag 20261101a
+```
+
+Each row says whether it moves or stays. Apps that only the new tag would move are flagged ⚠. Apps are built and tagged in their own repos, so a platform tag usually doesn't exist for them.
+
+**3. Roll the platform.**
+
+```bash
+wip-deploy redeploy --name wip --tag 20261101a
+```
+
+`redeploy` writes the new tag into the saved spec, re-renders, and recreates only the services whose rendered definition changed. Data volumes and secrets are kept.
+
+**Apps don't move with the platform.** Each enabled app the new tag would otherwise carry is pinned to the image it runs today, and the command names it. To move an app as well, pin it in the same call (`--image-tag react-console=20261101b`). To move one app later on its own, use:
+
+```bash
+wip-deploy app-deploy react-console --tag 20261101b --name wip
+```
+
+`app-deploy` renders the whole spec but applies only that app, plus any service whose rendered definition changed. To hotfix one platform service on top of a roll, add `--image-tag registry=20261102-fix`.
+
+**Update the deployer first.** `redeploy` renders the *whole* spec from the deployer checkout it runs from, not just the tag. Update that checkout to the release you are rolling to before running it. If you roll to new images while the checkout is old, or update the checkout while keeping old images, the services can expect a configuration the images don't support.
+
+**Dev installs.** On the dev target, every service built from local source runs `<name>:dev` and ignores tags (SOURCE `source`). A tag roll reaches only images pulled from a registry. To take new code, update the source checkout instead.
+
 ---
 
 ## 2. Deployment Tiers
@@ -143,6 +192,8 @@ Networking is where most operator failures happen. The three callouts below prev
 ### 3.1 Critical: `--hostname` is the OIDC issuer
 
 > **The hostname and HTTPS port you install with become Dex's issuer URL, and every token's `iss` claim. Choose them once, as the name browsers will actually use.**
+>
+> That is why `wip-deploy install` requires `--hostname` for `--target compose` and `--target k8s`: there is no default to fall back on silently. Only `--target dev` defaults it, to `localhost`. The preview verbs (`validate`, `show-spec`, `render`) still use the placeholder `wip.local` when it is omitted.
 >
 > `wip-deploy` derives all of a service's token-validation settings from that one value, so they cannot drift apart. Never set them by hand: every apply re-renders them.
 >
@@ -269,7 +320,7 @@ Several keys are more comfortably declared in a file than in repeated
 `--api-key` JSON — reviewable and diffable deployer input:
 
 ```bash
-wip-deploy install --api-keys-file keys.yaml
+wip-deploy install --hostname wip.example.com --api-keys-file keys.yaml
 # keys.yaml: a list under a top-level `keys:` (or a bare list) —
 # each entry {name, namespaces, grants, owner?, groups?}.
 # File entries merge with any --api-key values.
@@ -326,6 +377,21 @@ API keys carry a `namespaces` field that scopes their access. The rule is:
 - **Privileged groups** — `wip-admins` and `wip-services` — are exempt from namespace scoping. A key in either group has access across all namespaces.
 - **Every other key** must declare `namespaces` explicitly. Non-privileged keys without a namespace scope receive 403 on every request.
 - **Single-namespace keys** get a convenience: omit the `namespace` query parameter and the server derives it from the key's scope. Multi-namespace keys must always pass `namespace` explicitly.
+
+**Giving an app another namespace on one install.** Each app runs with a key of its own, scoped to the namespaces its manifest declares (`spec.namespaces`, `spec.namespace_access`). Adding a namespace to that scope is an operator decision for one install, not a manifest edit:
+
+```bash
+wip-deploy app-namespace add wip-kb kb-research --description "Research corpus"   # owned: reserved for the app, admin on it
+wip-deploy app-namespace add dev-kb library --access write                       # used: read or write on a namespace it does not own
+wip-deploy app-namespace list wip-kb                                               # manifest + this install + wip
+wip-deploy app-namespace remove wip-kb kb-research
+```
+
+- The addition is kept in the install's saved spec, so `redeploy` keeps it. Other installs and the app's manifest are untouched.
+- Nothing restarts: the app keeps its key, and its scope changes in the key file, which every service re-reads within about 10 seconds (about a minute on k8s, while the Secret propagates). The Registry reads the reservation on the next upsert.
+- An owned namespace may be created by the app's own key, with the settings given here (`--setting deletion_mode=full`, `--setting isolation_mode=strict`, `--setting allowed_external_refs=a,b`, `--setting id_config=<json>`). The app may send its own description; any other setting must match. Or create it yourself with the master key and let the app use it.
+- `remove` takes the namespace away from the app at once, even while it holds the app's data. The namespace and its data stay; deleting them is a separate admin action.
+- An app holding the master key (`privileged_key`) takes no additions, and a namespace its manifest already declares cannot be added again.
 
 ### 4.6 External identity providers (Google, Okta, …)
 
@@ -436,9 +502,42 @@ wip-deploy user remove e2e --name <install>
   `remove` it and `add` it again.
 - `remove` refuses to delete the last `wip-admins` user, and `set-groups`
   refuses to take `wip-admins` away from it. Add another admin first.
-- `user add`, `user set-groups` and `user remove` re-render the install's files from the
-  current repo but apply only to Dex: Dex is recreated with the new user
-  set, and every other container keeps running.
+- `user add`, `user set-groups`, `user import` and `user remove` re-render the install's
+  files from the current repo but apply only to Dex: Dex is recreated with
+  the new user set, and every other container keeps running.
+
+**Users who already have a password.** Users created by hand in a rendered
+Dex `config.yaml` are lost on the next re-render. To keep them, and their
+passwords, declare them with their existing bcrypt hashes. The hash is
+stored as `dex-password-<username>.bcrypt`; no password is generated or
+printed, and `user list` shows the user as `supplied hash`.
+
+```bash
+# One user, from a file holding the hash ('-' reads stdin)
+wip-deploy user add alice --email alice@example.com --group wip-editors \
+    --password-hash-file alice.hash --name <install>
+
+# Many users in one apply: from a saved Dex config (its staticPasswords) ...
+wip-deploy user import dex-config-backup.yaml --groups-file groups.yaml \
+    --group wip-viewers --name <install> --dry-run
+
+# ... or from a CSV file with username,email,hash and an optional groups column
+wip-deploy user import users.csv --group wip-viewers --name <install>
+```
+
+- A Dex config carries no groups. Each user's groups come from, in order:
+  the CSV `groups` column (comma-separated, quoted), its entry in
+  `--groups-file` (a YAML mapping such as `alice: [wip-editors, wip-admins]`),
+  then `--group`. A user with none refuses the import.
+- A user already declared on the install is reported and left as it is.
+  Any other problem (a value that is not a bcrypt hash, an email another user
+  holds, a repeated username) refuses the whole import before anything
+  changes. `--dry-run` lists what would be declared.
+- The install declares each user's Dex `userID` as `<username>-001`. An
+  imported entry with a different `userID` is warned about: its token
+  subject changes.
+- The hash has to stay in the secret store. An apply that finds it missing
+  stops and names the user; the deployer never invents one.
 
 Don't hand-edit the rendered Dex `config.yaml` to add users: it is output,
 and the next render overwrites it. Don't hand-edit `auth.users` in the
@@ -589,6 +688,9 @@ metadata:
   category: optional
 
 spec:
+  # The admin console is the one app holding the master key; every other app
+  # gets a key of its own (spec.namespaces / spec.namespace_access).
+  privileged_key: true
   image:
     name: react-console
     tag: v1.2.2
@@ -729,7 +831,7 @@ Do **not** rely on Caddy stripping the prefix. Do **not** hardcode paths.
 | `VITE_BASE_PATH` | Build time | `--build-arg` in Dockerfile |
 | `APP_BASE_PATH` | Runtime | env from manifest |
 | `WIP_BASE_URL` | Runtime | env from manifest (`from_component: router`) |
-| `WIP_API_KEY` | Runtime | env from manifest (`from_secret: api-key`) |
+| `WIP_API_KEY` | Runtime | set by the deployer from the app's own key (`app-<name>`, scoped by `spec.namespaces` / `spec.namespace_access`); only a `privileged_key` app declares `from_secret: api-key` |
 | `OIDC_ISSUER` | Runtime | env (the *external* URL — `https://<hostname>:8443/dex`) |
 
 ### 6.4 Common app failures

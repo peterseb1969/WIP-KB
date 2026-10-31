@@ -1,10 +1,10 @@
 <!-- card-sources: what this card condenses; checked by components/mcp-server/tests/test_card_drift.py
-wip://data-model sha256:bffb8895a216ea4c reviewed:a66e110f
-wip://conventions sha256:87ba62a4fe264d2c reviewed:a66e110f
-docs/WIP_PoNIFs.md sha256:99346d0d8e8c7605 reviewed:ea985986
+wip://data-model sha256:add49672e871c9bb reviewed:c4423374
+wip://conventions sha256:fe50c05c4b8902e7 reviewed:9f8f08fb
+docs/WIP_PoNIFs.md sha256:52b14c6b845fc8b0 reviewed:d1653035
 docs/design/ontology-support.md sha256:06666e3c8f3a3cc1 reviewed:ea985986
-docs/slash-commands/app-builder/wip-implement.md sha256:7c84315b0d4fb4b0 reviewed:a66e110f
-docs/slash-commands/app-builder/wip-design-model.md sha256:3485f5c0cd3f136b reviewed:a66e110f
+docs/slash-commands/app-builder/wip-implement.md sha256:1afef1d1999621a1 reviewed:809f9059
+docs/slash-commands/app-builder/wip-design-model.md sha256:88c3300b894dc3ca reviewed:809f9059
 -->
 # WIP model card — Phase 2–3: designing and implementing the data model
 
@@ -45,7 +45,7 @@ docs/slash-commands/app-builder/wip-design-model.md sha256:3485f5c0cd3f136b revi
 ## Creation order
 - namespace (`create_namespace` / `upsert_namespace`) → terminologies → terms → (term relations) → templates, referenced before referencing → documents.
 - Why: a template's references (terminology_ref, target_templates, …) are resolved when the template is created — an unresolvable one fails the create. Documents are validated against active terms and existing referenced documents at write time.
-- Model in your dev namespace (named in CLAUDE.md). MCP tools run with an admin key that spans namespaces: pass `namespace=` on every call.
+- Model in your app's namespace (named in CLAUDE.md). MCP tools run with an admin key that spans namespaces: pass `namespace=` on every call.
 
 ## Draft mode and activation
 - Create templates with `status: "draft"` to skip reference validation — for circular dependencies or order-independent creation.
@@ -65,7 +65,7 @@ docs/slash-commands/app-builder/wip-design-model.md sha256:3485f5c0cd3f136b revi
 - It needs two `reference_type: document` fields named exactly `source_ref` and `target_ref`, plus non-empty template-level `source_templates` and `target_templates`.
 - Do not set `target_templates` on `source_ref`/`target_ref` — it is derived from the template-level lists and discarded.
 - Properties of the interaction itself (role, quantity) are further fields.
-- Source and target documents must be in the edge's own namespace (`cross_namespace_relationship`); archived endpoints are rejected. Across namespaces use a plain document reference field instead.
+- An edge lives in its source's namespace (`cross_namespace_relationship` otherwise); its target may be in another namespace the reference gates allow. Archived endpoints are rejected.
 - `versioned: false` (any template with identity fields; edges are the typical use) = updates overwrite in place, documents stay at version 1, no history. It requires non-empty `identity_fields`; declare them explicitly, e.g. `[source_ref, target_ref]` (`create_edge_type` fills that in when omitted; `create_template` does not). Add a third field (e.g. `role`) to allow several edges between one pair.
 - `usage` and `versioned` are immutable after creation — choose deliberately.
 - To let new templates take part, widen with `add_edge_type_endpoints` — never delete and recreate (strands existing edges). Endpoints cannot be removed.
@@ -82,7 +82,7 @@ docs/slash-commands/app-builder/wip-design-model.md sha256:3485f5c0cd3f136b revi
 ## Addressing terms and other entities
 - A term identifier is exactly one of: the canonical UUID; `ns:terminology:value`; or the field form (a `terminology` parameter plus the raw value, never colon-parsed).
 - The 2-part `TERMINOLOGY:VALUE` shorthand is rejected (422) on every term endpoint. Prefer the field form.
-- Other entities: a bare value always resolves in your OWN namespace; `NS:VALUE` is the only value form that crosses namespaces; a UUID crosses freely. Permission (`allowed_external_refs`) does not make a bare value cross — write `"kb:KB_TOPIC"`.
+- Other entities: a bare value resolves in your OWN namespace; `NS:VALUE` is the only value form that crosses (write `"kb:KB_TOPIC"`); a UUID crosses freely. Referencing another namespace needs read on it (closed by default); a refusal reads as "not found".
 - In documents submit the term's value or name; WIP stores both value and term_id. Inactive terms are rejected in new documents.
 
 ## Bulk results — 200 OK always

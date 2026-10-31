@@ -46,13 +46,14 @@ The contract has two halves — what the **source repo** must look like, and wha
 
 ```yaml
 spec:
+  namespaces:                              # the namespaces your app owns (see below)
+    - {role: main, name: <your-namespace>, env: WIP_NAMESPACE}
   ports:
     - {name: http, container_port: <your-express-port>}
     - {name: dev,  container_port: <your-vite-port>}   # Vite, used with --app-source
   env:
     required:
       - {name: WIP_BASE_URL,   source: {from_component: router}}
-      - {name: WIP_API_KEY,    source: {from_secret: api-key}}
       - {name: PORT,           source: {literal: "<your-express-port>"}}
       - {name: APP_BASE_PATH,  source: {literal: "/apps/<name>"}}
       - {name: NODE_ENV,       source: {literal: "production"}}
@@ -120,7 +121,7 @@ The contract is small. The failure signatures when you skip a step are specific 
 
 ### Skip 5: no `MCP_URL` env declared
 
-**Failure (apps using MCP):** App boots; `agent.ts` falls back to `stdio` transport, tries to spawn `python -m wip_mcp` inside the container. Container is `node:20-alpine` — no Python. Crash loop with `ECONNREFUSED` after the spawn fails.
+**Failure (apps using MCP):** App boots; `agent.ts` falls back to `stdio` transport, tries to spawn `python -m wip_mcp` inside the container. Container is `node:24-alpine` — no Python. Crash loop with `ECONNREFUSED` after the spawn fails.
 
 **Symptom signature:** container restart-loops. Logs show `MCP client error: ECONNREFUSED` or `python: command not found`. The app's chat / agent surface is dead even though everything else works.
 
@@ -209,19 +210,52 @@ These are platform-side guarantees the contract assumes. They're invariants toda
   ```yaml
   spec:
     nats_client:
-      roles: [ingest-producer]   # and/or event-subscriber, replay-subscriber, nats-monitor
+      roles: [ingest-producer]   # and/or nats-monitor; event-subscriber, replay-subscriber need privileged_key
   ```
 
   The deployer generates the user's password and injects `NATS_URL`, `NATS_USER` and `NATS_PASSWORD`. Connect with them, and set the reply-inbox prefix `_INBOX_<NATS_USER>`: the server lets each user receive replies only on its own prefix, so JetStream publish acks and pulls need it. Raw NATS subject lists in an app manifest are rejected; they are for platform components.
 
   - **`ingest-producer`** may publish to `wip.ingest.{terminologies,terms,templates,documents}.<action>`. **Every message carries your WIP API key in its `X-API-Key` NATS header.** ingest-gateway writes the item with exactly that key, so your key's namespace grants apply. A message without the header is refused (a 401 result) and nothing is written. Use a key scoped to your namespace: the message, header included, stays in the ingest stream until the stream's size limits drop it. Reading the results stream is not part of the role, because it carries every producer's outcomes. To learn what happened to your items, ask ingest-gateway over HTTP with the same key: `GET /api/ingest-gateway/results/{correlation_id}`, or `POST /api/ingest-gateway/results/lookup` with `{"correlation_ids": [...]}` for several. You see only the outcomes of items submitted with your key; a 404 or `not_found` means not processed yet, never submitted under that key, or already dropped by the results stream's size limits, so poll soon after submitting. Wrap each message as `{"correlation_id": ..., "payload": ...}` so you know the ID to ask for.
-  - **`event-subscriber`** may run one durable consumer on `WIP_EVENTS`, **named after your app**, and use no other stream. It receives change events from **every** namespace, so treat it as an admin-level read.
-  - **`replay-subscriber`** receives replayed events with a plain subscription to `wip.replay.<session>.>`. Subscribe before starting the replay. There is no JetStream access to replay streams, so events published while you are disconnected are missed.
+  - **`event-subscriber`** may run one durable consumer on `WIP_EVENTS`, **named after your app**, and use no other stream. It receives change events from **every** namespace (event subjects carry no namespace to scope a subscription by), so only an app declaring `privileged_key: true` may declare it; the deployer refuses it for any other app. An app reads its own data through the WIP API and reporting-sync, which its key's namespace grants scope.
+  - **`replay-subscriber`** receives replayed events with a plain subscription to `wip.replay.<session>.>`. Subscribe before starting the replay. There is no JetStream access to replay streams, so events published while you are disconnected are missed. Like `event-subscriber` it sees every namespace, so it needs `privileged_key: true`.
   - **`nats-monitor`** reads JetStream listings for a status page: account info, the stream list (configs and state) and every stream's consumer list (names and pending counts). It cannot read message contents or change any stream or consumer. react-console uses it.
 
 One **non-guarantee** belongs in the same list, because apps have assumed its opposite:
 
 - **Registered reporting views are not archived — apps own them.** WIP backup/restore carries MongoDB state only; registered SQL views (`POST /api/reporting-sync/namespace/{ns}/views`) live in PostgreSQL bookkeeping and come back **missing after every restore, by design**. An app that queries a registered view must tolerate its absence and re-register it idempotently (re-registering an existing name replaces the definition): at bootstrap, at startup, and again when a query fails on a missing relation. Registration validates the SQL against real reporting tables, which exist only after reporting-sync has synced the namespace — so a failure right after bootstrap or restore is a retry, not an error. The bootstrap scaffold ships this pattern as `server/seed/views/` + `ensureRegisteredViews()` / `ensureRegisteredViewsWithRetry()` in `bootstrap.server.ts.template`. Views registered by hand outside any app bootstrap are ephemeral: nothing recreates them after a restore.
+  The scaffold seeds an inert example, `templates/bootstrap/seed/views/_00_example.json` (`_`-prefixed files are skipped): write its SQL against the unqualified entity view `doc_<template_value>`, because it runs in the namespace's own schema and the namespace name differs between dev and deployed installs. Registering needs namespace **admin** on the app's namespace, or a `wip-admins` / `wip-services` key; the deployment's key qualifies, a `write`-granted runtime key does not.
+
+**Your app runs with a key of its own, never the install's master key.** The deployer derives one config-file key per enabled app from its manifest and sets `WIP_API_KEY` from it; do not declare `WIP_API_KEY` yourself, and a manifest naming `from_secret: api-key` is refused. The key holds:
+
+- `admin` on every namespace in `spec.namespaces` (your bootstrap creates them and registers their views);
+- `read` or `write` on each namespace you list under `spec.namespace_access`, for namespaces another app owns or a shared one:
+
+  ```yaml
+  spec:
+    namespace_access:
+      - {namespace: library, permission: write}   # read is the default
+  ```
+
+- `read` on `wip`, the platform's shared vocabularies.
+
+Nothing else: no namespace you have not declared, no platform-admin route. Free-form SQL (`POST /api/reporting-sync/query`, the MCP `run_report_query` tool) works with your key over exactly the namespaces it can read; anything else fails with `permission denied`. Creating namespaces outside your reservations needs a platform admin key, so an app cannot do it. Calls through the platform MCP server act with your key too. Only an admin console declaring `privileged_key: true` (React Console) holds the master key. Your app never creates a namespace that is not reserved for it; when an install needs it to own or use another one (a new corpus, a shared library), the operator adds it with `wip-deploy app-namespace add`, and your key reaches it within seconds, without a restart. On create, the namespace upsert accepts any `description` you send; every other setting must match the reservation. The key rotates with `wip-deploy rotate-key app-<name>`.
+
+The app also owns its **namespace settings**, and declares them in its manifest, not in its seeds:
+
+  ```yaml
+  spec:
+    namespaces:
+      - role: main            # the role the seeds use (server/seed/namespaces.json)
+        name: myapp           # the namespace on this install
+        env: WIP_NAMESPACE    # the deployer sets it to `name`; don't also set it under env
+        settings:             # only what differs from the defaults
+          isolation_mode: strict
+          id_config: {documents: {algorithm: prefixed, prefix: "DOC-", pad: 6}}
+  ```
+
+  `settings` takes `description`, `isolation_mode`, `allowed_external_refs` (namespace names on the install), `inbound_references` (`closed` by default: other namespaces' writers need read on it; `open` admits any writer), `id_config` and `deletion_mode`. One namespace must have role `main`, and a namespace has one owning app on an install.
+
+  The deployer renders every enabled app's declarations as **namespace reservations** the Registry reads (it refuses two apps reserving one namespace, and two reservations claiming one ID prefix). With a reservation, a key holding `admin` on the namespace may create it through the namespace upsert, so your bootstrap does not need a platform admin key. It creates the namespace only as reserved: the bootstrap upserts with **no settings**, the reservation supplies them, and any setting it sends must equal the reservation's (403 naming the field otherwise). A namespace that already exists is never changed this way; changing a live namespace's settings is an operator action. `server/seed/namespaces.json` keeps the roles (`authored_as`, `env`) and `external`; a role that still carries `config` fails the bootstrap before its first write.
 
 You don't need to test these. They're stable. Just use them.
 
@@ -283,7 +317,7 @@ What `--preset query` ships today vs. what this paper recommends:
 | `/api/me` | OIDC session only | Gateway-header sniff → OIDC → anonymous |
 | SPA fallback scope | **In scaffold** (CASE-834) — API prefixes excluded; apps created before it keep the catch-all | Exclude the API prefixes (`/api`, `/auth`, `/wip`, `/server-api`, `/mcp`) so unmatched API paths return 404 JSON; page routes still fall through to `index.html` |
 | `Dockerfile.dev` | **In scaffold** | Provided as starter (canonical pattern) |
-| `Dockerfile` (production) | **In scaffold** — two-stage, `VITE_BASE_PATH` as ARG, `wget` installed in the `node:22-slim` runtime | Two-stage; `VITE_BASE_PATH` as ARG; `curl` or `wget` in the runtime stage if the manifest declares a healthcheck |
+| `Dockerfile` (production) | **In scaffold** — two-stage, `VITE_BASE_PATH` as ARG, `wget` installed in the `node:24-slim` runtime | Two-stage; `VITE_BASE_PATH` as ARG; `curl` or `wget` in the runtime stage if the manifest declares a healthcheck |
 | `.dockerignore` | **In scaffold** | Provided; narrow `*.md` exclusion called out |
 | `apps/<name>/wip-app.yaml` | Not generated — written by hand in the WIP repo | Provided alongside source-repo files; declares both ports + required env |
 
