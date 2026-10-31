@@ -76,7 +76,11 @@ router.use(requireAuth())
 // The guard ahead of it narrows what a browser session can do with the injected
 // (wip-admins) key to reads plus the flag-for-YAC write; it reads a body only for
 // a document create, which it then forwards itself.
-router.use('/wip', wipProxyGuard(WIP_KEY), wipProxy({
+// A configuration that yields no key costs /wip, not the app: with
+// onMissingKey 'unavailable' the proxy's routes answer 503 with the reason and
+// one warning is logged, while the gateway, health check and SPA keep serving.
+// The default ('throw') would stop the process before listen().
+const wipProxyRouter = wipProxy({
   baseUrl: process.env.WIP_BASE_URL || 'https://wip-kb.local',
   // Both key sources, deliberately. The file is preferred so a key rotation is
   // picked up on restart instead of stranding a stale inline value; the inline
@@ -84,9 +88,12 @@ router.use('/wip', wipProxyGuard(WIP_KEY), wipProxy({
   // safe from @wip/proxy 0.4.3 on, where a missing/unreadable file falls back to
   // the inline key with a warning instead of crashing at construction — which is
   // what a container hits when a bind-mounted .env names a host-only path.
+  // Unset sources stay undefined: an empty string is no key, not a fallback.
   apiKeyFile: process.env.WIP_API_KEY_FILE,
-  apiKey: process.env.WIP_API_KEY || '',
-}))
+  apiKey: process.env.WIP_API_KEY,
+  onMissingKey: 'unavailable',
+})
+router.use('/wip', wipProxyGuard(WIP_KEY), wipProxyRouter)
 
 // JSON body parsing for our own routes (skips /wip, which is already handled).
 router.use((req, res, next) => {
@@ -135,6 +142,9 @@ router.get(
   appConfigHandler(() => ({
     namespace: process.env.WIP_NAMESPACE || 'kb',
     library_namespace: process.env.KB_LIBRARY_NAMESPACE || 'library',
+    // Whether the WIP proxy has a key. Only the state is served; the reason can
+    // name file paths and stays in the server log.
+    wip_proxy: wipProxyRouter.unavailableReason ? 'unavailable' : 'available',
   })),
 )
 
