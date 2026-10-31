@@ -79,6 +79,20 @@ copy button. A reading aid only: nothing in it changes the document (spec §11).
 
 ## Intentionally simple (do NOT "fix")
 
+### `-0000` in an early case attribution means "time unknown"
+47 cases filed before July 2026 carried attributions that no longer fit the attribution
+pattern on `CASE_RECORD` (session ID, email or `WEB-UI`), so they could not move to the
+template's current version. They were corrected in place on 2026-10-31:
+- **46 FRanC cases** (`filed_by` / `authored_by` `FRanC-YYYYMMDD`, FRanC's day-scoped
+  session IDs of April–June 2026) → `FRanC-YYYYMMDD-0000`. Role and day are the original
+  information; `-0000` only marks that the original ID had no time. It is not a session
+  that started at midnight, and no SESSION record exists for most of those days.
+- **CASE-7** (`unknown`) → `UNKNOWN-20260625-0000`. The writer was never recorded; the
+  date is when the record was created in this KB, not when the case was first filed.
+
+The previous values remain in each record's version history. Do not "restore" a full
+session ID for these: none is recorded.
+
 - **Read-mostly UI; a fixed set of writes.** The browser can write only what the guards
   admit: flag-for-YAC (`server/wip-proxy-guard.ts`), case close/reopen, topics and the
   relationship picker's three edge types (`server/kb-ui-guard.ts`), and admin-only
