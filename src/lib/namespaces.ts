@@ -90,6 +90,10 @@ export function corpusHref(ns: string): string {
  * never into the library, and its value is not namespace-prefixed (the bootstrap
  * record's is, and older corpora carry the unprefixed one), so one check covers
  * corpora of every age. Read through the WIP proxy, like all deterministic UI reads.
+ *
+ * Asked as a filtered list, not a by-value lookup: most namespaces are not corpora,
+ * and a by-value miss answers 404, which the browser logs as a failed request on
+ * every page load. The list answers 200 with no items instead.
  */
 export async function listCorpora(): Promise<string[]> {
   const res = await fetch(`${BASE}wip/api/registry/namespaces`)
@@ -98,9 +102,12 @@ export async function listCorpora(): Promise<string[]> {
   const hits = await Promise.all(
     all.map(async ({ prefix }) => {
       const r = await fetch(
-        `${BASE}wip/api/template-store/templates/by-value/WRITE_POLICY?namespace=${encodeURIComponent(prefix)}`,
+        `${BASE}wip/api/template-store/templates?namespace=${encodeURIComponent(prefix)}`
+          + '&value=WRITE_POLICY&latest_only=true&page_size=1',
       )
-      return r.ok ? prefix : null
+      if (!r.ok) return null
+      const { items = [] } = (await r.json()) as { items?: Array<{ value?: string }> }
+      return items.some((t) => t.value === 'WRITE_POLICY') ? prefix : null
     }),
   )
   const found = hits.filter((p): p is string => p !== null)
