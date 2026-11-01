@@ -16,7 +16,7 @@
 # CHOKIDAR_USEPOLLING: reliable file-change detection on macOS bind mounts.
 # NODE_ENV=development: belt-and-suspenders; the wip-deploy renderer also sets
 # this, but keeping it in the image means a bare `docker run` still works.
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 

@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 
 # Copy package files and lib tarballs first for cache efficiency
@@ -24,7 +24,7 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Production server
-FROM node:20-alpine AS production
+FROM node:24-alpine AS production
 WORKDIR /app
 
 # Install only production dependencies
