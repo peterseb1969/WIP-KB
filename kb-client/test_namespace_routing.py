@@ -51,9 +51,13 @@ class Gateway(BaseHTTPRequestHandler):
         self._answer({"items": [], "types": [], "total": 0})
 
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
         self._record()
-        self._answer({"result": "created", "document_id": "d", "synonym": "CASE-1"})
+        # Every requested edge is reported as having no target in this namespace,
+        # as the gateway does for a target that lives in another corpus.
+        edges = [{"type": e.get("type"), "target_key": e.get("target_key"), "status": "target_not_found"}
+                 for e in body.get("edges") or []]
+        self._answer({"result": "created", "document_id": "d", "synonym": "CASE-1", "edges": edges})
 
     def log_message(self, *a):
         pass
@@ -136,6 +140,17 @@ r = run("kb-write.py", "--list", namespace="kb-work")
 check("types.explicit_env", namespaces(r, "/types"), [["kb-work"]])
 r = run("kb-write.py", "--list", "--namespace", "kb-work")
 check("types.explicit_flag", namespaces(r, "/types"), [["kb-work"]])
+
+# 6. A link whose target is not in this corpus is written without the edge,
+#    exit 0, and a warning names the missing target and the namespace.
+env = {k: v for k, v in os.environ.items() if not k.startswith("KB_") and k != "CLAUDE_PROJECT_DIR"}
+env.update(PYTHONPATH=_here, KB_APP_URL=URL, KB_API_KEY_FILE=key, KB_NAMESPACE="kb-work")
+p = subprocess.run(["python3", os.path.join(_here, "kb-write.py"), "CASE_RECORD", case_md,
+                    "--edge", "REFERENCES:CASE_RECORD:970"], cwd=plain, env=env,
+                   capture_output=True, text=True, timeout=60)
+check("edge.not_found.exit", p.returncode, 0)
+check("edge.not_found.warning",
+      "not linked — REFERENCES→970: no such CASE_RECORD in namespace kb-work" in p.stderr, True)
 
 srv.shutdown()
 if _fails:

@@ -611,6 +611,17 @@ def _post_write(type_: str, data: dict, edges: list, metadata: dict | None, fmt:
     # like success (exit 0) or transport failure (exit 2). Exit 3 = "doc written,
     # >=1 edge rejected — retry the edge via: kb-write.py EDGE <TYPE> <src> <tgt>".
     # (target_not_found stays exit 0: the loaders' converge-on-rewrite semantics.)
+    # A link whose target is not in this namespace is written without the edge
+    # and stays exit 0 (a loader's link resolves once the target is written), but
+    # never silently: corpora are walled off, so a target in another corpus can
+    # never be linked, and the writer has to see that the link is missing.
+    asked = {(x.get("type"), str(x.get("target_key"))): x.get("target_type") for x in edges}
+    for e in (result.get("edges") or []):
+        if e.get("status") == "target_not_found":
+            ttype = e.get("target_type") or asked.get((e.get("type"), str(e.get("target_key")))) or "target"
+            print(f"WARNING: not linked — {e.get('type')}→{e.get('target_key')}: no such "
+                  f"{ttype} in namespace {NAMESPACE}. A document in "
+                  f"another corpus cannot be linked.", file=sys.stderr)
     failed = [e for e in (result.get("edges") or []) if e.get("status") == "error"]
     if failed:
         for e in failed:
