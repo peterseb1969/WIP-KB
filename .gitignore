@@ -36,3 +36,7 @@ evidence/
 # NOTE: .claude/hooks/ is deliberately TRACKED. settings.json (tracked) wires both
 # hooks by path, so ignoring the scripts left a fresh clone referencing gates that
 # were not there — a guard that silently is not installed is worse than none.
+
+# Browser tests: the saved login session and run output
+e2e/.auth/
+test-results/

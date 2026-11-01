@@ -54,6 +54,13 @@ npm run dev          # client (Vite, :5173) + server (Express) concurrently
   server which serves `dist/` statically with an SPA fallback. The Dockerfile
   bakes `VITE_BASE_PATH=/apps/kb` so asset paths resolve under the mount.
 
+## Tests
+
+- `npm test` — the offline suites (kb-client Python tests and the gateway's
+  `node:test` tests); no instance needed, and what CI runs on every push.
+- `npm run test:e2e` — read-only browser tests against an installed instance,
+  the localhost sandbox by default. See `e2e/README.md`.
+
 ## Environment variables
 
 | Var | Purpose |

@@ -1,0 +1,51 @@
+# Browser tests
+
+Playwright tests that drive the KB app in a real browser, through the gateway's
+login, against an installed instance. They **only read**: nothing is written to
+WIP, so any rung of the ladder (sandbox, dev-test, prod-test, canonical) is safe
+to point them at.
+
+```bash
+npm run test:e2e                         # the localhost sandbox
+KB_E2E_URL=https://dev-test.internal/apps/kb/ \
+KB_E2E_PASSWORD_FILE=~/.wip-deploy/dev-test/secrets/dex-password-e2e \
+  npm run test:e2e                       # another instance, once it has an e2e user
+```
+
+Today only the sandbox (`~/.wip-deploy/default`) has the e2e user.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `KB_E2E_URL` | `https://localhost:8443/apps/kb/` | The app under test. |
+| `KB_E2E_LOGIN` | `e2e@wip.local` | The Dex user to log in as. |
+| `KB_E2E_PASSWORD_FILE` | `~/.wip-deploy/default/secrets/dex-password-e2e` | File holding that user's password. |
+| `KB_E2E_CHANNEL` | `chrome` | Browser. `chrome` uses the installed Google Chrome; elsewhere run `npx playwright install chromium` and set `chromium`. |
+
+The login user is a dedicated one, never `admin` or `editor`. An install that
+lacks it gets one from its owner:
+`wip-deploy user add e2e --email e2e@wip.local --group wip-editors --name <install>`.
+
+## What is covered
+
+- **smoke** — health, app-config and the WIP proxy answer; an unknown API route
+  is a JSON 404; home, search, client and settings load with no failed request to
+  the app and no console error.
+- **doc** — a case (the first `CASE_RECORD` the corpus returns) opens by its
+  document ID, its identity strip stays visible when scrolled, a search for words
+  of its title lists it, and a search with no hits says so.
+- **corpora** — with more than one knowledge base visible to the app: the
+  switcher lists them all with the deployment's corpus first and moves between
+  them, a deep link into another corpus opens its document, and that document is
+  found by its own corpus's search and not by the main corpus's. Skipped when
+  only one corpus is visible.
+
+The tests find their documents from the data, so they need no fixtures — but a
+corpus with no cases skips the doc tests rather than failing them.
+
+## Not covered
+
+Anything that writes (flag-for-YAC, vocabulary settings, the askBar's runtime key)
+and the askBar itself, which needs an Anthropic key and answers
+non-deterministically.
+
+They are not part of `npm test` or CI, which run without an instance.

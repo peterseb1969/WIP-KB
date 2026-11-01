@@ -9,8 +9,9 @@
     "dev:server": "NODE_TLS_REJECT_UNAUTHORIZED=0 tsx watch server/index.ts",
     "build": "vite build",
     "start": "tsx server/index.ts",
-    "test": "python3 kb-client/test_parse_frontmatter.py && python3 kb-client/test_verb_parity.py && python3 kb-client/test_implement_hashes.py && python3 kb-client/test_instance_pairing.py && python3 kb-client/test_attribution.py && python3 kb-client/test_patch_match.py && python3 kb-client/test_write_404.py && python3 kb-client/test_namespace_routing.py",
-    "test:gateway": "node --test server/lib/patch-match.test.ts server/lib/agent-retry.test.ts"
+    "test": "python3 kb-client/test_parse_frontmatter.py && python3 kb-client/test_verb_parity.py && python3 kb-client/test_implement_hashes.py && python3 kb-client/test_instance_pairing.py && python3 kb-client/test_attribution.py && python3 kb-client/test_patch_match.py && python3 kb-client/test_write_404.py && python3 kb-client/test_namespace_routing.py && npm run test:gateway",
+    "test:gateway": "node --test server/lib/patch-match.test.ts server/lib/agent-retry.test.ts",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",
@@ -36,6 +37,7 @@
     "ip-address": "^10.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@tailwindcss/typography": "^0.5.19",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.2",
