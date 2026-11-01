@@ -457,7 +457,17 @@ kbc case-fetch.py read CASE_RECORD --filter app=<project>
 
 A **knowledge base** is a namespace seeded with the full KB model, with its own
 documents, numbering, vocabularies and relationships; links cannot cross between
-knowledge bases. `kbc kb-namespace.py create <name>` makes one (with your key; WIP
-decides whether it may). `"namespace": "<name>"` in `.claude/kb.json` points the whole
+knowledge bases. Making one takes two steps, in this order:
+
+1. On the install's host, `wip-deploy app-namespace add wip-kb <name> --name <install>`
+   gives the KB app's own key the namespace (and every later apply keeps it). Without
+   it the knowledge base exists, but the KB UI and the gateway's topic and type
+   listings cannot see it: they run with the app's key, not yours.
+2. `kbc kb-namespace.py create <name>`, run with a platform-admin key, seeds it.
+
+Never copy another key into the app's key file to widen it; the next apply
+re-issues that file, and two keys sharing one value resolve inconsistently.
+
+`"namespace": "<name>"` in `.claude/kb.json` points the whole
 client at it; `search`, `read`, `brief` and `topics` also take `--namespace` for a
 single command.

@@ -13,6 +13,20 @@ existing namespace.
 Usage:
     kb-namespace.py create <namespace> [--description TEXT]
 
+Creating a knowledge base the KB app can serve takes two steps, in this order:
+
+  1. On the install's host, give the KB app's own key the namespace:
+         wip-deploy app-namespace add wip-kb <namespace> --name <install>
+     This reserves the namespace for the KB app and grants its key admin on it,
+     and every later wip-deploy apply keeps it. Skip it, and the knowledge base
+     exists but the app's UI and its topic/type listings cannot see it — the
+     app runs with its own deployer-issued key, not yours.
+  2. Run this script with a platform-admin key (wip-admins).
+
+Never copy another key into the app's key file (secrets/app-wip-kb-api-key):
+the next apply re-issues that file as the app's key, and two keys sharing one
+value resolve inconsistently across WIP services.
+
 The call runs with your API key, so WIP decides whether you may create
 namespaces. An existing namespace with content is never re-seeded — the gateway
 answers 409 and leaves it as it is. An existing EMPTY namespace (what a failed
@@ -61,7 +75,11 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Create a new KB knowledge domain (namespace).")
+    ap = argparse.ArgumentParser(
+        description="Create a new KB knowledge domain (namespace).",
+        epilog="First, on the install's host: wip-deploy app-namespace add wip-kb <namespace> "
+               "--name <install> — otherwise the KB app's own key cannot see the new knowledge "
+               "base. Then run this with a platform-admin key.")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("create", help="create and seed a new namespace")
     c.add_argument("namespace", help="lowercase slug: a-z, 0-9, '-', starting with a letter")
