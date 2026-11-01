@@ -202,7 +202,8 @@ def _gw_url(base_url: str, path: str) -> str:
 
 
 def _request(base_url: str, key_file: Path, path: str,
-             method: str, body: dict | None, timeout: float = 20) -> dict | None:
+             method: str, body: dict | None, timeout: float = 20,
+             refuse_404: bool = False) -> dict | None:
     """One gateway HTTP call. Returns parsed JSON, or None when the route is not
     present on this instance. Raises RuntimeError on transport / real HTTP error
     (so callers can fail over).
@@ -231,7 +232,10 @@ def _request(base_url: str, key_file: Path, path: str,
             # gateway saying the document a patch names does not exist: returning
             # None there made a status change that changed nothing look like
             # success. The server's own route-absent answer carries `path`.
-            if method != "GET" and (e.headers.get("Content-Type") or "").startswith("application/json"):
+            # A read that asks for it (refuse_404) gets the same treatment, for
+            # routes whose 404 carries a reason the caller must see — e.g. WIP not
+            # letting this instance's key into the namespace.
+            if (method != "GET" or refuse_404) and (e.headers.get("Content-Type") or "").startswith("application/json"):
                 try:
                     body = json.loads(raw_err)
                 except json.JSONDecodeError:
@@ -270,15 +274,17 @@ def _request(base_url: str, key_file: Path, path: str,
             f"(content-type {ctype or 'unset'}): {raw[:200].decode('utf-8', 'replace')}") from e
 
 
-def gw_get(path: str) -> dict | None:
+def gw_get(path: str, refuse_404: bool = False) -> dict | None:
     """GET a gateway endpoint (path relative to /server-api/kb, e.g. '/cases/5'),
     with local→remote failover. Returns parsed JSON, or None if the final
     (remote) target reports 404. Raises RuntimeError if every target is
-    unreachable / errors."""
+    unreachable / errors. With refuse_404, a 404 that carries the gateway's
+    reason raises GatewayRefusal instead of returning None; only an absent
+    route still returns None."""
     last_error: Exception | None = None
     for name, url, key in targets():
         try:
-            return _request(url, key, path, "GET", None)
+            return _request(url, key, path, "GET", None, refuse_404=refuse_404)
         except RuntimeError as e:
             last_error = e
             if name != "remote":

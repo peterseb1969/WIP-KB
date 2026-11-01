@@ -71,6 +71,12 @@ except core.GatewayRefusal as e:
     check("write.missing_doc.msg", "not found" in str(e), True)
 check("write.route_absent", core.gw_post("/route-absent", {"x": 1}), {})
 check("read.missing", core.gw_get("/cases/99999"), None)
+try:
+    core.gw_get("/topics?type=CASE_RECORD", refuse_404=True)
+    check("read.refuse_404", "no exception", "GatewayRefusal")
+except core.GatewayRefusal as e:
+    check("read.refuse_404.msg", "not found" in str(e), True)
+check("read.refuse_404.route_absent", core.gw_get("/route-absent", refuse_404=True), None)
 
 srv.shutdown()
 if _fails:
@@ -78,4 +84,4 @@ if _fails:
     for f in _fails:
         print("  -", f)
     raise SystemExit(1)
-print("OK — a write's 404 is a refusal; reads and absent routes are unchanged")
+print("OK — a write's 404 is a refusal (and a read's, when asked); absent routes are unchanged")

@@ -43,7 +43,7 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-from kb_client_core import PROJECT, gw_get, gw_get_bytes
+from kb_client_core import PROJECT, GatewayRefusal, gw_get, gw_get_bytes
 
 
 # ----------------------------------------------------------------------------
@@ -341,7 +341,7 @@ def fetch_topics(type_: str, namespace: str | None) -> dict | None:
     params = {"type": type_}
     if namespace:
         params["namespace"] = namespace
-    return gw_get("/topics?" + urllib.parse.urlencode(params))
+    return gw_get("/topics?" + urllib.parse.urlencode(params), refuse_404=True)
 
 
 def _format_topics(payload: dict) -> str:
@@ -665,7 +665,13 @@ def main() -> None:
             sys.exit(0)
 
         elif args.mode == "topics":
-            payload = fetch_topics(args.type_, args.namespace)
+            try:
+                payload = fetch_topics(args.type_, args.namespace)
+            except GatewayRefusal as e:
+                # The gateway answered with a reason (WIP refused this instance's
+                # key for the namespace, or the type has no topics field): show it.
+                print(f"no topic vocabulary for {args.type_}: {e}", file=sys.stderr)
+                sys.exit(1)
             if payload is None:
                 print(f"no topic vocabulary for {args.type_} on this instance "
                       "(older gateway, or the type carries no topics field)", file=sys.stderr)
