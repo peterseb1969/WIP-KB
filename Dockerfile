@@ -27,7 +27,8 @@ RUN npm run build
 FROM node:24-alpine AS production
 WORKDIR /app
 
-# Install only production dependencies
+# Install only production dependencies. tsx is one of them: the server runs
+# from TypeScript source, so the runner must be in the image, not fetched.
 COPY package.json package-lock.json ./
 COPY libs/ libs/
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
@@ -54,4 +55,6 @@ EXPOSE 3012
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD wget -qO- http://localhost:3012${APP_BASE_PATH:-}/api/health || exit 1
 
-CMD ["npx", "tsx", "server/index.ts"]
+# --no-install: if tsx were ever missing from the image, fail at start instead
+# of downloading it from the npm registry, which an offline install cannot reach.
+CMD ["npx", "--no-install", "tsx", "server/index.ts"]
