@@ -356,18 +356,15 @@ Seconds precision (`HHMMSS`) eliminates the same-minute collision class. Record 
 
 ### After every commit
 
-Read `commits.md` first; if the commit hash is already listed, skip it (prevents duplicates after compaction). Then append:
+Nothing to do by hand: the `post-commit` hook (`.githooks/post-commit` → `.claude/scripts/log-commit.py`) appends the entry to `reports/<session-id>/commits.md`. Hash, time, author, files and lines come from git; the subject becomes the heading and the body the **Why**. Put the judgment into the commit message as trailers at its end, one per line:
 
-```markdown
-## <short-hash> — <commit message>
-**Time:** <date '+%H:%M'>
-**Files:** <count> changed, +<added>/-<removed>
-**Tests:** <X passed, Y failed — or "not run">
-**What:** <1-2 sentences — what changed>
-**Why:** <1-2 sentences — what motivated this change>
-**PoNIF:** <if you encountered a PoNIF — which one and whether it caused issues. Omit if none.>
-**Discovered:** <anything surprising, bugs found, or gaps identified — omit if nothing>
 ```
+Tests: <X passed, Y failed — or "not run">
+PoNIF: <which PoNIF you hit and whether it caused issues — omit if none>
+Discovered: <anything surprising, bugs found, gaps identified — omit if nothing>
+```
+
+If an entry is missing after a commit, the hook is not installed: `git config core.hooksPath` must print `.githooks`.
 
 ### Session summary
 
