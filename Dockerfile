@@ -55,6 +55,9 @@ EXPOSE 3012
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD wget -qO- http://localhost:3012${APP_BASE_PATH:-}/api/health || exit 1
 
-# --no-install: if tsx were ever missing from the image, fail at start instead
-# of downloading it from the npm registry, which an offline install cannot reach.
-CMD ["npx", "--no-install", "tsx", "server/index.ts"]
+# The runner is started by path, never through npx: the image must start without
+# fetching anything. npx asks the npm registry for a package the image lacks —
+# even with --no-install, where it hangs offline instead of failing — so a missing
+# tsx would stall the start on a network call. By path it fails at once, naming
+# the file. The path is relative to WORKDIR /app.
+CMD ["./node_modules/.bin/tsx", "server/index.ts"]
