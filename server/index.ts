@@ -6,7 +6,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { wipProxy, appConfigHandler } from '@wip/proxy'
 import { startAgent, ask } from './agent.js'
-import { initAuth, requireAuth, requireAdmin, handleCallback, handleLogout } from './auth.js'
+import { initAuth, requireAuth, requireAdmin, isAdmin, handleCallback, handleLogout } from './auth.js'
 import bootstrapRoutes from './bootstrap.routes.js'
 import configRoutes from './config.routes.js'
 import vocabRoutes from './vocab.routes.js'
@@ -170,14 +170,14 @@ router.get('/api/me', (req, res) => {
   const gwUser = req.headers['x-wip-user'] as string | undefined
   if (gwUser) {
     const groups = (req.headers['x-wip-groups'] as string || '').split(',').filter(Boolean)
-    res.json({ email: gwUser, groups, method: 'gateway' })
+    res.json({ email: gwUser, groups, method: 'gateway', admin: isAdmin(req) })
     return
   }
   if (req.session?.user) {
-    res.json(req.session.user)
+    res.json({ ...req.session.user, admin: isAdmin(req) })
     return
   }
-  res.json({ anonymous: true })
+  res.json({ anonymous: true, admin: isAdmin(req) })
 })
 
 // API prefixes never fall through to the SPA: a JSON client asking for a route

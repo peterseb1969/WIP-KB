@@ -131,18 +131,26 @@ export function requireAuth(): RequestHandler {
  * anyway. Otherwise the caller must belong to an ADMIN_GROUPS group. Groups come
  * from the gateway header (x-wip-groups) when present, else the OIDC session.
  */
+/**
+ * Whether the caller may use the privileged config endpoints: a member of an
+ * ADMIN_GROUPS group (gateway headers first, else the OIDC session), or anyone
+ * when no authentication is configured (open dev mode). /api/me reports it, so
+ * the UI asks before calling an admin endpoint instead of learning it from a 403.
+ */
+export function isAdmin(req: Request): boolean {
+  const gwUser = req.headers['x-wip-user'] as string | undefined
+  const gwGroups = (req.headers['x-wip-groups'] as string || '')
+    .split(',').map(g => g.trim()).filter(Boolean)
+  const sessionGroups = req.session?.user?.groups || []
+  const groups = gwGroups.length ? gwGroups : sessionGroups
+  const authEnabled = !!OIDC_ISSUER || !!gwUser
+  if (!authEnabled) return true  // open dev mode
+  return groups.some(g => ADMIN_GROUPS.includes(g))
+}
+
 export function requireAdmin(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const gwUser = req.headers['x-wip-user'] as string | undefined
-    const gwGroups = (req.headers['x-wip-groups'] as string || '')
-      .split(',').map(g => g.trim()).filter(Boolean)
-    const sessionGroups = req.session?.user?.groups || []
-    const groups = gwGroups.length ? gwGroups : sessionGroups
-
-    const authEnabled = !!OIDC_ISSUER || !!gwUser
-    if (!authEnabled) { next(); return }  // open dev mode
-
-    if (groups.some(g => ADMIN_GROUPS.includes(g))) { next(); return }
+    if (isAdmin(req)) { next(); return }
     res.status(403).json({ error: 'Administrator access required' })
   }
 }

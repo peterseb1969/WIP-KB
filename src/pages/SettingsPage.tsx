@@ -26,13 +26,32 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
 
+  // Admin or not comes from /api/me, before any admin endpoint is called: a
+  // non-admin's visit then sends nothing that answers 403 (which the browser
+  // logs as a failed request). A server too old to report `admin` falls back to
+  // the 403 check below.
+  const [ready, setReady] = useState(false)
+
   async function loadStatus() {
     const res = await fetch(`${SERVER_API}/config/anthropic-key`)
     if (res.status === 403) { setForbidden(true); return }
     if (res.ok) setStatus(await res.json())
   }
 
-  useEffect(() => { loadStatus() }, [])
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      try {
+        const me = await (await fetch(`${import.meta.env.BASE_URL}api/me`)).json()
+        if (!live) return
+        if (me?.admin === false) { setForbidden(true); setReady(true); return }
+      } catch { /* fall through to the 403 check */ }
+      if (!live) return
+      setReady(true)
+      loadStatus()
+    })()
+    return () => { live = false }
+  }, [])
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -67,6 +86,14 @@ export default function SettingsPage() {
       <div className="mx-auto max-w-2xl p-6">
         <h1 className="text-xl font-semibold">Settings</h1>
         <p className="mt-4 text-text/70">Administrator access required.</p>
+      </div>
+    )
+  }
+
+  if (!ready) {
+    return (
+      <div className="mx-auto max-w-4xl p-6">
+        <h1 className="text-xl font-semibold">Settings</h1>
       </div>
     )
   }
