@@ -210,7 +210,7 @@ npm install ./libs/wip-client-*.tgz ./libs/wip-react-*.tgz ./libs/wip-proxy-*.tg
 
 Two gotchas:
 - **`@wip/client` baseUrl in browser apps behind the `@wip/proxy` mount:** use ``baseUrl: `${import.meta.env.BASE_URL}wip` `` (as `src/lib/wipClient.ts` does). The deployed app lives under `/apps/kb/`, so a bare `'/wip'` works only for an app served at `/`. Do NOT use a bare relative path without the client resolving it — `new URL('/wip/...')` throws without a protocol.
-- **`@wip/react` providers:** hooks require BOTH `QueryClientProvider` (from `@tanstack/react-query`) AND `WipProvider` (from `@wip/react`). Missing either breaks every hook: outside `WipProvider`, `useWipClient` throws "useWipClient must be used within a <WipProvider>"; outside `QueryClientProvider`, TanStack's hooks throw that no QueryClient is set.
+- **`@wip/react` providers:** hooks require BOTH `QueryClientProvider` (from `@tanstack/react-query`) AND `WipProvider` (from `@wip/react`). Missing either breaks every hook: outside `WipProvider`, `useWipClient` throws "useWipClient must be used within a <WipProvider>"; outside `QueryClientProvider`, TanStack's hooks throw that no QueryClient is set. `WipProvider` (≥ 0.26) also renews the app-origin session in the background: on an install with an origin per app, a tab outside it loses its API calls when the 15-minute app session expires. The whole KB renders inside it (`src/main.tsx`); keep it that way.
 
 ---
 
