@@ -73,12 +73,12 @@ FIELD_KEYS = ["name", "label", "type", "mandatory", "default_value", "terminolog
               "semantic_type", "full_text_indexed"]
 
 
-def req(method, path, payload=None):
+def req(method, path, payload=None, timeout=120):
     r = urllib.request.Request(
         BASE + path, data=json.dumps(payload).encode() if payload is not None else None,
         headers={"X-API-Key": KEY, "Content-Type": "application/json"}, method=method)
     try:
-        with urllib.request.urlopen(r, context=CTX, timeout=120) as resp:
+        with urllib.request.urlopen(r, context=CTX, timeout=timeout) as resp:
             return json.load(resp)
     except urllib.error.HTTPError as e:
         sys.exit(f"ABORT {method} {path}: HTTP {e.code} {e.read().decode()[:400]}")
@@ -197,14 +197,14 @@ if not cohorts:
     print(f"SKIP migrate: all {len(cases)} cases on v{target}")
 for v in cohorts:
     body = {"template_id": "CASE_RECORD", "from_version": v, "to_version": target}
-    dry = req("POST", f"/api/document-store/documents/migrate?namespace={NS}", {**body, "dry_run": True})
+    dry = req("POST", f"/api/document-store/documents/migrate?namespace={NS}", {**body, "dry_run": True}, timeout=1800)
     print(f"DRY v{v} -> v{target}: total {dry['total']}, ok {dry['succeeded']}, failed {dry['failed']}")
     if dry["failed"]:
         bad = [r for r in dry["results"] if r.get("status") not in ("ready", "migrated", "ok", "success")]
         sys.exit(f"ABORT migrate v{v}: {json.dumps(bad[:5])[:800]}")
     if not APPLY:
         continue
-    done = req("POST", f"/api/document-store/documents/migrate?namespace={NS}", {**body, "dry_run": False})
+    done = req("POST", f"/api/document-store/documents/migrate?namespace={NS}", {**body, "dry_run": False}, timeout=1800)
     print(f"OK v{v} -> v{target}: total {done['total']}, ok {done['succeeded']}, failed {done['failed']}")
     if done["failed"]:
         sys.exit(f"ERROR migrate v{v}: {done['failed']} failed")
