@@ -83,7 +83,7 @@ Env:
   `project` key (a `KB_APP` term, becomes `KB_PROJECT`) is sent with every write:
   the gateway tags the document with `app` when its type has that field and the
   document names none. `search --project <app>` scopes a search to one project.
-- `KB_BASE_URL` — the canonical instance (default `https://kb.internal`).
+- `KB_BASE_URL` — another name for `KB_APP_URL` (default `https://kb.kb.internal`).
 - `KB_API_KEY_FILE` — its key file. **No default:** the key is issued when the
   project is installed and its file name differs per installation, so it comes
   from `kb_api_key_file` in `.claude/kb.json` or from this variable; with
@@ -96,5 +96,6 @@ Env:
 - `KB_NAMESPACE` (default `kb`), `KB_VERIFY_TLS` (default `false`),
   `KB_DEV_ROOT` (default `~/Development` — flat-file repo roots).
 - `KB_APP_URL` / `KB_APP_BASE_PATH` — the KB app endpoint (gateway verbs +
-  served bundle), distinct from the WIP backend `KB_BASE_URL`. Default
-  `https://kb.internal` + `/apps/kb`.
+  served bundle). Default `https://kb.kb.internal` + `/apps/kb`: canonical
+  serves each app on its own origin, `https://<app>.<WIP host>`, and its old
+  URL `https://kb.internal/apps/kb` only answers 301 there.
