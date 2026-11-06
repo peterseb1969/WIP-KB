@@ -12,7 +12,9 @@ KB_E2E_PASSWORD_FILE=~/.wip-deploy/dev-test/secrets/dex-password-e2e \
   npm run test:e2e                       # another instance, once it has an e2e user
 ```
 
-Today only the sandbox (`~/.wip-deploy/default`) has the e2e user.
+The e2e user exists on the sandbox (`~/.wip-deploy/default`) and on dev-test
+(`~/.wip-deploy/dev-test`). On an instance where the app sees a single corpus,
+the three corpus tests skip.
 
 | Variable | Default | Meaning |
 |---|---|---|
