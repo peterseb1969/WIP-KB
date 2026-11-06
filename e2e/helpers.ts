@@ -62,9 +62,16 @@ export function watchFailures(page: Page, basePath: string) {
   return { list, clear: () => { list.length = 0 } }
 }
 
-/** Search words from a title: long enough to be selective, free of query syntax. */
+/**
+ * Search words from a title: long enough to be selective, free of query syntax.
+ * URLs, paths and code spans are dropped first: full-text search indexes
+ * `https://rc.<host>/` as one URL token, not as the word "https", so a word taken
+ * from inside one can never match.
+ */
 export function searchTermsFrom(title: string): string {
   return title
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/\S*(?:\/|:\/\/|<|>)\S*/g, ' ')
     .split(/[^\p{L}\p{N}]+/u)
     .filter((w) => w.length >= 5)
     .slice(0, 3)
