@@ -33,6 +33,9 @@ lacks it gets one from its owner:
 - **doc** — a case (the first `CASE_RECORD` the corpus returns) opens by its
   document ID, its identity strip stays visible when scrolled, a search for words
   of its title lists it, and a search with no hits says so.
+- **facets** — the search page's Severity facet lists only `CASE_SEVERITY` terms
+  (older spellings are folded into the term they alias), worst first. Skipped on
+  a corpus that does not have the vocabulary yet.
 - **corpora** — with more than one knowledge base visible to the app: the
   switcher lists them all with the deployment's corpus first and moves between
   them, a deep link into another corpus opens its document, and that document is

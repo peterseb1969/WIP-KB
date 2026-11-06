@@ -79,10 +79,11 @@ const SCOPE_LABEL: Record<string, string> = {
 }
 const scopeLabel = (t: string): string => SCOPE_LABEL[t] ?? t.toLowerCase()
 
-async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
+/** term_id → value for one corpus vocabulary, in the vocabulary's own order. */
+async function fetchTermValues(terminology: string, namespace: string): Promise<Map<string, string>> {
   try {
     const t = await wipFetchJson<{ terminology_id?: string; id?: string }>(
-      `/api/def-store/terminologies/by-value/KB_APP?namespace=${namespace}`,
+      `/api/def-store/terminologies/by-value/${terminology}?namespace=${namespace}`,
     )
     const tid = t.terminology_id ?? t.id
     if (!tid) return EMPTY_APP_TERMS
@@ -91,7 +92,7 @@ async function fetchAppTerms(namespace: string): Promise<Map<string, string>> {
     )
     return new Map((terms.items ?? []).map((x) => [x.term_id, x.value]))
   } catch {
-    return EMPTY_APP_TERMS // no KB_APP yet (pre-(A)) → callers fall back to raw
+    return EMPTY_APP_TERMS // vocabulary absent (older corpus) → callers fall back to the raw value
   }
 }
 
@@ -338,10 +339,25 @@ export default function SearchPage() {
   // KB_APP lives in the corpus namespace only, so this stays corpus-scoped.
   const appTermsQ = useQuery<Map<string, string>>({
     queryKey: ['kb-app-terms', CORPUS_NS],
-    queryFn: () => fetchAppTerms(CORPUS_NS),
+    queryFn: () => fetchTermValues('KB_APP', CORPUS_NS),
     staleTime: 5 * 60_000,
   })
   const appTermMap = appTermsQ.data ?? EMPTY_APP_TERMS
+  // Severity is a CASE_SEVERITY term: old spellings ("minor", "high") are aliases,
+  // so the facet groups by the resolved term, and lists it worst first (the
+  // vocabulary's sort order) rather than alphabetically.
+  const severityTermsQ = useQuery<Map<string, string>>({
+    queryKey: ['kb-severity-terms', CORPUS_NS],
+    queryFn: () => fetchTermValues('CASE_SEVERITY', CORPUS_NS),
+    staleTime: 5 * 60_000,
+  })
+  const severityTermMap = severityTermsQ.data ?? EMPTY_APP_TERMS
+  const severityOf = useCallback(
+    (doc: DocItem): string | undefined =>
+      (doc.data.severity_term_id ? severityTermMap.get(doc.data.severity_term_id) : undefined) ??
+      doc.data.severity,
+    [severityTermMap],
+  )
 
   const docsById = useMemo(() => {
     const m = new Map<string, DocItem>()
@@ -423,11 +439,15 @@ export default function SearchPage() {
       Array.from(
         new Set(
           docsInTypeScope
-            .map((d) => d.data.severity)
+            .map((d) => severityOf(d))
             .filter((s): s is string => typeof s === 'string' && s.length > 0),
         ),
-      ).sort(),
-    [docsInTypeScope],
+      ).sort((a, b) => {
+        const order = [...severityTermMap.values()]
+        const ia = order.indexOf(a), ib = order.indexOf(b)
+        return (ia < 0 ? order.length : ia) - (ib < 0 ? order.length : ib) || a.localeCompare(b)
+      }),
+    [docsInTypeScope, severityOf, severityTermMap],
   )
   // App = the canonical KB_APP term resolved from each doc's term_reference
   // (CASE-422); the spelling variants live as KB_APP synonyms, so the facet
@@ -629,14 +649,14 @@ export default function SearchPage() {
         if (aFilter.size > 0 && !docAuthors(authorSource(doc)).some((r) => aFilter.has(r)))
           return false
         if (kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
-        if (vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
+        if (vFilter.size > 0 && !vFilter.has(severityOf(doc) ?? '')) return false
         if (pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
         if (rFilter.size > 0 && !rFilter.has(doc.data.release ?? '')) return false
         if (selectedTopics && !(doc.data.topics ?? []).some((t) => selectedTopics.has(t)))
           return false
         return true
       }),
-    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, selectedTopics, appOf],
+    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, selectedTopics, appOf, severityOf],
   )
 
   // Per-option counts for each facet. "What would the result count be if I
@@ -660,7 +680,7 @@ export default function SearchPage() {
       )
         return false
       if (skip !== 'k' && kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
-      if (skip !== 'v' && vFilter.size > 0 && !vFilter.has(doc.data.severity ?? '')) return false
+      if (skip !== 'v' && vFilter.size > 0 && !vFilter.has(severityOf(doc) ?? '')) return false
       if (skip !== 'p' && pFilter.size > 0 && !pFilter.has(appOf(doc) ?? '')) return false
       if (skip !== 'r' && rFilter.size > 0 && !rFilter.has(doc.data.release ?? '')) return false
       if (
@@ -705,12 +725,12 @@ export default function SearchPage() {
       s: bucket('s', (d) => workflowStatus(d)),
       a: bucket('a', (d) => docAuthors(authorSource(d))),
       k: bucket('k', (d) => d.data.kind),
-      v: bucket('v', (d) => d.data.severity),
+      v: bucket('v', (d) => severityOf(d)),
       p: bucket('p', (d) => appOf(d)),
       r: bucket('r', (d) => d.data.release),
       o: oCounts,
     }
-  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, selectedTopics, topicTree, appOf])
+  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, selectedTopics, topicTree, appOf, severityOf])
 
   const hasCaseInScope = useMemo(
     () => filtered.some((h) => typeof h.doc.data.case_number === 'number'),

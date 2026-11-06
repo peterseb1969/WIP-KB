@@ -82,8 +82,8 @@ thread intact instead of a duplicate filing.
    title: <short case title>
    doc_status: published
    status: open
-   type: <bug | question | request | platform-gap>
-   severity: <blocks-me | annoying | fyi>
+   type: <bug | gap | docs | design | process | chore | question>
+   severity: <security | blocks-me | wrong-result | degraded | annoying | cosmetic | fyi>
    component: <wip-client | document-store | registry | scaffold | mcp-server | wip-react | wip-proxy | wip-auth | reporting-sync | other>
    app: <your app name, or "backend">
    topics: [<pick 1–4 from KB_TOPIC>]
@@ -103,6 +103,36 @@ thread intact instead of a duplicate filing.
    ## Peter's Take
    <verbatim, only if Peter gave a comment with /wip-case file; else omit.>
    ```
+
+   **On `type` and `severity`** — both are drawn from vocabularies (`CASE_TYPE`,
+   `CASE_SEVERITY`), and a value outside them is REJECTED. Pick the type by the
+   work the case asks for:
+
+   | type | when |
+   |---|---|
+   | `bug` | something does the wrong thing |
+   | `gap` | something needed does not exist yet (capability, endpoint, feature) |
+   | `docs` | documentation is wrong, missing or obsolete |
+   | `design` | a decision is needed before anyone builds |
+   | `process` | how the agents work: rules, drift, coordination |
+   | `chore` | clean-up, audit or investigation that changes no behaviour |
+   | `question` | needs an answer, not a change |
+
+   Pick the severity by what happens if nothing is done, worst first:
+
+   | severity | when |
+   |---|---|
+   | `security` | data or access reachable by someone who should not have it, a leaked secret, an auth gap |
+   | `blocks-me` | work stops; no workaround |
+   | `wrong-result` | wrong or lost data, a silent failure — it looks fine and is not |
+   | `degraded` | works, but slowly, unreliably, or only with a workaround |
+   | `annoying` | friction or extra effort; nothing is actually wrong |
+   | `cosmetic` | wording, layout, appearance |
+   | `fyi` | no action expected |
+
+   A silent failure is `wrong-result`, not `annoying`: being unnoticed makes it
+   worse, not milder. Older spellings (`request`, `platform-gap`, `minor`, …) are
+   accepted as aliases of the term they meant; write the current value.
 
    **On `topics`** — the subject-matter tags the KB's Topic facet navigates by,
    drawn from the `KB_TOPIC` vocabulary. **List it before you write:**

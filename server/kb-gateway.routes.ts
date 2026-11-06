@@ -95,9 +95,36 @@ function statusForErrorCode(code?: string): number {
 // A per-item write result that is neither created nor updated, as an error with
 // the status its error_code earns: a value WIP refused (validation_failed → 422)
 // is the caller's to fix and must not read as the backend failing.
-function writeError(what: string, r: AnyObj): WipError {
+async function writeError(what: string, r: AnyObj, key: string): Promise<WipError> {
   const status = statusForErrorCode(r.error_code)
-  return new WipError(status, `${what} ${status < 500 ? 'refused' : 'failed'}: ${r.error || JSON.stringify(r)}`)
+  return new WipError(status, `${what} ${status < 500 ? 'refused' : 'failed'}: ${await describeWriteError(r, key)}`)
+}
+
+// WIP names a refused term by its terminology's id ("Value 'x' is not valid for
+// terminology '01a1…'"), which tells a writer neither which field was wrong nor
+// what it accepts. Its per-field errors carry both the field and the terminology,
+// so an invalid term is reworded as "<field>: 'x' is not one of a, b, c". Any
+// other error, or a lookup that fails, keeps WIP's own text.
+async function describeWriteError(r: AnyObj, key: string): Promise<string> {
+  const errs = ((r.details?.errors as AnyObj[] | undefined) || []).filter((e) => e?.field)
+  if (!errs.some((e) => e.code === 'invalid_term')) return r.error || JSON.stringify(r)
+  const parts: string[] = []
+  for (const e of errs) {
+    const value = /Value '(.*)' is not valid/.exec(String(e.message || ''))?.[1]
+    const tid = e.details?.terminology
+    if (e.code !== 'invalid_term' || value === undefined || !tid) {
+      parts.push(`${e.field}: ${e.message}`)
+      continue
+    }
+    try {
+      const d = await wipReq('GET', `/api/def-store/terminologies/${tid}/terms?page_size=200`, key)
+      const allowed = ((d.items || []) as AnyObj[]).filter((t) => t.status !== 'deprecated').map((t) => t.value)
+      parts.push(`${e.field}: '${value}' is not one of ${allowed.join(', ')}`)
+    } catch {
+      parts.push(`${e.field}: ${e.message}`)
+    }
+  }
+  return parts.join('; ')
 }
 
 async function wipReq(method: string, path: string, key: string, body?: unknown): Promise<AnyObj> {
@@ -398,7 +425,7 @@ async function mintNumberedDoc(opts: {
     }])
     const r = (d.results || [])[0] || {}
     if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
-      throw writeError(`${templateValue} update at ${numberField}=${explicit}`, r)
+      throw await writeError(`${templateValue} update at ${numberField}=${explicit}`, r, key)
     return {
       number: Number(explicit), synonym: buildSynonym(synCfg, Number(explicit), data),
       document_id: r.document_id, result: r.status,
@@ -417,7 +444,7 @@ async function mintNumberedDoc(opts: {
       }])
       const r = (d.results || [])[0] || {}
       if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
-        throw writeError(`${templateValue} re-mint`, r)
+        throw await writeError(`${templateValue} re-mint`, r, key)
       return { number: num, synonym: buildSynonym(synCfg, num, data), document_id: r.document_id, result: r.status }
     }
   }
@@ -453,7 +480,7 @@ async function mintNumberedDoc(opts: {
     if (r.status === 'created' || r.status === 'updated')
       return { number: n, synonym, document_id: r.document_id, result: r.status }
     if (r.error_code === 'synonym_conflict' || /different entry/.test(r.error || '')) { n += 1; continue }
-    throw writeError(`${templateValue} mint at ${synonym}`, r)
+    throw await writeError(`${templateValue} mint at ${synonym}`, r, key)
   }
   throw new WipError(503, `${templateValue} allocation exhausted ${ALLOC_MAX_RETRIES} retries`)
 }
@@ -647,7 +674,7 @@ async function genericWrite(type: string, data: AnyObj, opts: { metadata?: AnyOb
   }])
   const r = (d.results || [])[0] || {}
   if (!['created', 'updated', 'unchanged', 'skipped'].includes(r.status))
-    throw writeError(`${type} write`, r)
+    throw await writeError(`${type} write`, r, key)
   return { document_id: r.document_id, result: r.status }
 }
 
@@ -1036,7 +1063,21 @@ router.get('/cases', async (req, res) => {
     else if (vals.length > 1) filters.push({ field: 'data.status', operator: 'in', value: vals })
   }
   for (const f of ['filed_by', 'severity', 'type', 'component', 'app']) {
-    if (req.query[f]) filters.push({ field: `data.${f}`, operator: 'eq', value: String(req.query[f]) })
+    if (!req.query[f]) continue
+    const v = String(req.query[f])
+    // A term field (app, severity, type) matches the TERM, not a spelling: stored
+    // values keep whatever alias the writer used, so `severity=cosmetic` must also
+    // find a case filed as "minor". A value that names no term keeps the spelling
+    // match, so nothing that matched before stops matching.
+    const tf = await liveField('CASE_RECORD', ns, key, f)
+    if (tf?.type === 'term' && tf.terminology_ref) {
+      const term = await resolveTerm(tf.terminology_ref, v, key)
+      if (term?.term_id) {
+        filters.push({ field: 'term_references.term_id', operator: 'eq', value: term.term_id })
+        continue
+      }
+    }
+    filters.push({ field: `data.${f}`, operator: 'eq', value: v })
   }
   if (req.query.since) filters.push({ field: 'updated_at', operator: 'gte', value: String(req.query.since) })
   try {

@@ -556,8 +556,8 @@ def main() -> None:
     list_sp = sub.add_parser("list", help="list cases with server-side facet filters")
     list_sp.add_argument("--status", help="comma-separated: open,responded,closed,implemented")
     list_sp.add_argument("--filed-by", dest="filed_by", help="filter by filer (data.filed_by)")
-    list_sp.add_argument("--severity", help="blocks-me|annoying|fyi|needs-update")
-    list_sp.add_argument("--type", dest="type_", help="case type")
+    list_sp.add_argument("--severity", help="security|blocks-me|wrong-result|degraded|annoying|cosmetic|fyi (older spellings match their term)")
+    list_sp.add_argument("--type", dest="type_", help="bug|gap|docs|design|process|chore|question (older spellings match their term)")
     list_sp.add_argument("--component", help="component label (e.g. scaffold)")
     list_sp.add_argument("--app", help="filter by app (e.g. backend, cross-agent)")
     list_sp.add_argument("--target-yac", dest="target_yac",

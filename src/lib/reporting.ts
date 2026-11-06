@@ -58,11 +58,12 @@ export interface HeaderDoc {
     doc_status?: string
     owner?: string // YAC_MEMORY carries its author here, not in authored_by (CASE-603)
     // Facet fields the search rail reads (present only on the templates that
-    // declare them: kind→DOCUMENT, severity/app/app_term_id/component→CASE_RECORD,
+    // declare them: kind→DOCUMENT, severity/severity_term_id/app/app_term_id/component→CASE_RECORD,
     // release→LIBRARY_DOC). app_term_id resolves the canonical KB_APP term (CASE-422)
     // in place of the document's term_references, which reporting does not carry.
     kind?: string
     severity?: string
+    severity_term_id?: string
     app?: string
     app_term_id?: string
     release?: string
@@ -128,6 +129,7 @@ const HEADER_COLS: Record<string, string> = {
   owner: 'text',
   kind: 'text',
   severity: 'text',
+  severity_term_id: 'text',
   app: 'text',
   app_term_id: 'text',
   release: 'text',
@@ -155,6 +157,7 @@ interface RawHeaderRow {
   owner: string | null
   kind: string | null
   severity: string | null
+  severity_term_id: string | null
   app: string | null
   app_term_id: string | null
   release: string | null
@@ -240,6 +243,7 @@ function toHeaderDoc(r: RawHeaderRow, namespace: string): HeaderDoc {
   if (r.owner != null) data.owner = r.owner
   if (r.kind != null) data.kind = r.kind
   if (r.severity != null) data.severity = r.severity
+  if (r.severity_term_id != null) data.severity_term_id = r.severity_term_id
   if (r.app != null) data.app = r.app
   if (r.app_term_id != null) data.app_term_id = r.app_term_id
   if (r.release != null) data.release = r.release
