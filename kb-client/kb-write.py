@@ -49,7 +49,7 @@ import subprocess
 import sys
 import urllib.parse
 
-from kb_client_core import DEV_ROOT, NAMESPACE, PROJECT, GatewayRefusal, gw_get, gw_post, gw_post_bytes, targets
+from kb_client_core import DEV_ROOT, NAMESPACE, PROJECT, GatewayRefusal, KbMoved, gw_get, gw_post, gw_post_bytes, targets
 
 
 def _coerce(v: str) -> object:
@@ -1031,6 +1031,10 @@ def main() -> int:
     except GatewayRefusal as e:
         print(f"ERROR: rejected — {e}", file=sys.stderr)
         return 1
+    except KbMoved as e:
+        # Not a transport failure: the instance answered, with where the KB went.
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
     except RuntimeError as e:
         print(f"ERROR: transport failure: {e}", file=sys.stderr)
         return 2

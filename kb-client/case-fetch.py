@@ -43,7 +43,7 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-from kb_client_core import PROJECT, GatewayRefusal, gw_get, gw_get_bytes
+from kb_client_core import PROJECT, GatewayRefusal, KbMoved, gw_get, gw_get_bytes
 
 
 # ----------------------------------------------------------------------------
@@ -831,6 +831,10 @@ def main() -> None:
                     out.append(f"| {r.get('flag_id')} | {r.get('flag_type') or ''} | {r.get('target_yac') or ''} "
                                f"| {r.get('doc_status') or ''} | {tgt} | {r.get('title') or ''} |")
                 sys.stdout.write("\n".join(out) + "\n")
+    except KbMoved as e:
+        # Not a transport failure: the instance answered, with where the KB went.
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(2)
     except RuntimeError as e:
         print(f"ERROR: transport failure: {e}", file=sys.stderr)
         sys.exit(2)
