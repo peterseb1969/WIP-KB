@@ -1,0 +1,55 @@
+{
+  "value": "CASE_SEVERITY",
+  "label": "Case Severity",
+  "description": "How bad it is if nothing happens — CASE_RECORD.data.severity. Ordered by sort_order, worst first. Spellings used before this vocabulary existed are aliases of the term they meant, so old cases keep their text and still resolve. Curated: deprecate, don't delete.",
+  "terms": [
+    {
+      "value": "security",
+      "label": "Security",
+      "sort_order": 10,
+      "description": "A security exposure: data or access reachable by someone who should not have it, a secret leaked, an authentication or authorisation gap."
+    },
+    {
+      "value": "blocks-me",
+      "label": "Blocks me",
+      "sort_order": 20,
+      "description": "Work stops until it is fixed; there is no workaround.",
+      "aliases": ["demo-blocker", "blocks-app-visual"]
+    },
+    {
+      "value": "wrong-result",
+      "label": "Wrong result",
+      "sort_order": 30,
+      "description": "Wrong or lost data, or a silent failure: it looks fine and is not. Work goes on but cannot be trusted.",
+      "aliases": ["high", "major"]
+    },
+    {
+      "value": "degraded",
+      "label": "Degraded",
+      "sort_order": 40,
+      "description": "Works, but slowly, unreliably, or only with a workaround.",
+      "aliases": ["medium"]
+    },
+    {
+      "value": "annoying",
+      "label": "Annoying",
+      "sort_order": 50,
+      "description": "Friction or extra effort; nothing is actually wrong.",
+      "aliases": ["needs-update", "needs-rewrite", "mixed (catalogue contains load-bearing, annoying, and cosmetic items)"]
+    },
+    {
+      "value": "cosmetic",
+      "label": "Cosmetic",
+      "sort_order": 60,
+      "description": "Wording, layout or appearance.",
+      "aliases": ["minor", "minor-issues", "acceptable"]
+    },
+    {
+      "value": "fyi",
+      "label": "FYI",
+      "sort_order": 70,
+      "description": "No action expected; recorded for information.",
+      "aliases": ["enhancement", "wishlist"]
+    }
+  ]
+}

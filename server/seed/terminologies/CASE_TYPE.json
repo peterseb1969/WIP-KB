@@ -1,0 +1,56 @@
+{
+  "value": "CASE_TYPE",
+  "label": "Case Type",
+  "description": "What kind of work a case asks for — CASE_RECORD.data.type. Spellings used before this vocabulary existed are aliases of the term they meant, so old cases keep their text and still resolve. Curated: deprecate, don't delete.",
+  "terms": [
+    {
+      "value": "bug",
+      "label": "Bug",
+      "sort_order": 10,
+      "description": "Something does the wrong thing.",
+      "aliases": ["deployer-bug", "ux-papercut", "design-fix"]
+    },
+    {
+      "value": "gap",
+      "label": "Gap",
+      "sort_order": 20,
+      "description": "Something needed does not exist yet: a missing capability, endpoint or feature.",
+      "aliases": ["request", "feature", "platform-gap", "scaffold-gap", "platform-refinement", "feature-handoff"]
+    },
+    {
+      "value": "docs",
+      "label": "Docs",
+      "sort_order": 30,
+      "description": "Documentation is wrong, missing or obsolete.",
+      "aliases": ["doc-audit", "doc-deletion", "doc-yac-methodology-gap"]
+    },
+    {
+      "value": "design",
+      "label": "Design",
+      "sort_order": 40,
+      "description": "A decision is needed before anyone builds.",
+      "aliases": ["design-discussion", "design-decision", "design-rule"]
+    },
+    {
+      "value": "process",
+      "label": "Process",
+      "sort_order": 50,
+      "description": "How the agents work: rules, drift between copies of shared material, coordination.",
+      "aliases": ["discipline", "methodology-gap", "gene-pool-drift", "coordination"]
+    },
+    {
+      "value": "chore",
+      "label": "Chore",
+      "sort_order": 60,
+      "description": "Clean-up, audit or investigation that changes no behaviour.",
+      "aliases": ["refactor", "tracking", "audit", "investigation"]
+    },
+    {
+      "value": "question",
+      "label": "Question",
+      "sort_order": 70,
+      "description": "Needs an answer, not a change.",
+      "aliases": ["fyi"]
+    }
+  ]
+}
