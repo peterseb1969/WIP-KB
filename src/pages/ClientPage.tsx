@@ -82,8 +82,11 @@ const PROJECT_PROFILE = `${KBC_RUN} kb-write.py PROJECT --json '{
   "doc_status": "published"
 }'`
 
+// kb_app_url is the origin this page is served from: on an install that gives
+// each app its own origin, that is the KB's origin, not WIP's host, and the
+// sample stays right wherever the KB is deployed.
 const KB_JSON_SAMPLE = `{
-  "kb_app_url": "https://kb.internal",
+  "kb_app_url": "${window.location.origin}",
   "kb_api_key_file": "<the KB API key file issued when your project was installed>",
   "namespace": "kb",
   "project": "<project>"

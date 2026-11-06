@@ -68,9 +68,28 @@ fi
 KEY="$(cat "$KEYFILE")"
 BASE="$KB_APP_URL$KB_APP_BASE_PATH/server-api/kb-client"
 
+# On an install that serves each app on its own origin, the KB's old URL answers
+# 301 to the new one. curl without -L takes the redirect as a success and hands its
+# empty body on, so a failed fetch is probed once (without following, so the key
+# goes nowhere else) and the new origin is named.
+moved_hint() {
+  r="$(curl -sk -m 10 -o /dev/null -w '%{http_code} %{redirect_url}' -H "X-API-Key: $KEY" "$1" 2>/dev/null)" || return 0
+  code="${r%% *}"; loc="${r#* }"
+  case "$code" in
+    301|302|303|307|308)
+      origin="$(printf '%s' "$loc" | sed -E 's#^(https?://[^/]+).*#\1#')"
+      if [ -n "$origin" ] && [ "$origin" != "$KB_APP_URL" ]; then
+        echo "$2: $KB_APP_URL answered $code — the KB moved to $origin. Set kb_app_url in .claude/kb.json (or KB_APP_URL) to $origin; the path stays the same." >&2
+      else
+        echo "$2: $1 answered $code, redirecting to $loc" >&2
+      fi ;;
+  esac
+}
+
+
 want="$(curl -fsSk -m 15 -H "X-API-Key: $KEY" "$BASE/manifest" \
         | python3 -c 'import sys,json; m=json.load(sys.stdin); print(m.get("bundle_digest") or m.get("client_version") or "none")')" \
-  || { echo "kb-client install: cannot reach manifest at $BASE/manifest" >&2; exit 2; }
+  || { moved_hint "$BASE/manifest" "kb-client install"; echo "kb-client install: cannot reach manifest at $BASE/manifest" >&2; exit 2; }
 have="$(cat "$KBC/.bundle_digest" 2>/dev/null || echo none)"
 
 if [ "$want" = "$have" ]; then
@@ -78,7 +97,7 @@ if [ "$want" = "$have" ]; then
 else
   tmp="$(mktemp)"
   curl -fsSk -m 30 -H "X-API-Key: $KEY" "$BASE/download" -o "$tmp" \
-    || { echo "kb-client install: download failed from $BASE/download" >&2; rm -f "$tmp"; exit 2; }
+    || { moved_hint "$BASE/download" "kb-client install"; echo "kb-client install: download failed from $BASE/download" >&2; rm -f "$tmp"; exit 2; }
   rm -rf "$KBC"; mkdir -p "$KBC"
   python3 - "$tmp" "$KBC" "$want" <<'PY'
 import json, os, sys

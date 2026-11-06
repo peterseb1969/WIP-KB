@@ -12,6 +12,12 @@ KB_E2E_PASSWORD_FILE=~/.wip-deploy/dev-test/secrets/dex-password-e2e \
   npm run test:e2e                       # another instance, once it has an e2e user
 ```
 
+On an install that gives each app its own origin (`network.app_origins:
+subdomain`), the KB lives at `https://kb.<hostname>/apps/kb/` — for the sandbox
+`KB_E2E_URL=https://kb.localhost:8443/apps/kb/`. The old URL answers 301 there.
+Logging in bounces through WIP's own origin and back; the login step waits until
+the browser is back under `KB_E2E_URL`.
+
 The e2e user exists on the sandbox (`~/.wip-deploy/default`) and on dev-test
 (`~/.wip-deploy/dev-test`). On an instance where the app sees a single corpus,
 the three corpus tests skip.

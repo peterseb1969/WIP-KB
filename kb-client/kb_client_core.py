@@ -153,6 +153,44 @@ def _ssl_ctx() -> ssl.SSLContext | None:
     return ctx
 
 
+class KbMoved(RuntimeError):
+    """The instance answered with a redirect. On an install that serves each app on
+    its own origin, the KB's old URL answers 301 to the new one; a POST does not
+    follow it, and following a GET would hand the API key to whatever host the
+    redirect names. So no redirect is followed: the caller is told where the KB
+    went and which setting to change."""
+
+
+def _moved(url: str, code: int, location: str) -> KbMoved:
+    old = urllib.parse.urlsplit(url)
+    new = urllib.parse.urlsplit(urllib.parse.urljoin(url, location))
+    old_origin, new_origin = f"{old.scheme}://{old.netloc}", f"{new.scheme}://{new.netloc}"
+    if new.netloc and new_origin != old_origin:
+        return KbMoved(
+            f"{old_origin} answered {code}: the KB moved to {new_origin}. Set kb_app_url "
+            f"in .claude/kb.json (or KB_APP_URL) to {new_origin}; the path stays the same.")
+    return KbMoved(f"{url} answered {code}, redirecting to {location}; not followed.")
+
+
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise _moved(req.full_url, code, newurl)
+
+
+def _open(req: urllib.request.Request, timeout: float):
+    """urlopen with this client's TLS setting, refusing every redirect (KbMoved).
+    The handler covers the codes urllib follows; any other 3xx with a Location
+    (308 before Python 3.11) arrives as an HTTPError and is refused the same way."""
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=_ssl_ctx()), _RefuseRedirect())
+    try:
+        return opener.open(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        if 300 <= e.code < 400 and e.headers.get("Location"):
+            raise _moved(req.full_url, e.code, e.headers["Location"]) from e
+        raise
+
+
 def read_key(key_file: Path | None) -> str:
     if key_file is None:
         raise SystemExit(
@@ -223,7 +261,7 @@ def _request(base_url: str, key_file: Path, path: str,
     req = urllib.request.Request(_gw_url(base_url, path), data=data,
                                  method=method, headers=headers)
     try:
-        resp = urllib.request.urlopen(req, context=_ssl_ctx(), timeout=timeout)
+        resp = _open(req, timeout)
     except urllib.error.HTTPError as e:
         raw_err = e.read()
         if e.code == 404:
@@ -307,7 +345,7 @@ def gw_get_bytes(path: str, timeout: float = 60) -> tuple[bytes, str | None] | N
         req = urllib.request.Request(_gw_url(url, path), method="GET",
                                      headers={"X-API-Key": read_key(key)})
         try:
-            resp = urllib.request.urlopen(req, context=_ssl_ctx(), timeout=timeout)
+            resp = _open(req, timeout)
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return None
@@ -377,7 +415,7 @@ def gw_post_bytes(path: str, content: bytes, content_type: str, filename: str,
         headers={"X-API-Key": read_key(key), "Content-Type": content_type,
                  "X-Filename": urllib.parse.quote(filename, safe="")})
     try:
-        resp = urllib.request.urlopen(req, context=_ssl_ctx(), timeout=timeout)
+        resp = _open(req, timeout)
         status, raw, ctype = resp.status, resp.read(), resp.headers.get("Content-Type") or ""
     except urllib.error.HTTPError as e:
         status, raw, ctype = e.code, e.read(), e.headers.get("Content-Type") or ""
