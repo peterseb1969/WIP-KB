@@ -17,6 +17,14 @@ setup('log in', async ({ page, baseURL }) => {
     await page.waitForLoadState('networkidle')
     if (page.url().startsWith(baseURL!)) break
     const login = page.locator('input[name="login"]')
+    // Dex shows the form again with an error when the user or password is wrong —
+    // typically an install (re)created without the e2e user.
+    if (step > 0 && (await login.count()) && (await page.getByText(/Invalid .*password/i).count())) {
+      throw new Error(
+        `Dex refused ${LOGIN} with the password in ${PASSWORD_FILE}. The install probably has no `
+          + 'such user (yet): `wip-deploy user add e2e --email e2e@wip.local --group wip-editors --name <install>`.',
+      )
+    }
     if (await login.count()) {
       await login.fill(LOGIN)
       await page.fill('input[name="password"]', password)

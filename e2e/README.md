@@ -7,14 +7,14 @@ to point them at.
 
 ```bash
 npm run test:e2e                         # the localhost sandbox
-KB_E2E_URL=https://dev-test.internal/apps/kb/ \
+KB_E2E_URL=https://kb.dev-test.internal/apps/kb/ \
 KB_E2E_PASSWORD_FILE=~/.wip-deploy/dev-test/secrets/dex-password-e2e \
   npm run test:e2e                       # another instance, once it has an e2e user
 ```
 
 On an install that gives each app its own origin (`network.app_origins:
 subdomain`), the KB lives at `https://kb.<hostname>/apps/kb/` — for the sandbox
-`KB_E2E_URL=https://kb.localhost:8443/apps/kb/`. The old URL answers 301 there.
+`https://kb.wip.localhost:8443/apps/kb/`, the default. The old URLs answer 301 there. An app origin needs a hostname with a dot, so the sandbox is installed as `wip.localhost`, not `localhost`.
 Logging in bounces through WIP's own origin and back; the login step waits until
 the browser is back under `KB_E2E_URL`.
 
@@ -24,7 +24,7 @@ the three corpus tests skip.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `KB_E2E_URL` | `https://localhost:8443/apps/kb/` | The app under test. |
+| `KB_E2E_URL` | `https://kb.wip.localhost:8443/apps/kb/` | The app under test (the sandbox, installed as `wip.localhost` with an origin per app). |
 | `KB_E2E_LOGIN` | `e2e@wip.local` | The Dex user to log in as. |
 | `KB_E2E_PASSWORD_FILE` | `~/.wip-deploy/default/secrets/dex-password-e2e` | File holding that user's password. |
 | `KB_E2E_CHANNEL` | `chrome` | Browser. `chrome` uses the installed Google Chrome; elsewhere run `npx playwright install chromium` and set `chromium`. |
