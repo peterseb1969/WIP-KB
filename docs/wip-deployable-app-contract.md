@@ -38,7 +38,7 @@ The contract has two halves — what the **source repo** must look like, and wha
 | Runtime app-config route (CASE-551) | `GET ${APP_BASE_PATH}/api/app-config` returns the deployment's client-visible config as JSON — at minimum `{"namespace": <WIP_NAMESPACE or null>}`; multi-namespace apps add their extra keys (e.g. `library_namespace`). Allowlist only: never an env dump, never secrets (the response reaches every browser); `Cache-Control: no-store`. The SPA fetches this at boot (scaffold: `src/lib/app-config.ts`) for **every** client-visible per-deployment value — never mirror such values into `VITE_*` build bakes; a bake and runtime env are two sources that drift silently (`VITE_BASE_PATH` is the one deliberate exception — consumed at bundle-emit time, loud when wrong). The scaffold emits the route inline; apps that vendor `@wip/proxy` ≥ 0.4.0 can mount its `appConfigHandler` at the same path. |
 | Client fetches | Every URL prefixed with `import.meta.env.BASE_URL` — *never* bare `/api/...` or `/wip/...`. |
 | `wipProxy` mount order (`@wip/proxy` ≥ 0.5.0) | The proxy streams both directions (O(1) memory in payload size — large archive uploads/downloads pass through flat; no bespoke streaming routes needed). Consequence: it consumes the request as a raw stream, so it must be mounted **before** any body-parsing middleware (`express.json()`, …) that would match the same paths — a parser ahead of the proxy drains the body and an empty stream is forwarded. The deprecated `bodyLimit` option is a no-op. |
-| `Dockerfile` (production) | Multi-stage. Build stage takes `VITE_BASE_PATH` as ARG and bakes it into the static bundle. Production stage runs the server via `tsx server/index.ts` (or your app's entry), exposes the app's port, healthchecks `${APP_BASE_PATH}/api/health`. **If the manifest declares an HTTP healthcheck, the runtime image MUST contain `curl` or `wget`** — the rendered probe is a shell `curl \|\| wget` chain; an image with neither (e.g. `node:*-slim`, distroless — alpine bases get busybox `wget` for free) exits 127 on every probe and reports permanently unhealthy while the app serves fine, and the install's health-wait fails pointing at the app. Fix: install `wget` in the runtime stage (~2 MB), use an alpine base, or drop `spec.healthcheck` — the container then shows plain `Up` with no health status, like the platform router. `wip-deploy check-app-deployability` pre-flights this. **The runtime stage must also contain the app's bootstrap seed directory** (`server/seed/` by default, or whatever `SEED_DIR` points at): the bootstrap reads it at runtime, resolved from the working directory. If you bundle the server (e.g. esbuild into `dist/server/`), the bundle does not carry the seeds, and a module-relative seed path no longer points at them — copy the seed dir explicitly. A missing seed dir fails the bootstrap with its resolved path before anything is written. |
+| `Dockerfile` (production) | Multi-stage. Build stage takes `VITE_BASE_PATH` as ARG and bakes it into the static bundle. Production stage runs the server via `./node_modules/.bin/tsx server/index.ts` (or your app's entry), exposes the app's port, healthchecks `${APP_BASE_PATH}/api/health`. **If the manifest declares an HTTP healthcheck, the runtime image MUST contain `curl` or `wget`** — the rendered probe is a shell `curl \|\| wget` chain; an image with neither (e.g. `node:*-slim`, distroless — alpine bases get busybox `wget` for free) exits 127 on every probe and reports permanently unhealthy while the app serves fine, and the install's health-wait fails pointing at the app. Fix: install `wget` in the runtime stage (~2 MB), use an alpine base, or drop `spec.healthcheck` — the container then shows plain `Up` with no health status, like the platform router. `wip-deploy check-app-deployability` pre-flights this. **The runtime stage must also contain the app's bootstrap seed directory** (`server/seed/` by default, or whatever `SEED_DIR` points at): the bootstrap reads it at runtime, resolved from the working directory. If you bundle the server (e.g. esbuild into `dist/server/`), the bundle does not carry the seeds, and a module-relative seed path no longer points at them — copy the seed dir explicitly. A missing seed dir fails the bootstrap with its resolved path before anything is written. **The image starts without fetching anything:** whatever the start command runs (tsx, for the scaffold) is in the image, listed under `dependencies` in `package.json` rather than `devDependencies`, and the CMD runs it by path (`./node_modules/.bin/tsx`), not through `npx`. A plain `npx tsx` downloads tsx from the npm registry at every start when the image lacks it, as a runtime stage that installs with `npm ci --omit=dev` does when tsx is a devDependency. An install without registry access (air-gapped, a firewalled cluster, an npm outage) then cannot start the app, and the version that runs is whatever the registry serves. `npx --no-install` installs nothing, but with the runner missing it still asks the registry before failing: offline, the start fails on a DNS error naming the registry, after retries. By path, a missing runner fails at once, naming the file. `wip-deploy check-app-deployability` fails a plain `npx` and a runner the image cannot contain. |
 | `.dockerignore` | Excludes `node_modules`, `dist`, `*.log`, `.git`. Be careful with `*.md` — narrow it to `/*.md` and add explicit excludes for `papers/` / `docs/`, **not** an unscoped `*.md` that catches runtime files like `server/prompts/assistant.md`. |
 | Readme | A `## Development with wip-deploy` section documenting the contract surface for human readers. Two paragraphs. Pointers at this paper. |
 
@@ -203,7 +203,22 @@ These are platform-side guarantees the contract assumes. They're invariants toda
     - {path: /apps/<name>, auth_required: true, allowed_groups: [wip-admins]}
   ```
 
-  The gateway answers 403 to a logged-in user in none of the groups, before any request reaches your app: a short "no access" page for browsers, JSON for API callers. Behind NGINX (k8s) only the status reaches the browser. No session is still a login redirect, and an empty or absent list lets any logged-in user in. Group names may use letters, digits, `.`, `_` and `-`; the field requires `auth_required: true`. Keep `ALLOWED_GROUPS` only if your app also runs its own OIDC client.
+  The gateway answers 403 to a logged-in user in none of the groups, before any request reaches your app: a short "no access" page for browsers, JSON for API callers. No session is still a login redirect, and an empty or absent list lets any logged-in user in. Group names may use letters, digits, `.`, `_` and `-`; the field requires `auth_required: true`. Keep `ALLOWED_GROUPS` only if your app also runs its own OIDC client.
+
+- **Your app may be served on an origin of its own** — when the install sets `network.app_origins: subdomain` (the default for new installs), the app is served at `https://<label>.<hostname>[:port]/apps/<label>/`, where `<label>` is the last segment of your route prefix (`/apps/rc` → `rc.<hostname>`). Your base path does not change, so the app needs no rebuild, and `https://<hostname>/apps/<label>/…` answers 301 to the new origin. What follows for the app:
+  - **Every browser request stays on your own origin**, under `BASE_URL` (the client-fetch rule above). A browser call to WIP's origin (`/api/…`, `/wip/…` on the bare host) is now a cross-origin request with no session: it fails. Server-side calls through `@wip/proxy` are unaffected.
+  - **Your server never sees a session cookie.** The gateway gives your origin a short-lived `wip_app_session` and removes it before the request reaches you; read identity from `X-WIP-User` / `X-WIP-Groups` as before.
+  - **Use `@wip/react`'s `WipProvider`** (0.26.0 or later), or call `useAppSessionRenewal` yourself: it renews the session in the background, so a long-open tab's `fetch` calls keep working. Without it, an app open longer than the session lifetime (15 minutes by default) sees its API calls fail until the page is reloaded.
+  - **`/auth/logout` and `/auth/userinfo` work on your origin** (relative links as before). The other `/auth/*` paths belong to WIP's origin.
+  - **Non-browser clients of your app's URLs** (a CLI, another service) must use the new origin or follow redirects: a `POST` does not follow the 301.
+
+- **Trust the identity headers only on routes you declare `auth_required: true`** — `X-WIP-User` and `X-WIP-Groups` come from the gateway on a protected route. On a route you declare `auth_required: false` the gateway never runs, so there is no identity to read. The front door, `wip-caddy` on every target (on k8s behind the cluster's ingress controller), removes client-sent copies:
+  - on an unprotected app route, `X-WIP-User`, `X-WIP-Groups` and `X-WIP-Auth-Method` are all removed, so your app receives none;
+  - on a protected one, the gateway's answer replaces `X-WIP-User` and `X-WIP-Groups` (or removes them), and `X-WIP-Auth-Method` is removed.
+
+  Attached apps get the same from the app edge.
+
+  So: read identity (author attribution, `/api/me`, an admin check on `x-wip-groups`) only in handlers served under an `auth_required: true` route, and never let an unprotected route's handler fall through to code that does. Don't decide anything on `X-WIP-Auth-Method`. The scaffold's `requireAdmin()` reads `x-wip-groups`: mount it only under a protected route.
 
 - **NATS access is a role, declared in the manifest** — NATS requires authentication, and an app gets a NATS user only by declaring roles:
 
@@ -225,7 +240,7 @@ One **non-guarantee** belongs in the same list, because apps have assumed its op
 - **Registered reporting views are not archived — apps own them.** WIP backup/restore carries MongoDB state only; registered SQL views (`POST /api/reporting-sync/namespace/{ns}/views`) live in PostgreSQL bookkeeping and come back **missing after every restore, by design**. An app that queries a registered view must tolerate its absence and re-register it idempotently (re-registering an existing name replaces the definition): at bootstrap, at startup, and again when a query fails on a missing relation. Registration validates the SQL against real reporting tables, which exist only after reporting-sync has synced the namespace — so a failure right after bootstrap or restore is a retry, not an error. The bootstrap scaffold ships this pattern as `server/seed/views/` + `ensureRegisteredViews()` / `ensureRegisteredViewsWithRetry()` in `bootstrap.server.ts.template`. Views registered by hand outside any app bootstrap are ephemeral: nothing recreates them after a restore.
   The scaffold seeds an inert example, `templates/bootstrap/seed/views/_00_example.json` (`_`-prefixed files are skipped): write its SQL against the unqualified entity view `doc_<template_value>`, because it runs in the namespace's own schema and the namespace name differs between dev and deployed installs. Registering needs namespace **admin** on the app's namespace, or a `wip-admins` / `wip-services` key; the deployment's key qualifies, a `write`-granted runtime key does not.
 
-**Your app runs with a key of its own, never the install's master key.** The deployer derives one config-file key per enabled app from its manifest and sets `WIP_API_KEY` from it; do not declare `WIP_API_KEY` yourself, and a manifest naming `from_secret: api-key` is refused. The key holds:
+**Your app runs with a key of its own, never the install's master key.** The deployer derives one key per enabled app from its manifest, renders it into the install's key file (which the Registry imports; the key is then a Registry record wip-deploy manages) and sets `WIP_API_KEY` from it; do not declare `WIP_API_KEY` yourself, and a manifest naming `from_secret: api-key` is refused. In an apps-only install (no local backend, apps against a remote WIP) the apps run with the install's own key instead, the one `wip-deploy import-bundle` brings from the remote WIP, since the remote Registry knows no derived key. The key holds:
 
 - `admin` on every namespace in `spec.namespaces` (your bootstrap creates them and registers their views);
 - `read` or `write` on each namespace you list under `spec.namespace_access`, for namespaces another app owns or a shared one:
@@ -255,11 +270,39 @@ The app also owns its **namespace settings**, and declares them in its manifest,
 
   `settings` takes `description`, `isolation_mode`, `allowed_external_refs` (namespace names on the install), `inbound_references` (`closed` by default: other namespaces' writers need read on it; `open` admits any writer), `id_config` and `deletion_mode`. One namespace must have role `main`, and a namespace has one owning app on an install.
 
-  The deployer renders every enabled app's declarations as **namespace reservations** the Registry reads (it refuses two apps reserving one namespace, and two reservations claiming one ID prefix). With a reservation, a key holding `admin` on the namespace may create it through the namespace upsert, so your bootstrap does not need a platform admin key. It creates the namespace only as reserved: the bootstrap upserts with **no settings**, the reservation supplies them, and any setting it sends must equal the reservation's (403 naming the field otherwise). A namespace that already exists is never changed this way; changing a live namespace's settings is an operator action. `server/seed/namespaces.json` keeps the roles (`authored_as`, `env`) and `external`; a role that still carries `config` fails the bootstrap before its first write.
+  The deployer renders every enabled app's declarations as **namespace reservations** the Registry reads (it refuses two apps reserving one namespace, and two reservations claiming one ID prefix). A namespace has one owner across the whole install, and the install's own reservation wins: if a platform admin has already reserved your namespace through a runtime API key (for an app wip-deploy does not manage), the apply warns and names that key, and the Registry replaces the key's reservation with yours. If one of your ID prefixes is already claimed by such a reservation, the apply refuses, since one prefix names one ID sequence: pick another prefix or have the operator release the runtime reservation. With a reservation, a key holding `admin` on the namespace may create it through the namespace upsert, so your bootstrap does not need a platform admin key. It creates the namespace only as reserved: the bootstrap upserts with **no settings**, the reservation supplies them, and any setting it sends must equal the reservation's (403 naming the field otherwise). A namespace that already exists is never changed this way; changing a live namespace's settings is an operator action. `server/seed/namespaces.json` keeps the roles (`authored_as`, `env`) and `external`; a role that still carries `config` fails the bootstrap before its first write.
 
 You don't need to test these. They're stable. Just use them.
 
 ---
+
+## Attached apps: under the umbrella without wip-deploy
+
+An app its own admin deploys can be **attached** instead of deployed: an
+app-admin records it in the Registry (`POST /api/registry/attachments`,
+`docs/wip-guide.md` §6.5), and the `app-edge` component serves it at
+`/apps/<name>`. What the app must do differs from a deployed app in these
+points:
+
+- **Be reachable from the app edge** at the upstream URL in the record:
+  scheme, host and port, no path. Not on WIP's own hosts, loopback,
+  link-local or cloud metadata addresses; those are refused.
+- **Serve under `/apps/<name>/`,** as a deployed app does, or set
+  `strip_prefix` on the record and serve at the root. `VITE_BASE_PATH` /
+  `APP_BASE_PATH` follow the same rules as above.
+- **Hold its own key.** It's a Console key the app-admin creates in RC,
+  widened with `reserve` for the namespaces the app creates. Read it from a
+  file or env of the app's own deployment. The edge never hands the app a
+  key.
+- **Trust `X-WIP-User` / `X-WIP-Groups` only from the edge,** and only on
+  routes the record marks `auth_required`. The edge removes browser-sent
+  copies. If the app is also reachable directly, bypassing the edge, anyone
+  can send those headers there.
+- **Expect `X-Forwarded-Proto` / `X-Forwarded-Host`** set to the install's
+  public URL, for building absolute URLs and secure cookies. The gateway's
+  `wip_session` cookie never reaches the app.
+- **Attaching is full trust.** The app is served on WIP's origin, so its
+  pages can act as any visitor elsewhere under the umbrella.
 
 ## Local dev with this scaffolded in
 
@@ -317,7 +360,7 @@ What `--preset query` ships today vs. what this paper recommends:
 | `/api/me` | OIDC session only | Gateway-header sniff → OIDC → anonymous |
 | SPA fallback scope | **In scaffold** (CASE-834) — API prefixes excluded; apps created before it keep the catch-all | Exclude the API prefixes (`/api`, `/auth`, `/wip`, `/server-api`, `/mcp`) so unmatched API paths return 404 JSON; page routes still fall through to `index.html` |
 | `Dockerfile.dev` | **In scaffold** | Provided as starter (canonical pattern) |
-| `Dockerfile` (production) | **In scaffold** — two-stage, `VITE_BASE_PATH` as ARG, `wget` installed in the `node:24-slim` runtime | Two-stage; `VITE_BASE_PATH` as ARG; `curl` or `wget` in the runtime stage if the manifest declares a healthcheck |
+| `Dockerfile` (production) | **In scaffold** — two-stage, `VITE_BASE_PATH` as ARG, `wget` installed in the `node:24-slim` runtime, tsx a dependency started by path (`./node_modules/.bin/tsx`) | Two-stage; `VITE_BASE_PATH` as ARG; `curl` or `wget` in the runtime stage if the manifest declares a healthcheck; the start fetches nothing (the runner in `dependencies`, started by path, not through `npx`) |
 | `.dockerignore` | **In scaffold** | Provided; narrow `*.md` exclusion called out |
 | `apps/<name>/wip-app.yaml` | Not generated — written by hand in the WIP repo | Provided alongside source-repo files; declares both ports + required env |
 

@@ -70,7 +70,7 @@ wip-toolkit status --integrity   # adds the heavy referential-integrity scan
 |---|---|
 | `headless` | API services only, no UI |
 | `core` | + console + API keys |
-| `analytics` | + OIDC (Dex) + reporting-sync + Postgres |
+| `analytics` | + OIDC (Dex) + reporting-sync + Postgres + the app edge (§6.5) |
 | `standard` (default) | + Garage + MCP server — fully exercisable platform |
 | `full` | + ingest-gateway (async bulk via NATS JetStream) |
 
@@ -105,7 +105,7 @@ It prints each service's image, and in SOURCE the rule that decided its tag:
 wip-deploy images --name wip --tag 20261101a
 ```
 
-Each row says whether it moves or stays. Apps that only the new tag would move are flagged ⚠. Apps are built and tagged in their own repos, so a platform tag usually doesn't exist for them.
+The preview is exactly the roll `redeploy` makes with the same flags. Each row says whether it moves or stays, and apps the new tag alone would move are listed as staying on their current images (step 3 explains why). It ends with the command that applies the roll.
 
 **3. Roll the platform.**
 
@@ -250,6 +250,24 @@ Choose by what you need. If you want auth, go with 1 or 3 (and pick `--hostname`
 
 For scenarios 2 and 4 the console's dev server needs proxy rules (Vite `vite.config.ts → server.proxy`) pointing `/api/registry`, `/api/def-store`, etc. at the matching `localhost:800x`.
 
+### 3.5 Apps on origins of their own (`network.app_origins`)
+
+Served under `/apps/<name>` on WIP's own origin, every app shares the visitor's login: an app's server receives the session cookie, and an app's JavaScript can call any other app as the visitor. With **`subdomain`** each app has an origin of its own and a session that works nowhere else:
+
+| | `path` | `subdomain` |
+|---|---|---|
+| App URL | `https://<hostname>:8443/apps/rc/` | `https://rc.<hostname>:8443/apps/rc/` |
+| Session | `wip_session`, shared by WIP and every app | per app: `wip_app_session`, host-only, naming the app |
+| Old app URLs | — | answer 301 to the app's origin |
+| Default for | installs made before this setting | new installs |
+
+- **Logging in once still covers every app.** The app origin sends the browser through `/auth/app-login` on WIP's origin, which hands it a one-time code; `/auth/handoff` on the app origin turns that into the app's session. Only WIP's origin talks to Dex, so Dex needs nothing per app.
+- **Logout reaches an app within its session lifetime** (`APP_SESSION_MAX_AGE`, 15 minutes by default). An app built on `@wip/react` 0.26.0 or later renews its session in the background while it is open; see the app contract.
+- **DNS:** every `<label>.<hostname>` must reach the install. `localhost` needs nothing (browsers resolve `*.localhost` to loopback); for any other hostname, add a wildcard record (`*.<hostname>`) or one per app.
+- **TLS:** `tls internal` issues a certificate per app origin from Caddy's CA, which browsers already trust once they trust the install's CA. Attached apps' origins are not known when wip-caddy is rendered: it gets their certificates on demand, and only for a name the app edge confirms as an active attachment. With `tls letsencrypt`, deployer apps get a certificate per origin the same way the hostname does; attached apps' on-demand certificates have not been tried against a public CA yet.
+- **k8s:** the Ingress gets a `*.<hostname>` rule and TLS host, and wip-caddy behind it answers each origin on plain HTTP. A self-signed certificate the deployer mints names `*.<hostname>`; an existing self-signed `wip-tls` without it is refused, and the remedy is `kubectl delete secret wip-tls -n <namespace>` and another apply. With `tls external`, your certificate must cover `*.<hostname>`.
+- **Switching an existing install:** `wip-deploy redeploy --name <install> --app-origins subdomain` (or `path`). An install over an existing one keeps its mode unless `--app-origins` says otherwise. Bookmarks keep working through the 301; **non-browser clients of app URLs** (for example a CLI that writes to an app's `server-api`) must use the new origin, because a `POST` does not follow the redirect.
+
 ---
 
 ## 4. Authentication
@@ -281,19 +299,41 @@ The `WIP_AUTH_MODE` env var picks the mode. `dual` is recommended.
 
 API keys are sent as `X-API-Key: <key>`. JWTs are sent as `Authorization: Bearer <token>`.
 
-### 4.3 API keys: config keys vs runtime keys
+### 4.3 API keys: key-file keys vs Console keys
 
-WIP supports two kinds of API keys; both authenticate identically.
+Every API key is a Registry record, and every service resolves keys through
+the Registry: key sync carries the keys (every 30 s), the Registry answers
+for their grants. Records have two authors:
 
-| Aspect | Config keys | Runtime keys |
+| Aspect | Key-file keys (wip-deploy) | Console keys |
 |---|---|---|
-| Defined in | `config/api-keys.json` | MongoDB, via REST API |
-| Created by | Declared in the deployment spec (`--api-key`, below) or by editing the file + recreating services | `POST /api/registry/api-keys` |
-| Modifiable via API | No (read-only) | Yes |
-| Deletable via API | No | Yes |
-| Survives a MongoDB wipe/restore | **Yes** — material lives in the spec + secret backend | **No** — key and grants are Mongo rows; the plaintext is unrecoverable |
-| Use case | Bootstrap keys, service accounts, agent keys that must survive redeploys | App keys, temporary keys, UI-created keys |
-| `source` field on the key | `"config"` | `"runtime"` |
+| Authored in | The deployment spec and app manifests, rendered to the key file `config/keys/api-keys.json` | `POST /api/registry/api-keys` (or RC's API-key page) |
+| In the Registry | Imported, `managed_by: "wip-deploy"`, `origin: "file"` | `origin: "console"` |
+| Changed through the API | No — 409, `error_code: managed_by_deployer`; change them with wip-deploy | Yes |
+| Plaintext kept by | The install's secret backend; the app gets it as `WIP_API_KEY` | Nobody: shown once at creation |
+| After a MongoDB wipe or restore | Re-imported by the Registry at its next start (and every 10 s) | Gone unless restored from a backup |
+| Use case | App keys, standing agent and service keys | Apps wip-deploy does not manage, temporary keys |
+
+**Only the Registry reads the key file.** The deployer renders it into a
+directory of its own (`config/keys/`, on k8s the Secret `wip-key-file`),
+mounted only into the Registry as `WIP_REGISTRY_KEY_FILE`; no other
+container holds a plaintext (`wip-deploy verify --security` checks it). The
+Registry imports each key (hashed; the plaintext is never stored), the
+grants a key declares and the install's namespace reservations into its own
+records, marked `managed_by: "wip-deploy"`. It re-imports at startup, every
+10 seconds and whenever a reservation lookup finds a file changed, and
+removes records the files no longer declare. A file it cannot trust
+(missing, unparseable, or without the `wip-canary` key) changes nothing.
+
+A Console key with a key-file key's name, a grant on a namespace a key-file
+key declares, or a runtime reservation of a prefix the file reserves is
+replaced by the file's record, and the Registry logs it at CRITICAL. A
+Console key with a key-file key's plaintext does not authenticate and is
+listed with `shadowed_by`.
+
+If the Registry is down, keys stop working: a service answers 503 once its
+synced copy is 90 s old (three missed key syncs), and the Registry's grants are the only
+grants. That is the design.
 
 **Spec-declared keys (recommended for standing agent/service keys).**
 Declare keys on the deployment and wip-deploy provisions everything:
@@ -305,16 +345,17 @@ wip-deploy install --target dev \
 
 For each declared key the deployer generates a random plaintext into the
 install's secret backend (`~/.wip-deploy/<name>/secrets/<key>-api-key`,
-stable across re-applies), renders `config/auth/api-keys.json` (mode
-0600), and mounts it into every backend service. `namespaces` is the
-key's read scope; `grants` gives per-namespace `read`/`write`/`admin`
-and must stay within `namespaces`. Crucially, a spec-declared key's
-grants resolve **locally in wip-auth** — not via Registry grants in
-MongoDB — so the key keeps working, at full declared scope, after any
-Mongo rebuild (redeploy with a fresh volume, `nuke --remove-data`, or
-the wipe-and-restore remediation ritual). Runtime keys die in exactly
-those events, and backups do not cover them. The declaration persists
-in the install's state: plain `redeploy`/`rebuild` keep it.
+stable across re-applies) and renders it into the key file. `namespaces` is
+the key's read scope; `grants` gives per-namespace `read`/`write`/`admin`
+and must stay within `namespaces`. A key that declares `grants` has them
+owned by the file: the API refuses to change them. A key without `grants`
+keeps Registry grants you set through the API. Because the Registry
+re-imports the file at every start, a spec-declared key keeps working, at
+full declared scope, after any Mongo rebuild (redeploy with a fresh volume,
+`nuke --remove-data`, or the wipe-and-restore remediation ritual). Console
+keys die in exactly those events unless a system backup restores them (§5.7). The
+declaration persists in the install's state: plain `redeploy`/`rebuild`
+keep it.
 
 Several keys are more comfortably declared in a file than in repeated
 `--api-key` JSON — reviewable and diffable deployer input:
@@ -388,7 +429,7 @@ wip-deploy app-namespace remove wip-kb kb-research
 ```
 
 - The addition is kept in the install's saved spec, so `redeploy` keeps it. Other installs and the app's manifest are untouched.
-- Nothing restarts: the app keeps its key, and its scope changes in the key file, which every service re-reads within about 10 seconds (about a minute on k8s, while the Secret propagates). The Registry reads the reservation on the next upsert.
+- Nothing restarts: the app keeps its key, and its scope changes in the key file. The Registry re-imports it within about 10 seconds (about a minute on k8s, while the Secret propagates), and the other services follow within one key sync (30 seconds). The Registry reads the reservation on the next upsert.
 - An owned namespace may be created by the app's own key, with the settings given here (`--setting deletion_mode=full`, `--setting isolation_mode=strict`, `--setting allowed_external_refs=a,b`, `--setting id_config=<json>`). The app may send its own description; any other setting must match. Or create it yourself with the master key and let the app use it.
 - `remove` takes the namespace away from the app at once, even while it holds the app's data. The namespace and its data stay; deleting them is a separate admin action.
 - An app holding the master key (`privileged_key`) takes no additions, and a namespace its manifest already declares cannot be added again.
@@ -668,7 +709,171 @@ edge-type templates through import have known open defects at the time of
 writing — check open cases against the toolkit before relying on either.
 There is no point-in-time snapshot (an export captures current state), no
 archive merge/diff, and archives do not carry API keys or namespace
-grants: a restore brings back data, not access.
+grants: a restore brings back data, not access. Access has its own backup
+(§5.7).
+
+### 5.7 System backup — API keys, grants, reservations and attachments
+
+Namespace backups never carry auth state. The **system backup** does: every
+API key the Registry stores, every namespace grant, every namespace
+reservation and every app attachment (§6.5), in one JSON file. It includes
+the keys the Registry imported from the install's key file. After a wipe or a
+move to other hardware, it brings back the keys apps were issued from the
+Console (the apps still hold the plaintexts), the grants to users, groups and
+keys, the runtime reservations, and the attached apps' routes.
+
+```bash
+# Platform admin key required for both
+wip-toolkit --proxy system-backup auth-state.json        # written with mode 0600
+
+wip-toolkit --proxy system-restore auth-state.json       # dry run: what would change
+wip-toolkit --proxy system-restore auth-state.json --apply
+```
+
+The same is available as `POST /api/registry/system-backup` and
+`POST /api/registry/system-restore` (`dry_run=true` by default). There is no
+MCP tool.
+
+**What it carries:**
+- Each key's bcrypt hash and metadata, never a plaintext.
+- No config keys, which includes the master key. They come from the install's
+  own config.
+
+**The file is sensitive.** It holds every key hash. Keep it like
+`~/.wip-deploy/`. It is not encrypted; encrypt it for offsite storage as
+in §5.5.
+
+**How a restore behaves:**
+- **Upsert by default.** A key is matched by name, a grant by namespace,
+  subject and subject type, a reservation by prefix, and an attachment by
+  name. Missing records are created and identical ones left alone. A record
+  that differs is listed and skipped unless `--overwrite` (`--mode overwrite`)
+  is given. Records that are not in the file are kept.
+- **`--mode mirror` makes the file the exact state.** It also replaces what
+  differs, and it removes every record the file does not hold:
+  - keys go as a revoke takes them, with their grants;
+  - grants and reservations are deleted;
+  - attachments are deactivated, never deleted.
+
+  It is stack-wide, since every system backup is. It never removes:
+  - records the install's files manage, or grants to a key whose grants the
+    key file declares;
+  - the bootstrap grants;
+  - keys named like config keys;
+  - user grants, when the file's user grants are not restored (another OIDC
+    issuer without `--include-user-grants`);
+  - the key the command runs with. A plan that would remove it is listed under
+    "Refused" and not applied. The same holds, in `--overwrite` and
+    `--mode mirror`, for a plan that would replace that key by the file's
+    different record of the same name: a re-created admin key restored from
+    an older file would otherwise lock you out.
+
+  Review the dry run, then apply with the plan digest it prints
+  (`--mode mirror --apply --expect sha256:…`). The apply is refused if the
+  plan has changed since. A removed key stops working at the Registry at
+  once, and at the other services on their next key sync (up to about 30 s).
+  A mirror is not one transaction: if it fails part-way, re-run it. After a
+  mirror the stack holds no keys of its own beyond the file's, so a mirror
+  also adopts a file's other hash salt, where an upsert refuses it.
+- **A scoped backup covers one app.** `wip-toolkit system-backup aa.json
+  --namespace aa --namespace aa-data --attachment aa` carries the grants and
+  reservations of those namespaces, the keys whose namespaces all lie in them,
+  and the named attachments, and the file declares that scope. Attachments
+  have no namespace, so name the ones to carry. A key in a stack-wide group
+  (`wip-admins`, `wip-services`) reaches every namespace, so it is never in a
+  scope, whatever its namespace list. The backup lists the keys the
+  scope touches but cannot carry (a namespace outside it, none, or a
+  stack-wide group); the file
+  still carries their grants inside the scope, and the restore warns about
+  them. **A restore of a scoped file changes nothing outside its scope**:
+  - a mirror never removes keys outside the scope, grants and reservations
+    on other namespaces, or unnamed attachments;
+  - a key whose copy on this stack reaches outside the scope (or holds no
+    namespace list, or is in a stack-wide group) is never replaced
+    (`out_of_scope_here`);
+  - the file's own records outside its declared scope are skipped
+    (`outside_archive_scope`).
+
+  An empty `--namespace` or `--attachment` is refused. A scoped file under
+  another hash salt is adopted only by a stack with no keys of its own, so in
+  practice it is restored onto the stack it came from, or one sharing its
+  salt.
+- **Restored records are unmanaged** (`origin: restored`). Where the install's
+  own key file or reservations file declares the same key, grant or prefix,
+  the Registry's import takes it over on its next pass (§4.3).
+- **The install's files win.** A restore never replaces a record wip-deploy
+  manages on this instance, a grant to a key whose grants the key file
+  declares, or a key named like a loaded config key, even with `--overwrite`.
+- **The hash salt travels with the file.** Runtime API keys are hashed under
+  a salt the Registry keeps for the stack. A new install generates it on the
+  Registry's first start; an install that already had keys keeps the old
+  default, `wip_auth_salt`. It is fixed for the stack's life. The file
+  carries it:
+  - onto a stack with the same salt, the restore proceeds as usual;
+  - onto a **fresh** stack, one holding no keys of its own (only keys its key
+    file manages), the restore adopts the file's salt and re-hashes the managed
+    keys. Services verify under it from their next key sync, within 30 s,
+    with no restart. This is the disaster-recovery path: a stack rebuilt from
+    nothing takes the old stack's keys back;
+  - onto a stack with keys of its own, it is refused (409), because adopting
+    the salt would invalidate them.
+
+  The salt is not secret from whoever holds the file. Its value is that
+  stacks do not share one constant. `WIP_AUTH_API_KEY_HASH_SALT` now only
+  salts each process's own config keys.
+- **User grants follow the OIDC issuer.** User grants made under a different
+  issuer are skipped, since the same email may belong to someone else. Pass
+  `--include-user-grants` to restore them anyway. Group and key grants are
+  always restored.
+- **Attachments come back last,** after keys and grants, with their archived
+  status, so an attached app is under the umbrella again as soon as it runs
+  with its original key. The attach rules still apply:
+  - a name one of this install's own apps routes under is skipped;
+  - an upstream that resolves, from the Registry, to one of the install's own
+    hosts or to a loopback, link-local or metadata address is skipped. The
+    app edge checks again where it resolves (§6.5);
+  - an upstream that does not resolve yet is restored and listed as
+    `unresolved`, since the app often comes back after the stack;
+  - an entry that fails the attach rules is skipped and listed on its own.
+    The keys, grants and other attachments are restored all the same;
+  - an entry the source's wip-deploy manages is skipped: the install that
+    deploys the app re-creates it.
+- **Either order.** A grant on a namespace that exists (active or archived),
+  or on a prefix reserved here by the archive's owner, is written as it was
+  (a reserving key needs its grant to create the namespace). Any other grant
+  is written **orphaned**, including one on a prefix another owner reserves
+  here: it counts as no grant until it is activated, and the report lists
+  it. (A key whose own `namespaces` list names the prefix still reads it, as
+  any such key does without a grant.) A grant the archive holds orphaned
+  never replaces one that is effective here. It is activated
+  when a platform admin creates the namespace, which a namespace restore run
+  by an admin does, or when a namespace admin activates it (`POST
+  /api/registry/namespaces/{prefix}/grants/activate`) or grants it again. A key
+  that reserves the prefix later and creates the namespace does not inherit
+  it. **A platform admin's create activates every orphan on the name**,
+  including those written because another owner reserves it here: a
+  namespace is known only by its name, so they cannot be told apart. Before
+  an admin creates such a namespace, list its orphans and revoke any that
+  should not apply. `GET /api/registry/grants?orphaned=true` lists every orphan. So the
+  system backup and the namespace backups can be restored in either order,
+  and re-running the system restore is safe.
+- **A namespace restore creates namespaces as the requester.** A platform
+  admin's namespace restore applies the archive's namespace settings. Anyone
+  else's never changes a namespace's settings: an existing namespace keeps
+  its own, and a missing one is created with the requester's own key, as
+  reserved (so a reservation's holder gets the reservation's settings, and
+  anyone else is refused). Each archive setting not applied is a warning on
+  the job. Creating a namespace this way needs an API key; a login can
+  restore only into a namespace that exists. One consequence for disaster
+  recovery: a reservation holder's restore of a missing namespace gets the
+  reservation's `id_config`, not the archive's, so a prefixed id scheme is
+  not carried over and new ids are minted the reservation's way from then
+  on; the job's warnings say so. Have a platform admin run the restore when
+  the archive's settings must apply.
+- **Restoring onto an instance in use brings back old access.** If the
+  instance already holds keys, grants or reservations of its own, the report
+  opens with a warning. Access revoked since the backup comes back too:
+  review the dry run before `--apply`.
 
 ---
 
@@ -845,6 +1050,162 @@ Do **not** rely on Caddy stripping the prefix. Do **not** hardcode paths.
 | OIDC redirect to wrong app | Callback URL missing base path | Mount auth routes under `APP_BASE_PATH`; do not strip prefix |
 | Session lost after Dex redirect | `trust proxy` not set, or wrong cookie path | `app.set('trust proxy', 1)`; cookie path = `<BASE>/` with trailing slash |
 | `${VAR}` literal in container | Env var not resolved | Verify the manifest's `env.required` lists the var with a real `source:` |
+
+### 6.5 Attached apps — under the umbrella without wip-deploy
+
+An app whose own admin deploys it, anywhere the stack's router can reach, can
+be **attached** under the umbrella through the Registry's API instead of being
+deployed by wip-deploy. Its key is an ordinary Console key (§4.3). The
+deployer knows nothing about the app.
+
+**Served by the app edge.** The `app-edge` component reads the active
+attachments every 10 s with its own key, and serves each one at
+`/apps/<name>`: behind the gateway with the record's `allowed_groups`, then
+to the upstream. The public router hands it every `/apps` path that no
+deployed app's longer route claims.
+
+**The edge is an optional module.** The presets with the auth gateway
+(`standard`, `full`, `analytics`) include it. `wip-deploy remove-module
+app-edge` turns it off, and `wip-deploy add-module app-edge` turns it back on.
+It needs the auth gateway and core; the deployer refuses it otherwise, and
+`install --no-auth-gateway` leaves a preset's edge out with a note. Without
+the edge:
+
+- an `/apps/<name>` that no deployed app routes answers 404;
+- the Registry refuses every attachment write (`invalid_state`,
+  `details.rule: no_app_edge`), reviving included. Listing, reading and
+  deactivating still work, so records from before the edge was removed stay
+  manageable;
+- records already active stay active but are not served, so their apps go
+  offline until the edge is back. Reads say so: every attachment in a list or
+  get carries `served` (true when it is active and an edge runs) and, when
+  false, `not_served_reason`: `inactive`, `upstream_invalid` (a record
+  stored before the host rule below: the edge refuses its host),
+  `no_app_edge`, or `policy_unavailable` (the attach policy file cannot be
+  used, so the edge serves nothing). `served` is not a reachability check: the Registry never
+  calls an upstream, and the edge can still refuse a record when it resolves
+  it;
+- a system restore skips the archive's active attachments
+  (`reason_code: no_app_edge`) and restores its inactive ones as records.
+
+What the edge guarantees:
+
+- **It dials the address it checked.** Each upstream host is resolved and
+  every address checked against the blocklist below, and the edge connects
+  to exactly those addresses. The name is used only for TLS and, with
+  `upstream_host_header`, the Host header. A name that later resolves
+  somewhere else doesn't reach a connection.
+- **Identity:** the app receives `X-WIP-User` / `X-WIP-Groups` from the
+  gateway, never a key. Browser-sent identity headers and the gateway's
+  `wip_session` cookie are removed. The app's own cookies pass through.
+  `X-Forwarded-Proto` / `X-Forwarded-Host` are set from the install's
+  public URL.
+- **No last-known-good copy:** the edge polls every 10 s. The first poll
+  that finds the Registry silent for more than 30 s (in practice between 30
+  and about 45 s after its last answer, since a failing poll takes longer)
+  turns every attached app to 503 until the Registry answers again.
+- **A dead upstream address is skipped:** a dial times out after 2 s, the
+  next checked address is tried for up to 10 s, and a failed address is
+  avoided by later requests for 30 s.
+- **One bad record can't take the others down.** A record the edge can't
+  serve is skipped and logged. If Caddy still refuses a config, the edge
+  retries without the records that carry their own CA certificate.
+
+```bash
+curl -k -X POST https://<host>/api/registry/attachments \
+  -H "X-API-Key: <admin-key>" -H "Content-Type: application/json" \
+  -d '[{"name": "aa", "upstream": "https://aa.apps.example:3000",
+        "auth_required": true, "allowed_groups": ["aa-users"],
+        "display_name": "AuthorAssist"}]'
+curl -k https://<host>/api/registry/attachments -H "X-API-Key: <admin-key>"
+curl -k -X POST https://<host>/api/registry/attachments/deactivate \
+  -H "X-API-Key: <admin-key>" -H "Content-Type: application/json" -d '[{"name": "aa"}]'
+```
+
+- **One record per app**, keyed by `name`, owning `/apps/<name>`. The route
+  fields match a manifest's route: `auth_required`, `allowed_groups`,
+  `strip_prefix`, `preserve_prefix_subpaths`, `redirect_bare_path`,
+  `upstream_host_header`, `streaming`. Then `upstream_tls` (`verify`, and
+  an optional `ca_pem` holding the CA certificate itself), `display_name`,
+  `ui_only` and `health`. Writes are bulk upserts and always answer 200
+  with per-item results. **Never deleted:** deactivate it, and write it
+  again to revive it.
+- **A write replaces the whole record.** `auth_required` and
+  `allowed_groups` are required on every write (`[]` means any logged-in
+  user). A client that sends only some fields fails with 422 rather than
+  silently opening the app to more users. Send the full record you read.
+- **The upstream is scheme, host and optional port only:** no path,
+  credentials, query or fragment. The router proxies `/apps/<name>/…` to
+  the upstream's root; `strip_prefix` drops the prefix.
+- **The host is an IP literal or a DNS name of RFC 1123 labels:** letters,
+  digits and inner hyphens, 1 to 63 characters each. An underscore (common
+  in container names), an empty label or a non-ASCII name is refused with
+  `validation_failed`, `details.rule: upstream_invalid`; give an
+  internationalised name in its `xn--` form. The app edge applies the same
+  rule, so a record the Registry accepts is one the edge can serve.
+- **Reading** (`GET /attachments`) is open to platform admins and to the
+  router's app edge, whose key's group `wip-app-edge` may read attachments
+  and nothing else. Every write stays platform admin. A record the deployer
+  manages is refused with `managed_by_deployer`.
+- **Platform admin only. Attaching is full trust.** An attached app is
+  served on WIP's own origin, so it receives the sessions of everyone who
+  visits it. Its JavaScript can call every other app as the visitor, React
+  Console included when an admin visits. Attach only apps you trust with your
+  users' sessions. Deployer apps share this origin too.
+- **Refused names:** a route of an app this install deploys
+  (`name_collision`). An apply that would add an app on an attachment's
+  route, active or not, is refused in turn.
+- **Refused upstreams** (`forbidden`, `details.rule: upstream_blocked`):
+  anything resolving to one of the install's own hosts (the deployer
+  renders them into `WIP_ATTACH_POLICY_FILE`: its containers and services,
+  its public hostname, and on k8s the API server's names), or to a
+  loopback, link-local (cloud metadata), unspecified or multicast address,
+  or to the cloud metadata addresses outside link-local (`fd00:ec2::254`,
+  `100.100.100.200`). IPv4-mapped IPv6 addresses count as the IPv4 address
+  they carry. A missing, empty or unparseable policy file refuses every
+  attach. Addresses
+  are compared, not names. This attach-time check is advisory: the Registry
+  may sit on another network than the router (a backend on one cluster, the
+  umbrella on another). The authoritative check is the router edge's, when
+  it resolves the upstream. A host that doesn't resolve from the Registry
+  is accepted with a warning.
+- **On k8s,** a blocked name resolves to its Service's ClusterIP, so an
+  upstream given as a WIP *pod* IP isn't caught by the name check. The
+  rendered NetworkPolicy `app-edge-egress` takes the edge out of the
+  namespace's broad allows. It lets the edge reach only the Registry, the
+  auth gateway, DNS, pods in other namespaces and addresses outside the
+  cluster.
+  - **Give the cluster's own ranges at install:** `--cluster-cidr
+    pods=<CIDR> --cluster-cidr services=<CIDR> --cluster-cidr nodes=<CIDR>`
+    (repeatable; `platform.k8s.cluster_ranges`). They are excepted from the
+    "outside the cluster" rule (`ipBlock 0.0.0.0/0`, `::/0`), which
+    otherwise also reaches the API server's endpoint and the kubelets on the
+    node addresses (ports such as 6443/16443 and 10250) and, depending on
+    the network plugin, pod and Service IPs. The node ranges also join the
+    attach blocklist: the Registry and the edge refuse an upstream that
+    resolves into them. `wip-deploy` warns about each kind left out.
+    On an existing install, `wip-deploy redeploy --name <install>
+    --cluster-cidr …` replaces the saved ranges (pass every kind to keep).
+    Give IPv4 ranges as IPv4: an IPv4-mapped IPv6 range is refused, since
+    it would never match.
+  - **Node ranges are the cluster's own node addresses** (for example
+    `192.168.1.20/32`), never a LAN it shares with other machines: an app
+    another cluster on that LAN serves through a NodePort would be refused
+    too. **Where the API endpoint is not a node address,** name it as
+    well: a load balancer's virtual IP in front of an HA control plane, or
+    a managed cluster's API endpoint. On kubeadm the API server runs as a
+    hostNetwork pod in `kube-system`; whether the "other namespaces" rule
+    matches hostNetwork pods depends on the network plugin, so give the node
+    addresses there too. Pod and Service ranges never block an upstream, since attached
+    apps in other namespaces live there.
+  - **The edge still reaches every other Kubernetes namespace's pods,** on
+    any port, including kube-system and other tenants' services. That is
+    part of "attaching is full trust" (above): an attachment can publish an
+    in-cluster service that has no authentication of its own. Attaching is
+    platform admin only.
+- **The app's key** is created in RC or through `/api-keys` (§4.4),
+  widened with `reserve` for the namespaces it creates. The app holds the
+  plaintext itself.
 
 ---
 
