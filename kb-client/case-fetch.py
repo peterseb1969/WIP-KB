@@ -3,7 +3,7 @@
 case-fetch.py — read-side commands for the KB client (cases, journeys, list, firesides, library,
 and the generic typed read for any writable type).
 
-Every read goes through the KB **gateway** API (`{BASE_PATH}/server-api/kb/…`) via
+Every read goes through the KB **gateway** API (`/server-api/kb/…` on the KB's own origin) via
 kb_client_core — the app-specific layer that owns projection, namespace discipline,
 and identity. Clients never reach past it into the document-store backend (CASE-482;
 the "straight to MongoDB" anti-pattern). Transport, target config, and local→remote

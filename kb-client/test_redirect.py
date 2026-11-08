@@ -5,7 +5,7 @@ An install that serves each app on its own origin answers the KB's old URL with
 301 to the new one. A POST does not follow that, and following a GET would send
 the API key to whatever host the redirect names. So every redirect raises
 KbMoved: to another origin, with the origin to set as kb_app_url; within the same
-origin, naming the target. Reads (GET), writes (POST) and file downloads alike;
+origin, naming the target; to a login page, saying the URL is not the KB's API. Reads (GET), writes (POST) and file downloads alike;
 the key is never sent to the redirect's target.
 
 A local HTTP server stands in for the old URL, a second one for the new origin.
@@ -52,8 +52,12 @@ class OldUrl(BaseHTTPRequestHandler):
         if self.command == "POST":
             self.rfile.read(int(self.headers.get("Content-Length") or 0))
         same = "same-origin" in self.path
-        self.send_response(308 if "permanent" in self.path else 301)
-        self.send_header("Location", ("/elsewhere" if same else NEW) + self.path)
+        login = "browser-route" in self.path
+        self.send_response(302 if login else 308 if "permanent" in self.path else 301)
+        if login:  # the gateway's answer to a browser route: off to WIP's login
+            self.send_header("Location", NEW + "/auth/app-login?app=kb&return_to=%2F")
+        else:
+            self.send_header("Location", ("/elsewhere" if same else NEW) + self.path)
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -94,11 +98,13 @@ check("308 to another origin", lambda: core.gw_get("/permanent"), [NEW, "308"])
 check("file download", lambda: core.gw_get_bytes("/export"), [NEW, "kb_app_url"])
 check("upload", lambda: core.gw_post_bytes("/upload", b"x", "text/plain", "f.txt"), [NEW, "kb_app_url"])
 check("same-origin redirect", lambda: core.gw_get("/same-origin"), ["/elsewhere", "not followed"])
+check("login redirect", lambda: core.gw_get("/browser-route"),
+      ["login redirect", "not the KB's API", "kb_app_url", "https://kb.<WIP host>"])
 
 if new_origin_hits:
     _fails.append(f"the redirect target was contacted (key sent there): {new_origin_hits}")
 
 for f in _fails:
     print("FAIL", f)
-print("6/6 redirect cases refused, target never contacted" if not _fails else f"{len(_fails)} failure(s)")
+print("7/7 redirect cases refused, target never contacted" if not _fails else f"{len(_fails)} failure(s)")
 sys.exit(1 if _fails else 0)

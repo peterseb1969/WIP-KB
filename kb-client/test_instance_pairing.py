@@ -76,7 +76,7 @@ none = project(None)
 
 # --- core ---------------------------------------------------------------
 check("core.kbjson", core(full), (0, f"{KBJ_URL}|{key}"))
-check("core.no_kbjson", core(none), (0, "https://kb.internal|None"))
+check("core.no_kbjson", core(none), (0, "https://kb.kb.internal|None"))
 rc, out = core(nokey)
 check("core.kbjson_without_key.rc", rc, 2)
 check("core.kbjson_without_key.msg", "does not name both" in out, True)

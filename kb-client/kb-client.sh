@@ -14,7 +14,6 @@
 # Env (defaults target the canonical KB app, https://kb.kb.internal):
 #   KB_APP_URL        https://kb.kb.internal; with KB_API_KEY_FILE, targets another
 #                     instance (set both or neither — never half a pair)
-#   KB_APP_BASE_PATH  /apps/kb
 #   KB_API_KEY_FILE   no default: from .claude/kb.json, or set it with KB_APP_URL
 #   KB_CLIENT_CACHE   ~/.cache/wip-kb-client
 #   KB_VERIFY_TLS     false (self-signed dev certs)
@@ -22,7 +21,7 @@
 # Runs from the CALLER's cwd (so relative file args resolve against the calling
 # repo) with PYTHONPATH=$KBC (so `from kb_client_core import …` resolves). The
 # served scripts handshake against the instance manifest and refuse to write on
-# schema_version skew because this wrapper exports KB_APP_URL/KB_APP_BASE_PATH.
+# schema_version skew because this wrapper exports KB_APP_URL.
 #
 # CASE-444 note: KB_API_KEY_FILE is exported ONLY when the caller set it (or
 # kb.json supplied it). The key file is per-installation configuration, so
@@ -95,12 +94,11 @@ if [ -r "$KBJSON" ]; then
 fi
 
 KB_APP_URL="${KB_APP_URL:-https://kb.kb.internal}"
-KB_APP_BASE_PATH="${KB_APP_BASE_PATH-/apps/kb}"  # `-` not `:-`: explicit empty = root-mounted instance
 KB_VERIFY_TLS="${KB_VERIFY_TLS:-false}"
 KBC="${KB_CLIENT_CACHE:-$HOME/.cache/wip-kb-client}"
 # KB_BASE_URL is what the served python read/write scripts use for the instance
 # host; keep it in lockstep with KB_APP_URL so the whole bundle targets one place.
-export KB_APP_URL KB_APP_BASE_PATH KB_VERIFY_TLS
+export KB_APP_URL KB_VERIFY_TLS
 export KB_BASE_URL="$KB_APP_URL"
 # Wrapper-local key for its own fetch curls; exported when set in env OR derived
 # from kb.json above (paired with the URL, so CASE-444's guard holds).
@@ -114,23 +112,32 @@ export KB_API_KEY_FILE="$KEYFILE"
 
 if [ ! -r "$KEYFILE" ]; then echo "kb-client: API key not readable at $KEYFILE" >&2; exit 2; fi
 KEY="$(cat "$KEYFILE")"
-BASE="$KB_APP_URL$KB_APP_BASE_PATH/server-api/kb-client"
+BASE="$KB_APP_URL/server-api/kb-client"  # the KB is served at the root of its origin
 
-# On an install that serves each app on its own origin, the KB's old URL answers
-# 301 to the new one. curl without -L takes the redirect as a success and hands its
-# empty body on, so a failed fetch is probed once (without following, so the key
-# goes nowhere else) and the new origin is named.
+# A failed fetch is probed once, without following redirects (so the key goes
+# nowhere else), to say why. curl without -L takes a redirect as a success and
+# hands its empty body on. A redirect to a login page means the URL reached a
+# browser route, not the KB's API: kb_app_url is not the KB's own origin, or the
+# instance still serves the KB under /apps/kb. A redirect to another origin names
+# where the KB went. A 404 means nothing serves the client at the root there.
 moved_hint() {
   r="$(curl -sk -m 10 -o /dev/null -w '%{http_code} %{redirect_url}' -H "X-API-Key: $KEY" "$1" 2>/dev/null)" || return 0
   code="${r%% *}"; loc="${r#* }"
   case "$code" in
     301|302|303|307|308)
       origin="$(printf '%s' "$loc" | sed -E 's#^(https?://[^/]+).*#\1#')"
-      if [ -n "$origin" ] && [ "$origin" != "$KB_APP_URL" ]; then
-        echo "$2: $KB_APP_URL answered $code — the KB moved to $origin. Set kb_app_url in .claude/kb.json (or KB_APP_URL) to $origin; the path stays the same." >&2
-      else
-        echo "$2: $1 answered $code, redirecting to $loc" >&2
-      fi ;;
+      case "$loc" in
+        */auth/*)
+          echo "$2: $1 answered $code with a login redirect — this is not the KB's API. kb_app_url in .claude/kb.json (or KB_APP_URL) must name the KB's own origin, https://kb.<WIP host>, and the KB must be served at its root." >&2 ;;
+        *)
+          if [ -n "$origin" ] && [ "$origin" != "$KB_APP_URL" ]; then
+            echo "$2: $KB_APP_URL answered $code — the KB moved to $origin. Set kb_app_url in .claude/kb.json (or KB_APP_URL) to $origin." >&2
+          else
+            echo "$2: $1 answered $code, redirecting to $loc" >&2
+          fi ;;
+      esac ;;
+    404)
+      echo "$2: $1 answered 404 — nothing serves the KB client at the root of $KB_APP_URL. kb_app_url must name the KB's own origin, https://kb.<WIP host>; an instance still serving the KB under /apps/kb is not redeployed for apps at root yet." >&2 ;;
   esac
 }
 

@@ -9,7 +9,7 @@ One module owns everything the command scripts need to talk to the KB gateway:
   local→remote failover for reads.
 
 The Golden Rule for clients (CASE-482): every call goes through the KB **gateway**
-API (`{BASE_PATH}/server-api/kb/…`) — the app-specific layer that owns projection,
+API (`/server-api/kb/…` on the KB's own origin) — the app-specific layer that owns projection,
 namespace discipline, and identity. Clients never reach past it into the
 document-store backend (the "straight to MongoDB" anti-pattern).
 
@@ -103,7 +103,7 @@ def _resolve_instance() -> None:
 
 _resolve_instance()
 
-CANONICAL_BASE_URL = "https://kb.internal"   # last-resort fallback (CASE-471 cutover from wip-kb.local)
+CANONICAL_BASE_URL = "https://kb.kb.internal"   # last-resort fallback: canonical's KB origin
 LOCAL_BASE_URL = "https://localhost:8443"
 
 
@@ -139,7 +139,6 @@ NAMESPACE = os.environ.get("KB_NAMESPACE", "kb")
 NAMESPACE_EXPLICIT = "KB_NAMESPACE" in os.environ
 # The project this repo is (kb.json `project` / KB_PROJECT), or "" for none.
 PROJECT = os.environ.get("KB_PROJECT", "").strip()
-GW_BASE_PATH = os.environ.get("KB_APP_BASE_PATH", "/apps/kb")  # KB gateway mount
 PREFER_LOCAL = os.environ.get("KB_PREFER_LOCAL") == "1"
 VERIFY_TLS = os.environ.get("KB_VERIFY_TLS", "false").lower() == "true"
 
@@ -154,21 +153,28 @@ def _ssl_ctx() -> ssl.SSLContext | None:
 
 
 class KbMoved(RuntimeError):
-    """The instance answered with a redirect. On an install that serves each app on
-    its own origin, the KB's old URL answers 301 to the new one; a POST does not
-    follow it, and following a GET would hand the API key to whatever host the
-    redirect names. So no redirect is followed: the caller is told where the KB
-    went and which setting to change."""
+    """The instance answered with a redirect. A POST does not follow it, and
+    following a GET would hand the API key to whatever host the redirect names, so
+    no redirect is followed: the caller is told what the redirect means and which
+    setting to change. Two shapes occur: a redirect to another origin (a URL that
+    is not the KB's own origin), and a redirect to a login page (the URL reached a
+    browser route, not the KB's API)."""
 
 
 def _moved(url: str, code: int, location: str) -> KbMoved:
     old = urllib.parse.urlsplit(url)
     new = urllib.parse.urlsplit(urllib.parse.urljoin(url, location))
     old_origin, new_origin = f"{old.scheme}://{old.netloc}", f"{new.scheme}://{new.netloc}"
+    if "/auth/" in new.path:
+        return KbMoved(
+            f"{url} answered {code} with a login redirect: this is not the KB's API. "
+            f"kb_app_url in .claude/kb.json (or KB_APP_URL) must name the KB's own origin, "
+            f"https://kb.<WIP host>, and the KB must be served at its root (an instance "
+            f"still serving it under /apps/kb is not redeployed for apps at root yet).")
     if new.netloc and new_origin != old_origin:
         return KbMoved(
             f"{old_origin} answered {code}: the KB moved to {new_origin}. Set kb_app_url "
-            f"in .claude/kb.json (or KB_APP_URL) to {new_origin}; the path stays the same.")
+            f"in .claude/kb.json (or KB_APP_URL) to {new_origin}.")
     return KbMoved(f"{url} answered {code}, redirecting to {location}; not followed.")
 
 
@@ -236,7 +242,8 @@ def _gw_url(base_url: str, path: str) -> str:
     if not already_scoped and not inherit_only:
         sep = "&" if "?" in path else "?"
         path = f"{path}{sep}namespace={urllib.parse.quote(NAMESPACE)}"
-    return f"{base_url}{GW_BASE_PATH}/server-api/kb{path}"
+    # The KB is served at the root of its own origin: no path prefix.
+    return f"{base_url}/server-api/kb{path}"
 
 
 def _request(base_url: str, key_file: Path, path: str,

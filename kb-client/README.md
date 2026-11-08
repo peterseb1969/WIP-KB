@@ -1,7 +1,7 @@
 # kb-client — the KB read/write client
 
 The client every YAC uses to talk to a KB instance. **All calls go through the
-KB gateway API** (`{BASE_PATH}/server-api/kb/…`) — never the document-store
+KB gateway API** (`/server-api/kb/…` on the KB's own origin) — never the document-store
 backend (CASE-482, the "straight to MongoDB" anti-pattern). Reads: cases,
 journals, firesides, faceted lists. Writes: one path — `POST /write/:type` — the
 client parses + validates the source and the gateway persists (mint or
@@ -11,7 +11,7 @@ field updates).
 **Owned by APP-KB-YAC** and **served from the running KB instance** (downloadable,
 versioned with the server) — see CASE-437 and
 `FR-YAC/papers/kb-client-ownership-and-distribution.md`. Any client fetches *this*
-client from *that* instance (`GET {BASE_PATH}/server-api/kb-client/download` —
+client from *that* instance (`GET /server-api/kb-client/download` —
 one-shot JSON bundle — or `/files/<name>` per file) and runs it, refreshing on
 `bundle_digest` change.
 
@@ -27,7 +27,7 @@ one-shot JSON bundle — or `/files/<name>` per file) and runs it, refreshing on
 **Pointing the client at another instance.** The instance URL and its key always resolve as one pair, from one source: the environment when `KB_APP_URL` (or `KB_BASE_URL`) or `KB_API_KEY_FILE` is set, and then both must be; otherwise `.claude/kb.json`, which must name both; otherwise the canonical default with a key still required. Half a pair is refused with exit 2 instead of being completed from `kb.json`, so a key is never sent to an instance it was not issued for. The runner prints the target when it came from the environment, and every write names the instance it goes to (CASE-950).
 | `kb-namespace.py` | `create <ns>` — a new knowledge domain: a namespace seeded with the full corpus model via `POST /namespaces`. Runs with your key (WIP decides who may); an existing namespace with content is never re-seeded. |
 | `kb-client.sh` | The runner (CASE-440): fetch/refresh the bundle on `bundle_digest` change, then run a script with `PYTHONPATH` set. Ships inside the bundle — relocated out of FR-YAC. |
-| `install.sh` | One-liner bootstrap (CASE-440): `curl -fsSk -H "X-API-Key: $KEY" {BASE_PATH}/server-api/kb-client/install \| sh` materializes the bundle to `~/.cache/wip-kb-client`. |
+| `install.sh` | One-liner bootstrap (CASE-440): `curl -fsSk -H "X-API-Key: $KEY" https://kb.<WIP host>/server-api/kb-client/install \| sh` materializes the bundle to `~/.cache/wip-kb-client`. |
 | `case-workflow.md` | The cross-YAC case playbook, served with the client (single source: `docs/playbooks/case-workflow.md`, synced from the gene-pool master). |
 
 ## Status — v3 (CASE-481 / 482)
@@ -95,7 +95,9 @@ Env:
   default (same rule as above).
 - `KB_NAMESPACE` (default `kb`), `KB_VERIFY_TLS` (default `false`),
   `KB_DEV_ROOT` (default `~/Development` — flat-file repo roots).
-- `KB_APP_URL` / `KB_APP_BASE_PATH` — the KB app endpoint (gateway verbs +
-  served bundle). Default `https://kb.kb.internal` + `/apps/kb`: canonical
-  serves each app on its own origin, `https://<app>.<WIP host>`, and its old
-  URL `https://kb.internal/apps/kb` only answers 301 there.
+- `KB_APP_URL` — the KB's own origin (gateway verbs + served bundle). Default
+  `https://kb.kb.internal`, canonical. Every install serves each app at the root
+  of an origin of its own, `https://<app>.<WIP host>/`, so there is no path
+  prefix: nothing answers under `/apps/kb` any more. Client 5.0.0 and later
+  build root URLs only; an older cached client fails against a KB served at the
+  root, and re-running the install one-liner replaces it.
