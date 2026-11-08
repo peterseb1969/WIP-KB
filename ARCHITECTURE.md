@@ -76,7 +76,8 @@ no cached data crosses domains. The CLI picks a domain with `KB_NAMESPACE` or th
   (`/wip/*`, `@wip/proxy` injecting the API key) and the **gateway**
   (`/server-api/kb/*`). Client helpers: `src/lib/wipBulk.ts` (`wipFetchJson`,
   bulk envelope) and `@wip/react` hooks (TanStack Query). Every fetch URL is
-  prefixed with `import.meta.env.BASE_URL` so it resolves under `/apps/kb/`.
+  prefixed with `import.meta.env.BASE_URL` (`/`: the app is served at the root of
+  its own origin).
 - **Server state** lives in the TanStack Query cache (keyed by namespace + query).
   **View state** (search query, facets, sort, page) lives in **URL params**, so
   searches are shareable/bookmarkable and survive reload. **Local component state**
@@ -135,11 +136,9 @@ documents the gateway reads, not code. `ClientPage` renders this for operators.
 4. **FTS is the data layer's job.** Search hits `reporting-sync` (Postgres
    `tsvector`), not a client index. `full_text_indexed` string fields on a template
    produce `<field>_tsv` columns automatically.
-5. **wip-deployable contract** (`papers/wip-deployable-app-contract.md`): base-path
-   prefixing, `server.host: 0.0.0.0`, BASE_URL-prefixed fetches, gateway-aware
-   `/api/me`, `Dockerfile.dev`. The Dockerfile defaults `VITE_BASE_PATH=/apps/kb`
-   so a deploy that forgets the build-arg still produces a loadable SPA (CASE-533's
-   sibling fix, `364fbde`).
+5. **wip-deployable contract** (`docs/wip-deployable-app-contract.md`): served at
+   the root of its own origin (no base path since CASE-1103), `server.host:
+   0.0.0.0`, BASE_URL-prefixed fetches, gateway-aware `/api/me`, `Dockerfile.dev`.
 
 ## Inline documentation
 

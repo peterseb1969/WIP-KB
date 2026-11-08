@@ -67,7 +67,7 @@ Four live WIP installs carry a `kb` namespace. They are near-identical in size, 
 | **prod-test** | `https://prod-test.internal` | ask Peter — not configured in this repo | k8s, runs *deployed images*. The rehearsal instance. |
 | **canonical** | `https://kb.internal` | `kb_api_key_file` in `.claude/kb.json` | Production. `deletion_mode: retain` — see below. |
 
-**Each install serves every app on an origin of its own** (`network.app_origins: subdomain`): the KB app is at `https://kb.<WIP host>/apps/kb/` — `https://kb.kb.internal` on canonical, `https://kb.wip.localhost:8443` on the sandbox (installed as `wip.localhost`: an app origin needs a hostname with a dot), `https://kb.dev-test.internal`, `https://kb.prod-test.internal`. WIP's own API stays on the bare host (`https://kb.internal/api/…`); `https://<WIP host>/apps/kb/…` only answers 301 to the KB's origin. So `kb_app_url` in `.claude/kb.json`, and `KB_APP_URL` for `kbc`, name the **KB origin**, while tools that call WIP directly (`tools/*.py`, `curl …/api/…`) take the bare host. `kbc` follows no redirect: pointed at an old URL it says where the KB went.
+**Each install serves every app at the root of an origin of its own:** the KB app is at `https://kb.<WIP host>/` — `https://kb.kb.internal/` on canonical, `https://kb.wip.localhost:8443/` on the sandbox (installed as `wip.localhost`: an app origin needs a hostname with a dot), `https://kb.dev-test.internal/`, `https://kb.prod-test.internal/`. There is no `/apps/kb` prefix any more, on either origin, and no redirect for old links (CASE-1103, hard cutover; the per-app tracker is CASE-1115). An install still running pre-cut images serves the KB under `/apps/kb/`, and today's image and `kbc` 5.x do not work there. WIP's own API stays on the bare host (`https://kb.internal/api/…`). So `kb_app_url` in `.claude/kb.json`, and `KB_APP_URL` for `kbc`, name the **KB origin**, while tools that call WIP directly (`tools/*.py`, `curl …/api/…`) take the bare host. `kbc` follows no redirect, and a failed fetch says why: a login redirect or a 404 means the URL is not the KB's API at that origin's root.
 
 - **One MCP server** in `.mcp.json` (local/gitignored): **`wip` → the sandbox at `localhost:8443`**. Tools surface as `mcp__wip__<tool>`. There is no `wip-local` server and no `wip-kb` server; older docs and gene-pool material that say otherwise are stale. If you need dev-test, prod-test or canonical, use `kbc` or an explicit `curl` with that instance's key file — not MCP.
 - **Pointing `kbc` at another instance takes both `KB_APP_URL` and `KB_API_KEY_FILE`.** From client 4.8.0 the URL and key resolve as one pair, and half a pair is refused with exit 2. Older clients, still served by any instance not yet redeployed, complete a half pair from `kb.json`: a key file set alone goes to canonical's URL, and a URL set alone gets canonical's key. Read before you write, and check the host the output names (the runner prints `target …`, each write prints `writing to …`).
@@ -209,7 +209,7 @@ npm install ./libs/wip-client-*.tgz ./libs/wip-react-*.tgz ./libs/wip-proxy-*.tg
 ```
 
 Two gotchas:
-- **`@wip/client` baseUrl in browser apps behind the `@wip/proxy` mount:** use ``baseUrl: `${import.meta.env.BASE_URL}wip` `` (as `src/lib/wipClient.ts` does). The deployed app lives under `/apps/kb/`, so a bare `'/wip'` works only for an app served at `/`. Do NOT use a bare relative path without the client resolving it — `new URL('/wip/...')` throws without a protocol.
+- **`@wip/client` baseUrl in browser apps behind the `@wip/proxy` mount:** use ``baseUrl: `${import.meta.env.BASE_URL}wip` `` (as `src/lib/wipClient.ts` does). The KB is served at the root of its origin, so that is `/wip`; keep the `BASE_URL` prefix anyway, as every client fetch does. Do NOT use a bare relative path without the client resolving it — `new URL('/wip/...')` throws without a protocol.
 - **`@wip/react` providers:** hooks require BOTH `QueryClientProvider` (from `@tanstack/react-query`) AND `WipProvider` (from `@wip/react`). Missing either breaks every hook: outside `WipProvider`, `useWipClient` throws "useWipClient must be used within a <WipProvider>"; outside `QueryClientProvider`, TanStack's hooks throw that no QueryClient is set. `WipProvider` (≥ 0.26) also renews the app-origin session in the background: on an install with an origin per app, a tab outside it loses its API calls when the 15-minute app session expires. The whole KB renders inside it (`src/main.tsx`); keep it that way.
 
 ---
@@ -219,8 +219,8 @@ Two gotchas:
 **Read `docs/wip-deployable-app-contract.md` before touching scaffold-level code.** Four-line summary:
 
 1. **Source repo** needs `Dockerfile.dev` + correct `vite.config.ts` (`server.host: '0.0.0.0'`, dev proxy targets *this app's* Express port). Client fetches use `import.meta.env.BASE_URL`, never bare paths.
-2. **WIP repo `apps/kb/wip-app.yaml`** declares both http and dev ports, `WIP_BASE_URL` via `from_component: router`, `APP_BASE_PATH` literal, and a healthcheck that doesn't depend on WIP being reachable.
-3. **Verify** with `wip-deploy install --target dev --app kb --app-source kb=~/Development/WIP-KB` — SPA must load at `https://localhost:8443/apps/kb/` on the first try, container healthy, no manual env patching.
+2. **WIP repo `apps/wip-kb/wip-app.yaml`** declares both http and dev ports, `WIP_BASE_URL` via `from_component: router`, `app_metadata.label`, route and healthcheck paths from `/` (no base path: the app is served at the root of its own origin), and a healthcheck that doesn't depend on WIP being reachable. The app reads no `APP_BASE_PATH` / `VITE_BASE_PATH`; Vite keeps its default base `/`.
+3. **Verify** with `wip-deploy install --target dev --app kb --app-source kb=~/Development/WIP-KB` — SPA must load at `https://kb.wip.localhost:8443/` on the first try, container healthy, no manual env patching.
 4. **If something breaks**, find the failure signature in the paper's "What breaks when you skip step N" annex.
 
 The contract is target-agnostic — compose, k8s, and apps-only installs satisfy the same contract.
@@ -298,7 +298,7 @@ After Phase 4: `/wip-improve`, `/wip-document`.
 When you hit one of these, escalate — don't decide unilaterally. Spec §15:
 
 1. Empty-state UX (KB starts empty)
-2. Doc deep-link format (`/apps/kb/doc/<wip-id>` vs slug)
+2. Doc deep-link format (`/doc/<wip-id>` vs slug)
 3. Citation rendering in askBar answers (inline footnote vs side panel)
 4. FLAG_RECORD / CASE_RECORD structured fields beyond required minimum (JIRA-creep risk)
 5. `doc_status` semantics for FLAG_RECORD

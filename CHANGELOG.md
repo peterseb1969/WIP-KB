@@ -3,6 +3,28 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-08 — The KB is served at the root of its own origin (CASE-1103 / CASE-1115)
+
+- **Changed (breaking, hard cutover):** the platform no longer serves apps under
+  `/apps/<label>`. The KB is at `https://kb.<WIP host>/` on every install, with no path
+  prefix and no redirect for old links. The image builds with Vite's default base `/`,
+  the server mounts every route at `/`, and nothing reads `APP_BASE_PATH` or
+  `VITE_BASE_PATH`. An install still on pre-cut images cannot serve this image.
+- **Changed:** `kbc` 5.0.0 builds `<kb_app_url>/server-api/…`; `KB_APP_BASE_PATH` is
+  gone. A cached 4.x client cannot refetch itself through the old path: re-run the
+  install one-liner (`<kb_app_url>/server-api/kb-client/install`). A failed fetch now
+  says why: a login redirect or a 404 means the URL is not the KB's API at that
+  origin's root. The fallback URL is canonical's KB origin, `https://kb.kb.internal`.
+- **Fixed:** a Registry outage is no longer reported as "absent". The platform now
+  answers it with 503 (not 404 or an empty list): the gateway passes 503 through, and
+  only a 404 means "not found" / "unknown type" / "no profile". A search names the
+  namespaces whose search failed (`unavailable_namespaces`) instead of returning silent
+  zero hits, and fails outright when every namespace failed. A bootstrap whose
+  namespace listing fails stops rather than seeding every namespace.
+- **Checked:** on the sandbox, which already runs the post-cut platform: e2e 12 passed
+  (3 corpus tests skipped), `kbc` and the install one-liner at the root, and the outage
+  paths with the Registry stopped.
+
 ## 2026-10-31 — The KB starts even when the platform's MCP server is not ready (CASE-1001)
 
 - **Fixed:** after a redeploy the KB's server could exit for good. It connected the

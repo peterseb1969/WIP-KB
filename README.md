@@ -47,12 +47,13 @@ npm run dev          # client (Vite, :5173) + server (Express) concurrently
 - **Standalone dev:** `npm run dev` serves the SPA at `http://localhost:5173` and
   the Express API/proxy alongside it. `dev:server` sets
   `NODE_TLS_REJECT_UNAUTHORIZED=0` because the WIP backend uses a self-signed cert.
-- **Under `wip-deploy`:** the app runs at `https://<host>:<port>/apps/kb/` (prod
-  build via the Dockerfile, or hot-reloaded dev via `--app-source`). See
-  `papers/wip-deployable-app-contract.md`.
+- **Under `wip-deploy`:** the app runs at the root of its own origin,
+  `https://kb.<host>[:port]/` (prod build via the Dockerfile, or hot-reloaded dev
+  via `--app-source`). There is no `/apps/kb` path prefix. See
+  `docs/wip-deployable-app-contract.md`.
 - **Production build:** `npm run build` → `dist/`; `npm start` runs the Express
-  server which serves `dist/` statically with an SPA fallback. The Dockerfile
-  bakes `VITE_BASE_PATH=/apps/kb` so asset paths resolve under the mount.
+  server which serves `dist/` statically with an SPA fallback. The bundle keeps
+  Vite's default base `/`.
 
 ## Tests
 
@@ -71,7 +72,6 @@ npm run dev          # client (Vite, :5173) + server (Express) concurrently
 | `VITE_KB_NAMESPACE` / `VITE_LIBRARY_NAMESPACE` | Client (bundle) namespaces (CASE-518): the KB corpus (default `kb`) and the Technical Library (default `library`). **Two-namespace by default** — overrides only; keep `VITE_KB_NAMESPACE` == `WIP_NAMESPACE` (review #1). |
 | `KB_LIBRARY_NAMESPACE` | Server-side Library namespace (CASE-518), default `library`. Drives BootstrapGate (seeds it from `server/seed-library/`, `allowed_external_refs` → the corpus) + gateway routing + askBar. Match it to `VITE_LIBRARY_NAMESPACE`. |
 | `PORT` | Express port (prod: `3012`). |
-| `APP_BASE_PATH` | Mount path (`/apps/kb`). Drives the router base + cookie path. |
 | `NODE_ENV` | `production` enables static `dist/` serving + SPA fallback. |
 | `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | OIDC login. When `OIDC_ISSUER` is unset, auth passes through (apps-only / dev mode). |
 | `ALLOWED_GROUPS` / `ADMIN_GROUPS` | Authz groups; admin gates the Settings config endpoints. |
@@ -82,8 +82,9 @@ npm run dev          # client (Vite, :5173) + server (Express) concurrently
 | `GIT_COMMIT_SHA` / `APP_VERSION` | Baked build stamp (footer); `commit_sha` on the BOOTSTRAP_RECORD. |
 | `KB_BOOTSTRAP_NAMESPACE` | Override the bootstrap target namespace (tests). |
 
-The build also takes `VITE_BASE_PATH`, `VITE_BUILD_STAMP`, `VITE_BUILD_SHA` as
-Docker build args (baked into the static bundle).
+The build also takes `VITE_BUILD_STAMP` and `VITE_BUILD_SHA` as Docker build args
+(baked into the static bundle). There is no base-path variable: the app is served
+at the root of its origin.
 
 ## WIP prerequisites
 
