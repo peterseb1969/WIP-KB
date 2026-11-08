@@ -17,9 +17,8 @@
  *
  * Adapted from templates/bootstrap/BootstrapGate.tsx.template:
  *   - serverApiUrl() helper inlined; paths are prefixed with Vite's
- *     `import.meta.env.BASE_URL` so they resolve correctly both in
- *     local dev (`/server-api/...`) and behind an ingress prefix
- *     (`/apps/kb/server-api/...`).
+ *     `import.meta.env.BASE_URL` (`/`: the KB is served at the root of
+ *     its own origin).
  *   - namespace label reads the runtime-loaded CORPUS_NS (CASE-551); APP_TITLE = 'KB'.
  */
 
@@ -29,9 +28,8 @@ import { CORPUS_NS } from '../lib/namespaces'
 
 const APP_TITLE = 'KB'
 
-// Vite BASE_URL always ends in `/`. In dev it's `/`; in prod (behind
-// ingress) it's `/apps/kb/`. Concatenating without a leading slash
-// gives the right URL in both contexts.
+// Vite BASE_URL always ends in `/` (it is `/`: the KB is served at the root
+// of its own origin), so it is concatenated without a leading slash.
 const SERVER_API = `${import.meta.env.BASE_URL}server-api`
 
 type AppStatus = 'checking' | 'wip_unreachable' | 'needs_bootstrap' | 'bootstrapping' | 'ready' | 'error'

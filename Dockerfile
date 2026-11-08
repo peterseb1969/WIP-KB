@@ -8,13 +8,8 @@ COPY libs/ libs/
 RUN npm ci --ignore-scripts
 
 # Copy source and build
-# VITE_BASE_PATH sets the public base path for assets (e.g. /apps/kb/).
-# Default to this app's production mount so the image is correct even if the
-# deploy forgets --build-arg VITE_BASE_PATH (a root-relative bundle 404s its
-# /assets/*.js under /apps/kb and the SPA fails with a text/html MIME error).
-# A passed --build-arg still overrides this default.
-ARG VITE_BASE_PATH=/apps/kb
-ENV VITE_BASE_PATH=${VITE_BASE_PATH}
+# The bundle is built with Vite's default base `/`: the KB is served at the
+# root of its own origin, and there is no base-path build arg.
 # Build stamp (CASE-472) — baked from CI --build-arg; 'dev' default hides it.
 ARG VITE_BUILD_STAMP=dev
 ARG VITE_BUILD_SHA=dev
@@ -53,7 +48,7 @@ ENV PORT=3012
 EXPOSE 3012
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD wget -qO- http://localhost:3012${APP_BASE_PATH:-}/api/health || exit 1
+  CMD wget -qO- http://localhost:3012/api/health || exit 1
 
 # The runner is started by path, never through npx: the image must start without
 # fetching anything. npx asks the npm registry for a package the image lacks —

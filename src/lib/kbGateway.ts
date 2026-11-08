@@ -11,8 +11,8 @@
 // guard replaces the author sent here (server/ui-author.ts). WEB_UI_AUTHOR is only
 // the placeholder for the field, and what an install without login records.
 
-// BASE_URL always ends in `/` (dev `/`, prod `/apps/kb/`); concatenating without
-// a leading slash yields the right URL in both — same pattern as lib/wipBulk.ts.
+// BASE_URL always ends in `/` (it is `/`: the KB is served at the root of its
+// own origin); concatenate without a leading slash, as lib/wipBulk.ts does.
 import { CORPUS_NS } from './namespaces'
 
 const GW_BASE = `${import.meta.env.BASE_URL}server-api/kb-ui`

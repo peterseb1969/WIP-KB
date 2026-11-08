@@ -14,8 +14,8 @@ name: Build & Push Image
 # and SIGILL-prone). Stitch runs only if BOTH arch builds succeed, so a bare
 # <tag> is never a half-index and both halves are built from the same commit.
 #
-# VITE_BASE_PATH must match the platform manifest's APP_BASE_PATH
-# (apps/wip-kb/wip-app.yaml in World-in-a-Pie). Tag convention: version tags
+# The image is built with Vite's default base `/`: the KB is served at the
+# root of its own origin, so there is no base-path build arg. Tag convention: version tags
 # (e.g. 1.0.0, 20260703a) are write-once — bump, never re-push. Empty tag input
 # falls back to sha-<short>. The per-arch tags (<tag>-amd64, <tag>-arm64) stay
 # in the registry as provenance; deploys pin the bare <tag>.
@@ -69,7 +69,6 @@ jobs:
           IMAGE="ghcr.io/${{ github.repository_owner }}/wip-kb"
           ARCH_TAG="${{ needs.resolve-tag.outputs.tag }}-${{ matrix.arch }}"
           docker build \
-            --build-arg VITE_BASE_PATH=/apps/kb/ \
             --build-arg VITE_BUILD_STAMP="$(date -u +%FT%TZ)" \
             --build-arg VITE_BUILD_SHA="$(git rev-parse --short HEAD)" \
             -t "$IMAGE:$ARCH_TAG" .

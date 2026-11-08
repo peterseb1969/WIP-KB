@@ -46,11 +46,11 @@ SEED = REPO / "server" / "seed"
 # e.g. the test Pi, or the cluster, at https://kb.internal:8443) is a DELIBERATE
 # opt-in: set KB_RELOAD_URL + KB_RELOAD_KEY_FILE, and KB_RELOAD_CONFIRM must equal
 # the URL (fat-finger guard). localhost stays the safe default for iteration.
-BASE_URL = os.environ.get("KB_RELOAD_URL", "https://localhost:8443")
+BASE_URL = os.environ.get("KB_RELOAD_URL", "https://kb.wip.localhost:8443")  # the KB origin
 KEY_FILE = Path(os.environ.get("KB_RELOAD_KEY_FILE",
-                               str(Path.home() / ".wip-deploy" / "wip-local" / "secrets" / "api-key"))).expanduser()
+                               str(Path.home() / ".wip-deploy" / "default" / "secrets" / "app-wip-kb-api-key"))).expanduser()
 IS_LOCAL = ("localhost" in BASE_URL) or ("127.0.0.1" in BASE_URL)
-GW = "/apps/kb/server-api/kb"
+GW = "/server-api/kb"  # the KB is served at the root of its own origin
 ENTITY_TYPE = "documents"
 
 

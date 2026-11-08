@@ -3,10 +3,10 @@
 // requireAuth) so headless clients can fetch with an API key, not a browser
 // session. The bundle is non-secret distributable code.
 //
-//   GET {BASE_PATH}/server-api/kb-client/manifest      -> manifest (schema_version, files[], bundle_digest)
-//   GET {BASE_PATH}/server-api/kb-client/download       -> JSON bundle { files: {name: content} } (one-shot)
-//   GET {BASE_PATH}/server-api/kb-client/files/:name    -> a single bundle file (whitelisted)
-//   GET {BASE_PATH}/server-api/kb-client/install        -> bootstrap shell script (curl | sh) (CASE-440)
+//   GET /server-api/kb-client/manifest      -> manifest (schema_version, files[], bundle_digest)
+//   GET /server-api/kb-client/download       -> JSON bundle { files: {name: content} } (one-shot)
+//   GET /server-api/kb-client/files/:name    -> a single bundle file (whitelisted)
+//   GET /server-api/kb-client/install        -> bootstrap shell script (curl | sh) (CASE-440)
 //
 // files[] and bundle_digest are DERIVED from the kb-client/ directory at serve
 // time, so the served manifest can never drift from the actual bundle:
@@ -75,13 +75,11 @@ function bundleDigest(pyFiles: string[]): string {
   return h.digest('hex')
 }
 
-// Served manifest = hand-set fields (manifest.json, {BASE_PATH} resolved) +
-// derived files[] + bundle_digest.
+// Served manifest = hand-set fields (manifest.json) + derived files[] +
+// bundle_digest. Its endpoint paths are root paths: the KB is served at the
+// root of its own origin.
 function buildManifest(): Record<string, unknown> {
-  const base = (process.env.APP_BASE_PATH || '').replace(/\/$/, '')
-  const stat = JSON.parse(
-    fs.readFileSync(path.join(CLIENT_DIR, 'manifest.json'), 'utf-8').replaceAll('{BASE_PATH}', base),
-  )
+  const stat = JSON.parse(fs.readFileSync(path.join(CLIENT_DIR, 'manifest.json'), 'utf-8'))
   const files = listClientFiles()
   return { ...stat, files, bundle_digest: bundleDigest(files) }
 }

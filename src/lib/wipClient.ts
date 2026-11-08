@@ -10,8 +10,8 @@ import { createWipClient } from '@wip/client'
  * time a non-component module needs the API.
  *
  * `import.meta.env.BASE_URL` is Vite's mirror of `config.base` (always ends in
- * `/`). Concatenated with `wip` it becomes `/wip` in local dev and
- * `/apps/kb/wip` when the app is served behind the ingress prefix.
+ * `/`). Concatenated with `wip` it becomes `/wip`: the KB is served at the
+ * root of its own origin.
  */
 export const wipClient = createWipClient({
   baseUrl: `${import.meta.env.BASE_URL}wip`,

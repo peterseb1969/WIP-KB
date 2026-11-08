@@ -3,7 +3,7 @@ import path from 'node:path'
 
 /** The app under test, with a trailing slash: every path in the tests is relative to it. */
 export const BASE_URL = (() => {
-  const u = process.env.KB_E2E_URL || 'https://kb.wip.localhost:8443/apps/kb/'
+  const u = process.env.KB_E2E_URL || 'https://kb.wip.localhost:8443/'
   return u.endsWith('/') ? u : `${u}/`
 })()
 

@@ -336,7 +336,7 @@ ${KBC_RUN} kb-write.py PROJECT profile.md --tooling ./tooling.zip`}
             <code className="font-mono text-xs">--namespace</code>.
           </li>
           <li>
-            • In the app, each one has its own address, <code className="font-mono text-xs">/apps/kb/ns/&lt;name&gt;/</code>,
+            • In the app, each one has its own address, <code className="font-mono text-xs">/ns/&lt;name&gt;/</code>,
             and the Knowledge base switcher in the sidebar lists them.
           </li>
         </ul>

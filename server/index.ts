@@ -18,12 +18,6 @@ import { resolveWipKey } from './lib/wip-key.js'
 
 const PORT = parseInt(process.env.PORT || '3012')
 
-// APP_BASE_PATH — external path prefix when behind a reverse proxy.
-// E.g. /apps/kb when nginx routes https://host/apps/kb/* to this app.
-// The reverse proxy does NOT strip the prefix; the app mounts every route
-// under APP_BASE_PATH so cookies, OIDC redirects, and asset URLs all match.
-const BASE_PATH = (process.env.APP_BASE_PATH || '').replace(/\/$/, '') || '/'
-
 // The WIP API key for the browser→gateway bridge below, resolved once at startup.
 const WIP_KEY = resolveWipKey()
 
@@ -47,7 +41,7 @@ app.use(session({
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000,
-    path: BASE_PATH.endsWith('/') ? BASE_PATH : `${BASE_PATH}/`,
+    path: '/',
   },
 }))
 
@@ -186,8 +180,7 @@ router.get('/api/me', (req, res) => {
 // instance" branch in a client unreachable). Any method. Registered after every
 // real route, and in every mode — in development Express's own 404 is an HTML
 // page, so a dev install would answer differently from the image it becomes.
-// req.path is relative to the router's mount, so BASE_PATH needs no handling;
-// the (\/|$) anchor keeps a page like /apiary on the SPA.
+// The (\/|$) anchor keeps a page like /apiary on the SPA.
 const API_PREFIXES = /^\/(api|auth|wip|server-api|mcp)(\/|$)/
 router.use((req, res, next) => {
   if (API_PREFIXES.test(req.path)) {
@@ -207,16 +200,14 @@ if (process.env.NODE_ENV === 'production') {
   router.get('{*path}', (_req, res) => { res.sendFile(indexHtml) })
 }
 
-// Mount router at BASE_PATH
-app.use(BASE_PATH, router)
+// The KB is served at the root of its own origin (https://kb.<host>/): every
+// route is mounted at `/`, and no base-path variable is read.
+app.use('/', router)
 
 async function main() {
   await initAuth()
   app.listen(PORT, () => {
     console.log(`wip-kb backend listening on http://localhost:${PORT}`)
-    if (BASE_PATH !== '/') {
-      console.log(`  base path: ${BASE_PATH}`)
-    }
   })
   // The askBar's MCP connection comes up in the background, with retries: the
   // UI and the KB gateway never use MCP, so they must not wait for it.
