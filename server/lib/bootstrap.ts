@@ -234,13 +234,10 @@ export async function runBootstrap(
     // already-populated namespace (e.g. an existing canonical `kb`) — re-writing
     // WRITE_POLICY docs and, since terminology creates use no on_conflict, aborting
     // on the first `already_exists`. An existing namespace is used as-is.
-    let existing: Set<string>
-    try {
-      const nss = (await wipGet('/api/registry/namespaces')) as Array<{ prefix: string }>
-      existing = new Set(nss.map((n) => n.prefix))
-    } catch {
-      existing = new Set()
-    }
+    // A failed listing is not "no namespace exists": treating it so would seed
+    // every planned namespace, existing ones included. It fails the bootstrap.
+    const nss = (await wipGet('/api/registry/namespaces')) as Array<{ prefix: string }>
+    const existing = new Set(nss.map((n) => n.prefix))
     for (const plan of plans) {
       if (existing.has(plan.namespace)) {
         onProgress({

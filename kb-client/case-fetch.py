@@ -508,6 +508,12 @@ def _format_search_table(payload: dict) -> str:
                 f"   The type name may be wrong or retired, or its documents may not be "
                 f"synced to reporting.\n"
                 f"   Re-run without --type to search every type.\n")
+    # Namespaces whose search failed are named: their hits are missing, so a short
+    # or empty result there is not an answer about the corpus.
+    down = payload.get("unavailable_namespaces") or []
+    if down:
+        head += (f"\n!! search failed in {', '.join(down)} — hits from there are missing; "
+                 f"retry shortly (a Registry outage answers 503).")
     if not items:
         return f"{head}\n_(no matches)_\n"
     out = [head, "", "| Type | Score | Title | Snippet | Document ID |", "|---|---|---|---|---|"]

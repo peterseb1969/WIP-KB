@@ -62,13 +62,23 @@ class WipError extends Error {
  * the identical refusal, and retried again. A 4xx the write path chose
  * deliberately now survives to the wire.
  *
- * Anything else from a WipError is an upstream failure and stays 502 rather than
- * passing the platform's own status through: a 500 from document-store is not
- * this gateway failing, and answering 500 would claim it was.
+ * A 503 passes through as 503: the platform answers it while the Registry is
+ * unreachable (`registry_unavailable`), and it means "retry later", not "absent"
+ * and not "broken". Anything else from a WipError is an upstream failure and
+ * stays 502 rather than passing the platform's own status through: a 500 from
+ * document-store is not this gateway failing, and answering 500 would claim it was.
  */
 function errStatus(e: unknown): number {
   if (!(e instanceof WipError)) return 500
+  if (e.status === 503) return 503
   return e.status >= 400 && e.status < 500 ? e.status : 502
+}
+
+// Only a 404 from WIP means "absent". A Registry outage answers 503 and an
+// identifier naming several entities answers 409; reading either as "not found"
+// would tell the caller that something exists or not when WIP never said so.
+function isNotFound(e: unknown): boolean {
+  return e instanceof WipError && e.status === 404
 }
 
 // Map document-store per-item error_codes to a precise client status (CASE-490
@@ -807,7 +817,9 @@ router.post('/write/:type', async (req, res) => {
         if ('document_id' in match) {
           try {
             doc = await wipReq('GET', `/api/document-store/documents/${match.document_id}?namespace=${ns}`, key)
-          } catch { /* not found → 404 below */ }
+          } catch (e) {
+            if (!isNotFound(e)) throw e // an outage is not "not found"; 404 → below
+          }
         } else {
           // Every match field filters; the query (active documents) must find
           // exactly one document. An ambiguous match is refused, never resolved
@@ -902,8 +914,9 @@ router.get('/read/:type', async (req, res) => {
   // rather than an opaque store error on template_id.
   try {
     await templateId(type, ns, key)
-  } catch {
-    return res.status(404).json({ error: `unknown type '${type}' in namespace ${ns}` })
+  } catch (e) {
+    if (isNotFound(e)) return res.status(404).json({ error: `unknown type '${type}' in namespace ${ns}` })
+    return res.status(errStatus(e)).json({ error: (e as Error).message })
   }
   const { page, pageSize } = pageParams(req)
   const filters: AnyObj[] = []
@@ -1485,8 +1498,11 @@ async function projectOf(appQ: string, ns: string, key: string): Promise<{ term:
       sort_by: 'updated_at', sort_order: 'desc', page_size: 1,
     })
     profile = (d.items ?? [])[0] ?? null
-  } catch {
-    profile = null // no PROJECT type in this domain (not migrated): a brief without a profile
+  } catch (e) {
+    // No PROJECT type in this domain (not migrated): a brief without a profile.
+    // Any other failure is not "no profile", and is the caller's to see.
+    if (!isNotFound(e)) throw e
+    profile = null
   }
   return { term, profile }
 }
@@ -1946,7 +1962,9 @@ router.get('/search', async (req, res) => {
     try {
       const tm = await wipReq('GET', `/api/def-store/terminologies/by-value/KB_APP?namespace=${encodeURIComponent(corpus)}`, key)
       appTermId = (await resolveTerm(tm.terminology_id, appQ, key))?.term_id ?? null
-    } catch {
+    } catch (e) {
+      // No KB_APP vocabulary here is "names no term"; an outage is not.
+      if (!isNotFound(e)) return res.status(errStatus(e)).json({ error: (e as Error).message })
       appTermId = null
     }
     if (!appTermId) {
@@ -1989,13 +2007,20 @@ router.get('/search', async (req, res) => {
             updated_at: h.updated_at ?? null,
           })),
         }
-      } catch {
+      } catch (e) {
         // A namespace with no FTS data must not sink the whole search — and it
-        // reports no verdict on the filter, rather than a negative one.
-        return { unmatched: null, items: [] as AnyObj[] }
+        // reports no verdict on the filter, rather than a negative one. Any other
+        // failure (a Registry outage answers 503) is reported, never shown as "no
+        // hits": an empty result would claim the namespace was searched.
+        return { unmatched: null, items: [] as AnyObj[], failure: isNotFound(e) ? null : e }
       }
     }),
   )
+  const failed = namespaces.filter((_, i) => perNs[i]?.failure)
+  if (failed.length > 0 && failed.length === namespaces.length) {
+    const e = perNs[0]?.failure
+    return res.status(errStatus(e)).json({ error: `search failed in every namespace: ${(e as Error).message}` })
+  }
   const all = perNs.flatMap((p) => p.items).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
   // Search spans namespaces, so a type is only "unmatched" when EVERY namespace
   // that answered said so — matching in one is enough to make the filter valid.
@@ -2013,6 +2038,8 @@ router.get('/search', async (req, res) => {
     // zero-result instead of reading silence as an answer (CASE-811).
     unmatched_template: unmatchedTemplate,
     returned: Math.min(all.length, limit), truncated: all.length > limit,
+    // Namespaces whose search failed (not merely empty): their hits are missing.
+    ...(failed.length ? { unavailable_namespaces: failed } : {}),
     items: all.slice(0, limit),
   })
 })
