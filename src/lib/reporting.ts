@@ -481,6 +481,40 @@ export async function fetchFlagTargets(
   return out
 }
 
+// Which of a set of documents carry a PENDING respond flag: an active FLAG_RECORD
+// with flag_type 'respond' whose doc_status is still 'published' (written, not yet
+// dispatched). One query for a whole result page. A flag names its document in
+// flagged_document, a plain string: usually the document ID, occasionally a case
+// handle (CASE-<n>), so both forms are matched and folded back to the ID.
+const CASE_HANDLE_RE = /^CASE-\d+$/
+export async function fetchPendingRespondFlags(
+  namespace: string,
+  docs: Array<{ documentId: string; caseNumber?: number | null }>,
+): Promise<Set<string>> {
+  if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
+  const byKey = new Map<string, string>()
+  for (const d of docs) {
+    if (ID_RE.test(d.documentId)) byKey.set(d.documentId, d.documentId)
+    if (d.caseNumber != null) {
+      const handle = `CASE-${d.caseNumber}`
+      if (CASE_HANDLE_RE.test(handle)) byKey.set(handle, d.documentId)
+    }
+  }
+  const out = new Set<string>()
+  if (!byKey.size) return out
+  const list = [...byKey.keys()].map((k) => `'${k}'`).join(',')
+  const { rows } = await reportingQuery<{ flagged_document: string }>(
+    namespace,
+    `SELECT DISTINCT flagged_document FROM "${namespace}"."doc_flag_record" WHERE ${ONLY_ACTIVE}`
+      + ` AND flag_type = 'respond' AND doc_status = 'published' AND flagged_document IN (${list})`,
+  )
+  for (const r of rows) {
+    const id = byKey.get(r.flagged_document)
+    if (id) out.add(id)
+  }
+  return out
+}
+
 // Relationship degree (edges touching each id, both directions, all edge types) for
 // a set of peer documents — one query across the namespace's edge tables, replacing
 // DocPage's per-peer /relationships round-trip for the "more-neighbors" badge.

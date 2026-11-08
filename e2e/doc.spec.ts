@@ -29,6 +29,18 @@ test('the identity strip stays on screen when the document is scrolled', async (
   if (doc.data.case_number != null) await expect(strip).toContainText(String(doc.data.case_number))
 })
 
+test('the identity strip jumps back to the top', async ({ page }) => {
+  await page.goto(`doc/${doc.document_id}`, { waitUntil: 'networkidle' })
+  await expect(page.locator('h1').first()).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+  const strip = page.getByRole('region', { name: 'Current document' })
+  await expect(strip).toBeVisible()
+  await strip.getByRole('button', { name: 'Jump to top' }).click()
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+  await expect(page.locator('h1').first()).toBeInViewport()
+  await expect(strip).toBeHidden()
+})
+
 test('a search for words of its title lists the case', async ({ page }) => {
   const terms = searchTermsFrom(doc.data.title ?? '')
   test.skip(!terms, 'the case title has no searchable words')

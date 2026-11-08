@@ -3,6 +3,24 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-08 — Flag cases from the list; see which await a response; jump to top
+
+- **Added:** every case row in the list (Search, cases filter) has a one-click
+  **Flag** button beside it: the same respond → BE-YAC flag as the doc page's quick
+  flag, so a case can be flagged for review without opening it. It is the same single
+  UI write (a FLAG_RECORD plus its FLAGGED_FROM edge).
+- **Added:** a case that already has a **pending** respond flag (written, not yet
+  dispatched: `doc_status` still `published`) shows its flag button greyed out and
+  disabled ("Flagged" in the list, "Flagged: response pending" on the doc page). One
+  reporting query per result page decides it; a flag named by the case's handle
+  (`CASE-<n>`) instead of its document ID counts too. Once the flag is dispatched the
+  button is live again, and a click re-arms the flag.
+- **Added:** the identity strip that stays at the top of a scrolled document has a
+  **Top** button that scrolls back to the start of the page.
+- **Checked:** on the sandbox, a click on a row's Flag wrote a pending flag on a case,
+  and the list and the doc page then showed it greyed out (e2e `caselist.spec.ts`,
+  and the strip's jump in `doc.spec.ts`).
+
 ## 2026-11-08 — The KB is served at the root of its own origin (CASE-1103 / CASE-1115)
 
 - **Changed (breaking, hard cutover):** the platform no longer serves apps under

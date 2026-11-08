@@ -14,7 +14,7 @@ import { DocIdentityStrip } from '../components/DocIdentityStrip'
 import { TopicPicker } from '../components/TopicPicker'
 import { CaseThread, type ResponseDoc, type ResponseLink } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
-import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees } from '../lib/reporting'
+import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees, fetchPendingRespondFlags } from '../lib/reporting'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 import { formatWipDateTime } from '../lib/datetime'
 
@@ -243,6 +243,17 @@ export default function DocPage() {
     },
     enabled: flagIds.length > 0,
     staleTime: 30_000,
+  })
+
+  // Whether this doc already carries a pending respond flag: the quick-flag button
+  // greys out while it does. Flags live in the corpus namespace, the only one the
+  // button is shown in.
+  const docCaseNumber = typeof doc?.data?.case_number === 'number' ? (doc.data.case_number as number) : null
+  const { data: pendingFlags } = useQuery<Set<string>>({
+    queryKey: ['pending-respond-flags', CORPUS_NS, id, docCaseNumber],
+    queryFn: () => fetchPendingRespondFlags(CORPUS_NS, [{ documentId: id!, caseNumber: docCaseNumber }]),
+    enabled: !!id && doc?.namespace === CORPUS_NS,
+    staleTime: 15_000,
   })
 
   // CASE-506: the include=peers projection carries only title/status/case_number
@@ -631,7 +642,11 @@ export default function DocPage() {
             >
               Flag for YAC
             </button>
-            <QuickFlagButton sourceDocId={id} sourceDocTitle={docLabel(data, id)} />
+            <QuickFlagButton
+              sourceDocId={id}
+              sourceDocTitle={docLabel(data, id)}
+              pending={pendingFlags ? pendingFlags.has(id) : undefined}
+            />
             <RelationshipPicker sourceDocId={id} />
             {isCase && caseNumber !== null && caseStatus && (
               <CaseActions docId={id} caseNumber={caseNumber} status={caseStatus} />

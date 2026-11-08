@@ -3,12 +3,13 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
-import { fetchCorpusHeaders, type HeaderDoc } from '../lib/reporting'
+import { fetchCorpusHeaders, fetchPendingRespondFlags, type HeaderDoc } from '../lib/reporting'
 import { fetchTopicTree, type TopicNode, type TopicTree } from '../lib/topics'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
 import { CaseStats } from '../components/CaseStats'
+import { QuickFlagButton } from '../components/FlagModal'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 import { parseWipDate, formatWipDateTime } from '../lib/datetime'
 
@@ -777,6 +778,24 @@ export default function SearchPage() {
   const safePage = Math.min(page, pageCount)
   const visible = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
+  // Cases on this page that can be flagged from the list (the corpus is the only
+  // namespace flags are written to), and which of them already carry a pending
+  // respond flag — one reporting query per page, so the row buttons can grey out.
+  const flaggableCases = useMemo(
+    () =>
+      visible
+        .map((v) => v.doc)
+        .filter((d) => d.template_value === 'CASE_RECORD' && d.namespace === CORPUS_NS)
+        .map((d) => ({ documentId: d.document_id, caseNumber: d.data.case_number ?? null })),
+    [visible],
+  )
+  const pendingFlagsQ = useQuery<Set<string>>({
+    queryKey: ['pending-respond-flags', CORPUS_NS, flaggableCases.map((c) => c.documentId).join(',')],
+    queryFn: () => fetchPendingRespondFlags(CORPUS_NS, flaggableCases),
+    enabled: flaggableCases.length > 0,
+    staleTime: 15_000,
+  })
+
   // Scope line: which types the current result set actually spans. With a type
   // filter active it's the selected types; otherwise every type present except
   // responses (which ride the separate include toggle). This is the disclosure
@@ -1127,9 +1146,12 @@ export default function SearchPage() {
           <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-surface">
             {visible.map(({ doc, score, snippet, responseMatches }) => (
               <li key={doc.document_id}>
+                {/* The quick flag sits beside the row's link, not inside it: a
+                    button cannot nest inside an anchor. */}
+                <div className="flex items-start transition hover:bg-background">
                 <Link
                   to={`/doc/${doc.document_id}`}
-                  className="block px-4 py-3 transition hover:bg-background"
+                  className="block min-w-0 flex-1 px-4 py-3"
                 >
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
@@ -1162,6 +1184,17 @@ export default function SearchPage() {
                     </div>
                   </div>
                 </Link>
+                {doc.template_value === 'CASE_RECORD' && doc.namespace === CORPUS_NS && (
+                  <div className="py-3 pr-4">
+                    <QuickFlagButton
+                      compact
+                      sourceDocId={doc.document_id}
+                      sourceDocTitle={docLabel(doc.data, doc.document_id)}
+                      pending={pendingFlagsQ.data ? pendingFlagsQ.data.has(doc.document_id) : undefined}
+                    />
+                  </div>
+                )}
+                </div>
                 {/* Matching responses, attributed to the case they belong to.
                     Outside the row's <Link> — each is its own link, and an
                     anchor cannot nest inside another anchor. */}

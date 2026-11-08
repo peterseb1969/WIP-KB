@@ -1,12 +1,13 @@
 import { useEffect, useState, type RefObject } from 'react'
-import { Check, Copy } from 'lucide-react'
+import { ArrowUp, Check, Copy } from 'lucide-react'
 
 /**
  * A strip fixed to the top of the viewport that names the open document once its
  * header has scrolled away, so the bottom of a long case or paper still says
  * which document it is: the handle (CASE-<n>, CASE-<n>#<seq> for a response, or
- * the template for other types), the title, and the document ID with a copy
- * button. A reading aid only — it never changes the document.
+ * the template for other types), the title, the document ID with a copy
+ * button, and a button that jumps back to the top of the page. A reading aid
+ * only — it never changes the document.
  *
  * @param headerRef - the doc header; the strip shows while it is out of view.
  * @param handle - the short identifier shown first, e.g. "CASE-957".
@@ -76,6 +77,16 @@ export function DocIdentityStrip({
           className="shrink-0 rounded p-1 text-text-muted hover:bg-background hover:text-text focus:outline-none focus:ring-2 focus:ring-primary/40"
         >
           {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          title="Jump to top"
+          aria-label="Jump to top"
+          className="flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-xs text-text-muted hover:bg-background hover:text-text focus:outline-none focus:ring-2 focus:ring-primary/40"
+        >
+          <ArrowUp className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Top</span>
         </button>
       </div>
     </div>

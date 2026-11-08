@@ -101,14 +101,25 @@ async function createFlagWithEdge(opts: {
  * minimal while dispatch experience accrues — more targets/intents (and a
  * pass-through instruction) come later; the dialog stays for anything custom.
  * Idempotent by flag identity: clicking again re-arms a consumed flag.
+ *
+ * While the doc already has a pending respond flag (written, not yet dispatched),
+ * the button is greyed out and disabled: a second click would only re-write the
+ * same flag, and the grey state is how a list shows which docs await a response.
+ *
  * @param sourceDocId/sourceDocTitle - the doc being flagged.
+ * @param pending - the doc has a pending respond flag (undefined: not known yet).
+ * @param compact - the smaller form used on list rows.
  */
 export function QuickFlagButton({
   sourceDocId,
   sourceDocTitle,
+  pending,
+  compact = false,
 }: {
   sourceDocId: string
   sourceDocTitle: string
+  pending?: boolean
+  compact?: boolean
 }) {
   const NAMESPACE = CORPUS_NS
   const qc = useQueryClient()
@@ -127,6 +138,9 @@ export function QuickFlagButton({
         body: 'One-click respond flag from the doc page.',
       })
       qc.invalidateQueries({ queryKey: ['relationships', sourceDocId] })
+      // Every pending-flag lookup (doc page, case list) re-reads, so the button
+      // greys out once reporting has the new flag.
+      qc.invalidateQueries({ queryKey: ['pending-respond-flags'] })
       setState('done')
       setTimeout(() => setState('idle'), 2500)
     } catch {
@@ -135,17 +149,32 @@ export function QuickFlagButton({
     }
   }
 
+  // A flag just written stays "done" until reporting reflects it; after that the
+  // pending prop takes over.
+  const isPending = pending === true && state !== 'busy' && state !== 'error'
+  const size = compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1 text-xs'
+  const look = isPending
+    ? 'cursor-default border-gray-200 bg-gray-100 text-text-muted'
+    : 'border-accent/20 bg-accent/5 text-accent hover:bg-accent/10 disabled:cursor-wait disabled:opacity-60'
+  const label = isPending
+    ? (compact ? 'Flagged' : 'Flagged: response pending')
+    : state === 'busy' ? 'Flagging…'
+    : state === 'done' ? 'Flagged ✓ pending'
+    : state === 'error' ? 'Flag failed — retry'
+    : (compact ? 'Flag' : 'Flag: respond → BE-YAC')
+
   return (
     <button
       type="button"
       onClick={handleClick}
-      disabled={state === 'busy'}
-      className="rounded-md border border-accent/20 bg-accent/5 px-3 py-1 text-xs font-medium text-accent hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:cursor-wait disabled:opacity-60"
+      disabled={state === 'busy' || isPending}
+      aria-disabled={isPending || undefined}
+      title={isPending
+        ? 'Already flagged for a response from BE-YAC; the flag is waiting to be picked up'
+        : 'Flag for a response from BE-YAC'}
+      className={`shrink-0 rounded-md border font-medium focus:outline-none focus:ring-2 focus:ring-accent/40 ${size} ${look}`}
     >
-      {state === 'idle' && 'Flag: respond → BE-YAC'}
-      {state === 'busy' && 'Flagging…'}
-      {state === 'done' && 'Flagged ✓ pending'}
-      {state === 'error' && 'Flag failed — retry'}
+      {label}
     </button>
   )
 }
