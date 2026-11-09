@@ -189,7 +189,13 @@ kbc case-fetch.py case <n> --view responses   # the response thread only
 kbc case-fetch.py case <n> --response latest  # just the latest response
 kbc case-fetch.py case <n> --response <seq>   # a specific response (404 if absent)
 kbc case-fetch.py case <n> --format json      # raw gateway payload
+kbc case-fetch.py case CASE-<n>#<seq>         # a response by its handle (= --response <seq>)
 ```
+
+`<n>` may be written as the KB prints it: `1179` and `CASE-1179` (any case, or
+`#1179`) name the same case. The same holds wherever a write takes a case number:
+`case_number:` in frontmatter, `--match case_number=CASE-1179`, and an edge's target
+key (`--edge RESPONDS_TO:CASE_RECORD:CASE-1179`).
 
 Prints the case body followed by its responses (CASE_RESPONSE docs, seq-ordered,
 active-only) — one gateway read, no separate fetch. Backed by

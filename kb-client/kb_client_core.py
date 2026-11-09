@@ -319,6 +319,35 @@ def _request(base_url: str, key_file: Path, path: str,
             f"(content-type {ctype or 'unset'}): {raw[:200].decode('utf-8', 'replace')}") from e
 
 
+# --- Case handles -----------------------------------------------------------
+# Agents name a case the way the KB prints it: CASE-1179, and a response
+# CASE-1179#3. Every place that takes a case number accepts those forms as well
+# as the bare number: 1179, "1179", "CASE-1179" (any case), "#1179".
+_CASE_HANDLE_RE = re.compile(r"^\s*(?:case-?\s*|#)?(\d+)(?:\s*#\s*(\d+))?\s*$", re.IGNORECASE)
+
+
+def parse_case_handle(value: object) -> tuple[int, int | None]:
+    """(case number, response seq or None) from 1179 / "CASE-1179" / "CASE-1179#3".
+    Raises ValueError naming the accepted forms."""
+    if isinstance(value, bool):
+        raise ValueError(f"not a case number: {value!r}")
+    if isinstance(value, int):
+        return value, None
+    m = _CASE_HANDLE_RE.match(str(value))
+    if not m:
+        raise ValueError(f"not a case number: {value!r} (use 1179, CASE-1179, or CASE-1179#3 for a response)")
+    return int(m.group(1)), (int(m.group(2)) if m.group(2) else None)
+
+
+def parse_case_number(value: object) -> int:
+    """The case number from 1179 / "1179" / "CASE-1179" / "#1179". A response
+    handle (CASE-1179#3) is refused here: it names a response, not a case."""
+    n, seq = parse_case_handle(value)
+    if seq is not None:
+        raise ValueError(f"{value!r} names a response; a case number is wanted here (CASE-{n})")
+    return n
+
+
 def gw_get(path: str, refuse_404: bool = False) -> dict | None:
     """GET a gateway endpoint (path relative to /server-api/kb, e.g. '/cases/5'),
     with local→remote failover. Returns parsed JSON, or None if the final

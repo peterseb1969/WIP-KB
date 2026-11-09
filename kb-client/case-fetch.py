@@ -43,7 +43,7 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-from kb_client_core import PROJECT, GatewayRefusal, KbMoved, gw_get, gw_get_bytes
+from kb_client_core import PROJECT, GatewayRefusal, KbMoved, gw_get, gw_get_bytes, parse_case_handle
 
 
 # ----------------------------------------------------------------------------
@@ -548,7 +548,8 @@ def main() -> None:
     sub = ap.add_subparsers(dest="mode", required=True)
 
     case_sp = sub.add_parser("case", help="fetch a case: body, response thread, or both")
-    case_sp.add_argument("identifier", help="case number")
+    case_sp.add_argument("identifier",
+                         help="the case: 1179 or CASE-1179; CASE-1179#3 reads its response 3")
     case_sp.add_argument("--view", choices=["case", "responses", "both"], default=None,
                          help="case body, the response thread, or both "
                               "(default: both, or responses when --response is given)")
@@ -652,10 +653,17 @@ def main() -> None:
     try:
         if args.mode == "case":
             try:
-                case_num = int(args.identifier)
-            except ValueError:
-                print(f"ERROR: case identifier must be an integer (got: {args.identifier!r})", file=sys.stderr)
+                case_num, seq = parse_case_handle(args.identifier)
+            except ValueError as e:
+                print(f"ERROR: {e}", file=sys.stderr)
                 sys.exit(2)
+            # A response handle (CASE-1179#3) reads that response, as --response 3 would.
+            if seq is not None:
+                if args.response is not None and str(args.response) != str(seq):
+                    print(f"ERROR: {args.identifier!r} names response {seq}, but --response says "
+                          f"{args.response!r}", file=sys.stderr)
+                    sys.exit(2)
+                args.response = str(seq)
             # --response implies responses-only unless --view is set explicitly,
             # so `case <n> --response latest` returns the response, not the body.
             view = args.view or ("responses" if args.response else "both")

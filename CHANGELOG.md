@@ -3,6 +3,22 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-09 — A case can be named as the KB prints it: CASE-1179
+
+- **Fixed:** `kbc case-fetch.py case CASE-1179` failed with "case identifier must be
+  an integer"; agents type the handle the KB prints. Client 5.1.0 accepts `1179`,
+  `CASE-1179` (any case) and `#1179` everywhere a case number is wanted, and
+  `case CASE-1179#3` reads response 3. In writes, `case_number:` frontmatter,
+  `--match case_number=…` and an edge's `CASE_RECORD` target key reach the gateway as
+  the integer.
+- **Fixed (gateway):** an edge target key or a patch match spelled `CASE-1179` for an
+  integer identity field is matched as the number. Before, the equality filter on the
+  string found nothing: the edge stayed silently unlinked, or the patch answered 404.
+  This also covers clients older than 5.1.0.
+- **Checked:** on the sandbox: `case CASE-970` and `case CASE-970#1` read the case and
+  its response, a bad handle names the accepted forms, and a raw gateway patch matching
+  `case_number: "CASE-970"` found the case.
+
 ## 2026-11-08 — Flag cases from the list; see which await a response; jump to top
 
 - **Added:** every case row in the list (Search, cases filter) has a one-click

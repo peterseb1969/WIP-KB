@@ -49,7 +49,8 @@ import subprocess
 import sys
 import urllib.parse
 
-from kb_client_core import DEV_ROOT, NAMESPACE, PROJECT, GatewayRefusal, KbMoved, gw_get, gw_post, gw_post_bytes, targets
+from kb_client_core import (DEV_ROOT, NAMESPACE, PROJECT, GatewayRefusal, KbMoved, gw_get, gw_post,
+                            gw_post_bytes, parse_case_number, targets)
 
 
 def _coerce(v: str) -> object:
@@ -828,9 +829,34 @@ def check_implement_hashes(body: str, repo: str) -> list[str]:
     return unpushed
 
 
+# Types whose data.case_number names a case. A writer may spell it as the KB prints
+# it (CASE-1179); the template field is an integer.
+_CASE_NUMBER_TYPES = {"CASE_RECORD", "CASE_RESPONSE"}
+
+
+def normalise_case_refs(type_: str, data: dict, edges: list) -> None:
+    """Turn every case handle a writer typed (CASE-1179, #1179, "1179") into the
+    integer the KB stores: data.case_number of a case or case response, and the
+    target key of an edge to a CASE_RECORD (case_number is its identity field, and
+    the gateway matches it by value). Raises ValueError on a value that names no
+    case."""
+    if type_ in _CASE_NUMBER_TYPES and data.get("case_number") not in (None, ""):
+        data["case_number"] = parse_case_number(data["case_number"])
+    for e in edges:
+        if e.get("target_type") == "CASE_RECORD" and e.get("target_key") not in (None, ""):
+            e["target_key"] = parse_case_number(e["target_key"])
+
+
+def normalise_case_match(match: dict) -> None:
+    """--match case_number=CASE-1179 locates the same case as case_number=1179."""
+    if match.get("case_number") not in (None, ""):
+        match["case_number"] = parse_case_number(match["case_number"])
+
+
 def cmd_write(type_: str, args: argparse.Namespace) -> int:
     try:
         data, edges = build_records(type_, args)
+        normalise_case_refs(type_, data, edges)
     except ValueError as e:
         print(f"ERROR: rejected — {e}", file=sys.stderr)  # client-side validation
         return 1
@@ -866,6 +892,11 @@ def cmd_patch(type_: str, args: argparse.Namespace) -> int:
     one document, or the gateway refuses with 409 instead of guessing."""
     patch = _parse_fields(args.patch)
     match = _parse_fields(args.match)
+    try:
+        normalise_case_match(match)
+    except ValueError as e:
+        print(f"ERROR: rejected — {e}", file=sys.stderr)
+        return 2
     if not patch or not match:
         print("ERROR: --patch k=v and --match k=v are both required", file=sys.stderr)
         return 2

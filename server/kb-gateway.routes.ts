@@ -24,6 +24,7 @@
 import { createHash } from 'node:crypto'
 import express, { Router, type Request, type Response, type NextFunction } from 'express'
 import { createCorpusNamespace } from './lib/bootstrap.js'
+import { identityValue } from './lib/identity-value.js'
 import { resolveWipKey } from './lib/wip-key.js'
 import { MATCH_PAGE_SIZE, describeMatch, matchFilters, resolveMatch, validateMatch } from './lib/patch-match.js'
 
@@ -714,7 +715,7 @@ async function resolveRef(targetType: string, targetKey: unknown, ns: string, ke
   if (!idField || targetKey === undefined || targetKey === null) return null
   const q = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key, {
     template_id: targetType,
-    filters: [{ field: `data.${idField}`, operator: 'eq', value: targetKey }],
+    filters: [{ field: `data.${idField}`, operator: 'eq', value: identityValue(t, idField, targetKey) }],
     page: 1, page_size: 1,
   })
   return (q.items || [])[0]?.document_id || null
@@ -808,6 +809,12 @@ router.post('/write/:type', async (req, res) => {
     }
     const where = describeMatch(match)
     try {
+      // A match on an integer field may be spelled as the KB prints it
+      // (case_number=CASE-1179): matched as the number, like an edge target.
+      if (!('document_id' in match)) {
+        const tpl = await getTemplate(type, ns, key)
+        for (const k of Object.keys(match)) match[k] = identityValue(tpl, k, match[k])
+      }
       for (let attempt = 0; attempt < PATCH_MAX_RETRIES; attempt++) {
         // match on document_id fetches directly — the escape hatch for types
         // whose identity is composite (FLAG_RECORD: [flag_type, flagged_document]),
