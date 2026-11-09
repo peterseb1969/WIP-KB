@@ -83,7 +83,7 @@ Env:
   `project` key (a `KB_APP` term, becomes `KB_PROJECT`) is sent with every write:
   the gateway tags the document with `app` when its type has that field and the
   document names none. `search --project <app>` scopes a search to one project.
-- `KB_BASE_URL` — another name for `KB_APP_URL` (default `https://kb.kb.internal`).
+- `KB_BASE_URL` — another name for `KB_APP_URL` (default `https://kb.prod.internal`).
 - `KB_API_KEY_FILE` — its key file. **No default:** the key is issued when the
   project is installed and its file name differs per installation, so it comes
   from `kb_api_key_file` in `.claude/kb.json` or from this variable; with
@@ -96,7 +96,7 @@ Env:
 - `KB_NAMESPACE` (default `kb`), `KB_VERIFY_TLS` (default `false`),
   `KB_DEV_ROOT` (default `~/Development` — flat-file repo roots).
 - `KB_APP_URL` — the KB's own origin (gateway verbs + served bundle). Default
-  `https://kb.kb.internal`, canonical. Every install serves each app at the root
+  `https://kb.prod.internal`, canonical. Every install serves each app at the root
   of an origin of its own, `https://<app>.<WIP host>/`, so there is no path
   prefix: nothing answers under `/apps/kb` any more. Client 5.0.0 and later
   build root URLs only; an older cached client fails against a KB served at the

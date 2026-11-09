@@ -17,7 +17,7 @@
 #   bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 437
 #
 # Env (same family as kb-client.sh):
-#   KB_APP_URL        https://kb.kb.internal (the KB's own origin)
+#   KB_APP_URL        https://kb.prod.internal (canonical: the KB's own origin)
 #   KB_API_KEY_FILE   no default: from .claude/kb.json, or set it with KB_APP_URL
 #   KB_CLIENT_CACHE   ~/.cache/wip-kb-client
 #
@@ -50,7 +50,7 @@ elif [ -r "$KBJSON" ]; then
   fi
 fi
 
-KB_APP_URL="${KB_APP_URL:-https://kb.kb.internal}"
+KB_APP_URL="${KB_APP_URL:-https://kb.prod.internal}"
 KBC="${KB_CLIENT_CACHE:-$HOME/.cache/wip-kb-client}"
 # The key is per-installation configuration, so there is no default path to guess.
 KEYFILE="${KB_API_KEY_FILE:-}"

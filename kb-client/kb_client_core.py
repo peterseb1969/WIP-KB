@@ -103,7 +103,7 @@ def _resolve_instance() -> None:
 
 _resolve_instance()
 
-CANONICAL_BASE_URL = "https://kb.kb.internal"   # last-resort fallback: canonical's KB origin
+CANONICAL_BASE_URL = "https://kb.prod.internal"   # last-resort fallback: canonical's KB origin
 LOCAL_BASE_URL = "https://localhost:8443"
 
 

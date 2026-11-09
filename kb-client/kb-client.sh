@@ -11,8 +11,8 @@
 #   e.g.  bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py case 437
 #         bash ~/.cache/wip-kb-client/kb-client.sh case-fetch.py list --status open
 #
-# Env (defaults target the canonical KB app, https://kb.kb.internal):
-#   KB_APP_URL        https://kb.kb.internal; with KB_API_KEY_FILE, targets another
+# Env (defaults target the canonical KB app, https://kb.prod.internal):
+#   KB_APP_URL        https://kb.prod.internal; with KB_API_KEY_FILE, targets another
 #                     instance (set both or neither — never half a pair)
 #   KB_API_KEY_FILE   no default: from .claude/kb.json, or set it with KB_APP_URL
 #   KB_CLIENT_CACHE   ~/.cache/wip-kb-client
@@ -93,7 +93,7 @@ if [ -r "$KBJSON" ]; then
   fi
 fi
 
-KB_APP_URL="${KB_APP_URL:-https://kb.kb.internal}"
+KB_APP_URL="${KB_APP_URL:-https://kb.prod.internal}"
 KB_VERIFY_TLS="${KB_VERIFY_TLS:-false}"
 KBC="${KB_CLIENT_CACHE:-$HOME/.cache/wip-kb-client}"
 # KB_BASE_URL is what the served python read/write scripts use for the instance

@@ -17,7 +17,7 @@ Env:
   KB_TARGET   base URL          (default https://localhost:8443 — the sandbox)
   KB_KEYFILE  admin API key file (default: WIP_API_KEY_FILE from .env, sandbox target only)
 
-To target canonical: KB_TARGET=https://kb.internal \
+To target canonical: KB_TARGET=https://prod.internal \
                      KB_KEYFILE=<canonical key file, kb_api_key_file in .claude/kb.json>
 """
 import json

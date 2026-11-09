@@ -3,6 +3,22 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-09 — Canonical is prod.internal; the KB is https://kb.prod.internal/
+
+- **Changed:** canonical moved with the apps-at-root cut-over, from `kb.internal`
+  (install `kb`) to `prod.internal` (install `prod`). The client's fallback URL is
+  `https://kb.prod.internal` (client 5.1.1: `install.sh`, `kb-client.sh`,
+  `kb_client_core.py`); CLAUDE.md's Backend Target names the new canonical and says
+  the old install is still up, pre-cut and not a target.
+- **Fixed:** the canonical-write guard (`.claude/hooks/block-canonical-writes.sh`)
+  matched only `kb.internal`, so it stopped guarding the moment canonical moved. It
+  now guards `prod.internal` and `kb.internal` and any subdomain of either
+  (`prod-test.internal` stays free), and its `-d` write indicator counts only inside a
+  curl command (`tr -d` no longer trips it).
+- **Every clone:** set `kb_app_url` to `https://kb.prod.internal` and `kb_api_key_file`
+  to the `prod` install's client key in `.claude/kb.json`, then re-run the install
+  one-liner (a cached 4.x client builds `/apps/kb` URLs and cannot refetch itself).
+
 ## 2026-11-09 — A case can be named as the KB prints it: CASE-1179
 
 - **Fixed:** `kbc case-fetch.py case CASE-1179` failed with "case identifier must be

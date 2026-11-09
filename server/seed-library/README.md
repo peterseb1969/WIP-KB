@@ -62,4 +62,4 @@ canonical `template_id`, not the value — value resolution does not traverse
 ## Dev vs deployed
 In dev the KB-corpus namespace is `kb-libdev` and this namespace is `library`, both on
 localhost:8443. A deployed instance substitutes its own namespace names; `namespace.json`
-records the dev values. **Never seed against prod `kb.internal`.**
+records the dev values. **Never seed against prod (`prod.internal`).**
