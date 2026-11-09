@@ -481,16 +481,25 @@ export async function fetchFlagTargets(
   return out
 }
 
-// Which of a set of documents carry a PENDING respond flag: an active FLAG_RECORD
-// with flag_type 'respond' whose doc_status is still 'published' (written, not yet
-// dispatched). One query for a whole result page. A flag names its document in
+// Which of a set of documents carry an OUTSTANDING respond flag — one asked for and
+// not yet answered:
+//   'pending'    — written (doc_status 'published'), not yet dispatched;
+//   'dispatched' — dispatched, and the case has no response created since the flag
+//                  was last written (re-arm or dispatch). A dispatch that has not
+//                  produced its response yet must not invite another click: every
+//                  re-arm is dispatched again and can produce another response.
+// A response created after the flag clears it: the flag did its job, and flagging
+// again means asking for another response. For a document that is not a case
+// there are no responses to wait for, so only 'pending' applies.
+// One query for a whole result page. A flag names its document in
 // flagged_document, a plain string: usually the document ID, occasionally a case
 // handle (CASE-<n>), so both forms are matched and folded back to the ID.
+export type OutstandingFlag = 'pending' | 'dispatched'
 const CASE_HANDLE_RE = /^CASE-\d+$/
-export async function fetchPendingRespondFlags(
+export async function fetchOutstandingRespondFlags(
   namespace: string,
   docs: Array<{ documentId: string; caseNumber?: number | null }>,
-): Promise<Set<string>> {
+): Promise<Map<string, OutstandingFlag>> {
   if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
   const byKey = new Map<string, string>()
   for (const d of docs) {
@@ -500,17 +509,23 @@ export async function fetchPendingRespondFlags(
       if (CASE_HANDLE_RE.test(handle)) byKey.set(handle, d.documentId)
     }
   }
-  const out = new Set<string>()
+  const out = new Map<string, OutstandingFlag>()
   if (!byKey.size) return out
   const list = [...byKey.keys()].map((k) => `'${k}'`).join(',')
-  const { rows } = await reportingQuery<{ flagged_document: string }>(
+  const ns = `"${namespace}"`
+  const { rows } = await reportingQuery<{ flagged_document: string; doc_status: string }>(
     namespace,
-    `SELECT DISTINCT flagged_document FROM "${namespace}"."doc_flag_record" WHERE ${ONLY_ACTIVE}`
-      + ` AND flag_type = 'respond' AND doc_status = 'published' AND flagged_document IN (${list})`,
+    `SELECT f.flagged_document, f.doc_status FROM ${ns}."doc_flag_record" f`
+      + ` LEFT JOIN ${ns}."doc_case_record" c ON c.${ONLY_ACTIVE}`
+      + ` AND f.flagged_document IN (c.document_id, 'CASE-' || c.case_number)`
+      + ` WHERE f.${ONLY_ACTIVE} AND f.flag_type = 'respond' AND f.flagged_document IN (${list})`
+      + ` AND (f.doc_status = 'published' OR (c.case_number IS NOT NULL AND NOT EXISTS (`
+      + `SELECT 1 FROM ${ns}."doc_case_response" r WHERE r.${ONLY_ACTIVE}`
+      + ` AND r.case_number = c.case_number AND r.created_at > f.updated_at)))`,
   )
   for (const r of rows) {
     const id = byKey.get(r.flagged_document)
-    if (id) out.add(id)
+    if (id) out.set(id, r.doc_status === 'published' ? 'pending' : 'dispatched')
   }
   return out
 }

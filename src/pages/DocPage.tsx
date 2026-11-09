@@ -14,7 +14,7 @@ import { DocIdentityStrip } from '../components/DocIdentityStrip'
 import { TopicPicker } from '../components/TopicPicker'
 import { CaseThread, type ResponseDoc, type ResponseLink } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
-import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees, fetchPendingRespondFlags } from '../lib/reporting'
+import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees, fetchOutstandingRespondFlags, type OutstandingFlag } from '../lib/reporting'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 import { formatWipDateTime } from '../lib/datetime'
 
@@ -245,13 +245,13 @@ export default function DocPage() {
     staleTime: 30_000,
   })
 
-  // Whether this doc already carries a pending respond flag: the quick-flag button
-  // greys out while it does. Flags live in the corpus namespace, the only one the
+  // Whether this doc carries an outstanding respond flag (pending, or dispatched and
+  // unanswered): the quick-flag button greys out while it does. Flags live in the corpus namespace, the only one the
   // button is shown in.
   const docCaseNumber = typeof doc?.data?.case_number === 'number' ? (doc.data.case_number as number) : null
-  const { data: pendingFlags } = useQuery<Set<string>>({
-    queryKey: ['pending-respond-flags', CORPUS_NS, id, docCaseNumber],
-    queryFn: () => fetchPendingRespondFlags(CORPUS_NS, [{ documentId: id!, caseNumber: docCaseNumber }]),
+  const { data: outstandingFlags } = useQuery<Map<string, OutstandingFlag>>({
+    queryKey: ['outstanding-respond-flags', CORPUS_NS, id, docCaseNumber],
+    queryFn: () => fetchOutstandingRespondFlags(CORPUS_NS, [{ documentId: id!, caseNumber: docCaseNumber }]),
     enabled: !!id && doc?.namespace === CORPUS_NS,
     staleTime: 15_000,
   })
@@ -645,7 +645,7 @@ export default function DocPage() {
             <QuickFlagButton
               sourceDocId={id}
               sourceDocTitle={docLabel(data, id)}
-              pending={pendingFlags ? pendingFlags.has(id) : undefined}
+              outstanding={outstandingFlags ? outstandingFlags.get(id) ?? null : undefined}
             />
             <RelationshipPicker sourceDocId={id} />
             {isCase && caseNumber !== null && caseStatus && (

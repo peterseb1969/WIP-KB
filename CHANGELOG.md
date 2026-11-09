@@ -3,6 +3,26 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-09 — A flag counts until it is answered; the list flags open cases only
+
+- **Fixed:** the quick flag greyed out only while a flag waited for dispatch, about
+  30 seconds. After that it was live again, and each click re-armed the flag, which
+  was dispatched again and could produce another response (on canonical, CASE-1229 and
+  CASE-1230 each received two). A respond flag now counts as **outstanding** until a
+  response on the case is created after it: pending dispatch, or dispatched and
+  unanswered. While it is outstanding the button is disabled, in the list and on the
+  doc page, and its tooltip says which of the two it is.
+- **Changed:** the case list offers a live Flag only on an **open** case. Responded,
+  closed and implemented cases show it disabled, with the reason. Clicking down a list
+  filtered to "open or responded" therefore queues only unanswered cases. To ask for
+  another response on an answered case, flag it on its page.
+- **Fixed:** a click left the button live again after 2.5 s, before reporting had
+  the new flag. It now stays disabled.
+- **Checked:** on the sandbox, the full cycle on one case: flag from the list (greyed,
+  and still greyed after reloads), marked dispatched (doc page: "awaiting response"),
+  a response added (the button is live again). e2e: a responded case's row button is
+  disabled.
+
 ## 2026-11-09 — Canonical is prod.internal; the KB is https://kb.prod.internal/
 
 - **Changed:** canonical moved with the apps-at-root cut-over, from `kb.internal`

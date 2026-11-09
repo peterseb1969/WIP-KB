@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { wipFetchJson, assertBulkSuccess } from '../lib/wipBulk'
 import { FLAG_INTENTS, DEFAULT_FLAG_INTENT, type FlagIntent } from '../lib/promptTemplates'
 import { CORPUS_NS } from '../lib/namespaces'
+import type { OutstandingFlag } from '../lib/reporting'
 import { WEB_UI_AUTHOR } from '../lib/kbGateway'
 
 interface Props {
@@ -100,30 +101,39 @@ async function createFlagWithEdge(opts: {
  * One-click flag for the common case: respond → BE-YAC, no note. Deliberately
  * minimal while dispatch experience accrues — more targets/intents (and a
  * pass-through instruction) come later; the dialog stays for anything custom.
- * Idempotent by flag identity: clicking again re-arms a consumed flag.
+ * Idempotent by flag identity: clicking again re-arms the same flag, and a
+ * re-armed flag is dispatched again — so every click can produce a response.
  *
- * While the doc already has a pending respond flag (written, not yet dispatched),
- * the button is greyed out and disabled: a second click would only re-write the
- * same flag, and the grey state is how a list shows which docs await a response.
+ * Disabled (greyed out) when clicking would ask for a response already asked for:
+ * - the doc has an outstanding respond flag: pending dispatch, or dispatched with
+ *   no response since (fetchOutstandingRespondFlags);
+ * - this button has just written one (reporting may not show it yet);
+ * - the caller passes inactiveReason: the case list does for every case that is
+ *   not open, so clicking down a list only ever queues unanswered cases. Asking
+ *   for another response on an answered case is a deliberate act, made on the
+ *   doc page, which passes no reason.
  *
  * @param sourceDocId/sourceDocTitle - the doc being flagged.
- * @param pending - the doc has a pending respond flag (undefined: not known yet).
+ * @param outstanding - the doc's outstanding respond flag, if any (undefined: not known yet).
+ * @param inactiveReason - why the caller does not offer a flag here (tooltip), if it does not.
  * @param compact - the smaller form used on list rows.
  */
 export function QuickFlagButton({
   sourceDocId,
   sourceDocTitle,
-  pending,
+  outstanding,
+  inactiveReason,
   compact = false,
 }: {
   sourceDocId: string
   sourceDocTitle: string
-  pending?: boolean
+  outstanding?: OutstandingFlag | null
+  inactiveReason?: string
   compact?: boolean
 }) {
   const NAMESPACE = CORPUS_NS
   const qc = useQueryClient()
-  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
+  const [state, setState] = useState<'idle' | 'busy' | 'flagged' | 'error'>('idle')
 
   const handleClick = async () => {
     setState('busy')
@@ -135,43 +145,40 @@ export function QuickFlagButton({
         flagType: 'respond',
         targetYac: 'BE-YAC',
         title: `Flag → BE-YAC: ${head}${sourceDocTitle.length > 60 ? '…' : ''}`,
-        body: 'One-click respond flag from the doc page.',
+        body: 'One-click respond flag.',
       })
       qc.invalidateQueries({ queryKey: ['relationships', sourceDocId] })
-      // Every pending-flag lookup (doc page, case list) re-reads, so the button
-      // greys out once reporting has the new flag.
-      qc.invalidateQueries({ queryKey: ['pending-respond-flags'] })
-      setState('done')
-      setTimeout(() => setState('idle'), 2500)
+      // Every outstanding-flag lookup (doc page, case list) re-reads.
+      qc.invalidateQueries({ queryKey: ['outstanding-respond-flags'] })
+      // Stays 'flagged' (disabled) from here on: the flag is outstanding now, even
+      // before reporting has synced it, and a second click would dispatch it twice.
+      setState('flagged')
     } catch {
       setState('error')
       setTimeout(() => setState('idle'), 4000)
     }
   }
 
-  // A flag just written stays "done" until reporting reflects it; after that the
-  // pending prop takes over.
-  const isPending = pending === true && state !== 'busy' && state !== 'error'
+  const known = state === 'flagged' ? 'pending' : outstanding ?? null
+  const blocked = state === 'busy' ? null
+    : known === 'pending' ? 'Flagged for a response from BE-YAC; waiting to be picked up'
+    : known === 'dispatched' ? 'Flagged and picked up; waiting for the response. You can flag again once it has arrived.'
+    : inactiveReason ?? null
   const size = compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1 text-xs'
-  const look = isPending
+  const look = blocked
     ? 'cursor-default border-gray-200 bg-gray-100 text-text-muted'
     : 'border-accent/20 bg-accent/5 text-accent hover:bg-accent/10 disabled:cursor-wait disabled:opacity-60'
-  const label = isPending
-    ? (compact ? 'Flagged' : 'Flagged: response pending')
-    : state === 'busy' ? 'Flagging…'
-    : state === 'done' ? 'Flagged ✓ pending'
+  const label = state === 'busy' ? 'Flagging…'
     : state === 'error' ? 'Flag failed — retry'
+    : known ? (compact ? 'Flagged' : 'Flagged: awaiting response')
     : (compact ? 'Flag' : 'Flag: respond → BE-YAC')
 
   return (
     <button
       type="button"
       onClick={handleClick}
-      disabled={state === 'busy' || isPending}
-      aria-disabled={isPending || undefined}
-      title={isPending
-        ? 'Already flagged for a response from BE-YAC; the flag is waiting to be picked up'
-        : 'Flag for a response from BE-YAC'}
+      disabled={state === 'busy' || blocked !== null}
+      title={blocked ?? 'Flag for a response from BE-YAC'}
       className={`shrink-0 rounded-md border font-medium focus:outline-none focus:ring-2 focus:ring-accent/40 ${size} ${look}`}
     >
       {label}

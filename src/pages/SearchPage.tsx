@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
-import { fetchCorpusHeaders, fetchPendingRespondFlags, type HeaderDoc } from '../lib/reporting'
+import { fetchCorpusHeaders, fetchOutstandingRespondFlags, type HeaderDoc, type OutstandingFlag } from '../lib/reporting'
 import { fetchTopicTree, type TopicNode, type TopicTree } from '../lib/topics'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
@@ -139,6 +139,16 @@ function compareDate(a: Date | null, b: Date | null, dir: 'asc' | 'desc'): numbe
 // for cases) — not what the user means by "status".
 function workflowStatus(doc: DocItem): string | undefined {
   return doc.data?.status
+}
+
+// The list offers a one-click flag only on an OPEN case, so clicking down a list
+// filtered to "open or responded" queues the unanswered cases and never asks again
+// about one already answered. Another response on an answered case is a deliberate
+// act: the doc page's flag button allows it.
+function listFlagInactiveReason(status: string | undefined): string | undefined {
+  if (status === 'open') return undefined
+  if (status === 'responded') return 'Already responded. To ask for another response, flag it on its page.'
+  return `This case is ${status ?? 'not open'}; only open cases are flagged from the list. Its page can still flag it.`
 }
 
 interface FtsHit {
@@ -778,9 +788,9 @@ export default function SearchPage() {
   const safePage = Math.min(page, pageCount)
   const visible = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
-  // Cases on this page that can be flagged from the list (the corpus is the only
-  // namespace flags are written to), and which of them already carry a pending
-  // respond flag — one reporting query per page, so the row buttons can grey out.
+  // Cases on this page shown with a flag button (the corpus is the only namespace
+  // flags are written to), and which of them carry an outstanding respond flag —
+  // one reporting query per page, so the row buttons can grey out.
   const flaggableCases = useMemo(
     () =>
       visible
@@ -789,9 +799,9 @@ export default function SearchPage() {
         .map((d) => ({ documentId: d.document_id, caseNumber: d.data.case_number ?? null })),
     [visible],
   )
-  const pendingFlagsQ = useQuery<Set<string>>({
-    queryKey: ['pending-respond-flags', CORPUS_NS, flaggableCases.map((c) => c.documentId).join(',')],
-    queryFn: () => fetchPendingRespondFlags(CORPUS_NS, flaggableCases),
+  const outstandingFlagsQ = useQuery<Map<string, OutstandingFlag>>({
+    queryKey: ['outstanding-respond-flags', CORPUS_NS, flaggableCases.map((c) => c.documentId).join(',')],
+    queryFn: () => fetchOutstandingRespondFlags(CORPUS_NS, flaggableCases),
     enabled: flaggableCases.length > 0,
     staleTime: 15_000,
   })
@@ -1190,7 +1200,8 @@ export default function SearchPage() {
                       compact
                       sourceDocId={doc.document_id}
                       sourceDocTitle={docLabel(doc.data, doc.document_id)}
-                      pending={pendingFlagsQ.data ? pendingFlagsQ.data.has(doc.document_id) : undefined}
+                      outstanding={outstandingFlagsQ.data ? outstandingFlagsQ.data.get(doc.document_id) ?? null : undefined}
+                      inactiveReason={listFlagInactiveReason(workflowStatus(doc))}
                     />
                   </div>
                 )}

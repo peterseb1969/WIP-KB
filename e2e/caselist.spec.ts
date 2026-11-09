@@ -1,6 +1,7 @@
-// The case list offers a one-click respond flag on every case row, and a case that
-// already has a pending respond flag shows it greyed out. Read-only: the tests never
-// click a flag button, so they are safe on every rung.
+// The case list offers a one-click respond flag on every case row. It is live only
+// on an open case with no outstanding respond flag: a case already flagged, or
+// already responded, shows it greyed out. Read-only: the tests never click a flag
+// button, so they are safe on every rung.
 import { test, expect } from '@playwright/test'
 import { appConfig } from './helpers'
 
@@ -15,6 +16,17 @@ test('every case row in the list has a quick flag button', async ({ page }) => {
     // The button sits beside the row's link, never inside it.
     await expect(rows.nth(i).locator('a button')).toHaveCount(0)
   }
+})
+
+test('a responded case cannot be flagged from the list', async ({ page }) => {
+  await page.goto('search?t=CASE_RECORD', { waitUntil: 'networkidle' })
+  const rows = page.locator('main ul > li').filter({
+    has: page.locator('span', { hasText: /^responded$/ }),
+  })
+  test.skip((await rows.count()) === 0, 'no responded case on the first page')
+  const btn = rows.first().getByRole('button', { name: /^Flag(ged)?$/ })
+  await expect(btn).toBeDisabled()
+  await expect(btn).toHaveAttribute('title', /responded|Flagged/)
 })
 
 test('a case with a pending respond flag shows its flag button greyed out', async ({ page, request }) => {
@@ -35,7 +47,7 @@ test('a case with a pending respond flag shows its flag button greyed out', asyn
   await expect(btn).toBeDisabled()
 
   await page.goto(`doc/${row!.document_id}`, { waitUntil: 'networkidle' })
-  const docBtn = page.getByRole('button', { name: 'Flagged: response pending' })
+  const docBtn = page.getByRole('button', { name: 'Flagged: awaiting response' })
   await expect(docBtn).toBeVisible()
   await expect(docBtn).toBeDisabled()
 })
