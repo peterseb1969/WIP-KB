@@ -1040,10 +1040,11 @@ def cmd_claim(args: argparse.Namespace) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="KB write client (gateway-only).")
-    ap.add_argument("type", nargs="?", help="doc type (e.g. DESIGN_DECISION), or EDGE; omit with --list")
-    ap.add_argument("file", nargs="?", help="markdown file with frontmatter, or '-' for stdin; EDGE: the edge type")
-    ap.add_argument("source", nargs="?", help="EDGE only: source handle (synonym or document_id)")
-    ap.add_argument("target", nargs="?", help="EDGE only: target handle (synonym or document_id)")
+    ap.add_argument("type", nargs="?", help="doc type (e.g. DESIGN_DECISION), or EDGE, or CLAIM; omit with --list")
+    ap.add_argument("file", nargs="?", help="markdown file with frontmatter, or '-' for stdin; EDGE: the edge type; "
+                                            "CLAIM: acquire|renew|park|release")
+    ap.add_argument("source", nargs="?", help="EDGE: source handle (synonym or document_id); CLAIM: the case (1259 or CASE-1259)")
+    ap.add_argument("target", nargs="?", help="EDGE: target handle (synonym or document_id); CLAIM: the kind (respond, implement, …)")
     ap.add_argument("--namespace",
                     help="namespace override — EDGE (default: gateway corpus) and --list "
                          "(default: every namespace)")

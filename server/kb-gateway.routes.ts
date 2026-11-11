@@ -789,6 +789,16 @@ router.post('/write/:type', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
   const type = req.params.type
+  // A claim is written only through POST /claims/:n/:kind, which checks it against
+  // the kind's rule (holders, exclusions) and serialises changes per case. Written
+  // here, a claim would hold the case without that check.
+  if (type === 'CASE_CLAIM') {
+    return res.status(409).json({
+      error_code: 'use_claims',
+      error: 'CASE_CLAIM is not written directly: use kb-write.py CLAIM acquire|renew|park|release '
+        + '<case> <kind> (POST /claims/:n/:kind), which applies the claim rules',
+    })
+  }
   // Route by the type's home namespace (CASE-518): Library-owned types → the
   // Library namespace, everything else → corpus (with the ?namespace= override).
   let ns: string
