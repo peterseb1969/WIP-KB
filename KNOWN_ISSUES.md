@@ -5,6 +5,15 @@ re-investigate solved problems, "fix" intentional choices, or miss real gaps.
 
 ## Open / deferred
 
+### Claim acquires are serialised in-process
+**Status:** known · **Severity:** low
+The gateway runs claim changes on one case one at a time with an in-process lock
+(`withCaseLock`, `server/kb-gateway.routes.ts`). The rule check itself orders claims
+deterministically, but without the lock a claimant whose write lands late can be
+ordered before a rival that already won, so both hold. The lock is correct only while
+the KB runs as one server process, which the deployable-app contract assumes. Running
+several replicas needs a shared lock or a single per-case document to compare-and-swap on.
+
 ### Tooling uploads are held in memory
 **Status:** known · **Severity:** low
 `POST /projects/:app/tooling` reads the whole archive (up to 100 MB) into memory and

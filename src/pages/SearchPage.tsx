@@ -3,7 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
-import { fetchCorpusHeaders, fetchOutstandingRespondFlags, type HeaderDoc, type OutstandingFlag } from '../lib/reporting'
+import { fetchCaseClaims, fetchCorpusHeaders, fetchOutstandingRespondFlags, type CaseClaimView, type HeaderDoc, type OutstandingFlag } from '../lib/reporting'
+import { ClaimChips, respondClaimReason } from '../components/ClaimChips'
 import { fetchTopicTree, type TopicNode, type TopicTree } from '../lib/topics'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
@@ -805,6 +806,13 @@ export default function SearchPage() {
     enabled: flaggableCases.length > 0,
     staleTime: 15_000,
   })
+  // Who is working on each listed case (claims that hold it), for the row chips.
+  const claimsQ = useQuery<Map<number, CaseClaimView[]>>({
+    queryKey: ['case-claims', CORPUS_NS, flaggableCases.map((c) => c.caseNumber).join(',')],
+    queryFn: () => fetchCaseClaims(CORPUS_NS, flaggableCases.map((c) => c.caseNumber).filter((n): n is number => n != null)),
+    enabled: flaggableCases.length > 0,
+    staleTime: 15_000,
+  })
 
   // Scope line: which types the current result set actually spans. With a type
   // filter active it's the selected types; otherwise every type present except
@@ -1177,6 +1185,9 @@ export default function SearchPage() {
                             {workflowStatus(doc)}
                           </span>
                         )}
+                        {doc.data.case_number != null && (
+                          <ClaimChips claims={claimsQ.data?.get(doc.data.case_number)} />
+                        )}
                       </div>
                       {snippet && (
                         <p
@@ -1201,7 +1212,8 @@ export default function SearchPage() {
                       sourceDocId={doc.document_id}
                       sourceDocTitle={docLabel(doc.data, doc.document_id)}
                       outstanding={outstandingFlagsQ.data ? outstandingFlagsQ.data.get(doc.document_id) ?? null : undefined}
-                      inactiveReason={listFlagInactiveReason(workflowStatus(doc))}
+                      inactiveReason={listFlagInactiveReason(workflowStatus(doc))
+                        ?? respondClaimReason(doc.data.case_number != null ? claimsQ.data?.get(doc.data.case_number) : undefined)}
                     />
                   </div>
                 )}

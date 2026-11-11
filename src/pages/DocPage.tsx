@@ -14,7 +14,8 @@ import { DocIdentityStrip } from '../components/DocIdentityStrip'
 import { TopicPicker } from '../components/TopicPicker'
 import { CaseThread, type ResponseDoc, type ResponseLink } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
-import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees, fetchOutstandingRespondFlags, type OutstandingFlag } from '../lib/reporting'
+import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees, fetchOutstandingRespondFlags, fetchCaseClaims, type CaseClaimView, type OutstandingFlag } from '../lib/reporting'
+import { ClaimChips, respondClaimReason } from '../components/ClaimChips'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 import { formatWipDateTime } from '../lib/datetime'
 
@@ -255,6 +256,14 @@ export default function DocPage() {
     enabled: !!id && doc?.namespace === CORPUS_NS,
     staleTime: 15_000,
   })
+  // Who is working on this case (claims that hold it).
+  const { data: caseClaims } = useQuery<Map<number, CaseClaimView[]>>({
+    queryKey: ['case-claims', CORPUS_NS, docCaseNumber],
+    queryFn: () => fetchCaseClaims(CORPUS_NS, docCaseNumber != null ? [docCaseNumber] : []),
+    enabled: docCaseNumber != null && doc?.namespace === CORPUS_NS,
+    staleTime: 15_000,
+  })
+  const claimsHere = docCaseNumber != null ? caseClaims?.get(docCaseNumber) : undefined
 
   // CASE-506: the include=peers projection carries only title/status/case_number
   // for response peers — NOT body/response_kind/response_seq — so fetch each
@@ -646,8 +655,10 @@ export default function DocPage() {
               sourceDocId={id}
               sourceDocTitle={docLabel(data, id)}
               outstanding={outstandingFlags ? outstandingFlags.get(id) ?? null : undefined}
+              inactiveReason={respondClaimReason(claimsHere)}
             />
             <RelationshipPicker sourceDocId={id} />
+            <ClaimChips claims={claimsHere} />
             {isCase && caseNumber !== null && caseStatus && (
               <CaseActions docId={id} caseNumber={caseNumber} status={caseStatus} />
             )}

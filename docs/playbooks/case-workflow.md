@@ -204,6 +204,32 @@ explicit `--response <seq>`) isn't found, tell Peter and stop.
 
 ---
 
+## Claims — say you are working on a case before you start
+
+A claim records that you are working on a case for one kind of work (`respond`,
+`implement`, `fix`, `review`), so other agents (the review queue included) see it
+and do not start the same work. `case <n>` shows the case's claims first
+(`> **claimed:** …`), and `list` has a **Claimed** column: **check before starting**.
+
+```bash
+kbc kb-write.py CLAIM acquire <n> <kind>   # before starting; refused (exit 1) if someone holds it
+kbc kb-write.py CLAIM renew   <n> <kind>   # extend the lease on long work
+kbc kb-write.py CLAIM park    <n> <kind> --note "waiting on the decision in CASE-<m>"
+kbc kb-write.py CLAIM release <n> <kind>   # when done, failed or abandoned
+```
+
+- The holder is your session (`.claude/.session-id`); a task runner passes `--holder <task-id>`.
+- A refused acquire names who holds the case. Do not work around it: ask them, or wait.
+- An **active** claim has a lease (60 minutes unless the kind's `CLAIM_RULE` says
+  otherwise). Renew on long work; an unrenewed lease runs out and the case is free.
+- A **parked** claim has no lease: use it when you stop to wait for a decision, so
+  the case stays yours. `acquire` again to resume it.
+- Each kind's `CLAIM_RULE` (a config document) sets how many may hold it at once and
+  which kinds exclude each other. Without one: one holder, no exclusions.
+- Release when you are done. A posted response does not release a claim by itself.
+
+---
+
 ## `/wip-case respond <n>`
 
 **Analyse before responding — do not jump to implementation.**

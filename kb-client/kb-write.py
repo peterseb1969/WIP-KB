@@ -15,6 +15,8 @@ Usage:
     kb-write.py <TYPE> <file.md>             # frontmatter -> data, body -> data.body
     kb-write.py <TYPE> -                     # read the markdown doc from stdin
     kb-write.py <TYPE> --json '{"title":…}'  # raw data object instead of a file
+    kb-write.py CLAIM acquire|renew|park|release <case> <kind> [--note …] [--holder ID]
+                                             # claim a case for a kind of work
   options:
     --field k=v        add/override a data field (repeatable; light type coercion)
     --metadata '{…}'   JSON object merged into the write's metadata
@@ -997,6 +999,45 @@ def cmd_edge(args: argparse.Namespace) -> int:
     return 0
 
 
+CLAIM_ACTIONS = ("acquire", "renew", "park", "release")
+
+
+def cmd_claim(args: argparse.Namespace) -> int:
+    """Claim a case for a kind of work, so other agents see it before starting:
+    `CLAIM acquire|renew|park|release <case> <kind>`. The holder is this session
+    (.claude/.session-id), or --holder for a task runner. An acquire the case's
+    claim rules refuse exits 1 and names who holds it; the refused claim is
+    recorded as released. acquire on one's own parked claim resumes it."""
+    action, case, kind = args.file, args.source, args.target
+    if action not in CLAIM_ACTIONS or not case or not kind:
+        print(f"ERROR: usage: kb-write.py CLAIM {'|'.join(CLAIM_ACTIONS)} <case> <kind> "
+              f"[--note TEXT] [--holder ID]", file=sys.stderr)
+        return 2
+    try:
+        n = parse_case_number(case)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    holder = (args.holder or "").strip() or (_read_local(SESSION_SENTINEL) or "").strip()
+    if not holder:
+        print(f"ERROR: no holder: {SESSION_SENTINEL} holds no session ID and --holder is not set",
+              file=sys.stderr)
+        return 2
+    body = {"action": action, "holder": holder, **({"note": args.note} if args.note else {})}
+    path = f"/claims/{n}/{kind}" + (f"?namespace={args.namespace}" if args.namespace else "")
+    result = gw_post(path, body)
+    if args.format == "json":
+        sys.stdout.write(json.dumps(result, indent=2) + "\n")
+        return 0
+    c = result.get("claim") or {}
+    lease = f", lease until {c['lease_until']}" if c.get("state") == "active" and c.get("lease_until") else ""
+    sys.stdout.write(f"CASE-{n} {kind}: {c.get('state', '?')} by {holder}{lease}\n")
+    others = [x for x in result.get("claims") or [] if x.get("holder") != holder or x.get("kind") != kind]
+    for x in others:
+        sys.stdout.write(f"  also: {x.get('kind')} {x.get('state')} by {x.get('holder')}\n")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="KB write client (gateway-only).")
     ap.add_argument("type", nargs="?", help="doc type (e.g. DESIGN_DECISION), or EDGE; omit with --list")
@@ -1009,6 +1050,9 @@ def main() -> int:
     ap.add_argument("--list", action="store_true",
                     help="list writable doc types across all namespaces (GET /types)")
     ap.add_argument("--json", help="raw JSON data object instead of a file")
+    ap.add_argument("--holder", help="CLAIM only: who holds the claim (default: this session, "
+                                     "from .claude/.session-id); a task runner passes its task id")
+    ap.add_argument("--note", help="CLAIM only: a note on the claim (e.g. why it is parked)")
     ap.add_argument("--field", action="append", help="add/override a data field k=v (repeatable)")
     ap.add_argument("--edge", action="append", help="edge intent TYPE:target_type:target_key (repeatable)")
     ap.add_argument("--metadata", help="JSON object merged into the write metadata")
@@ -1052,6 +1096,8 @@ def main() -> int:
             ap.error("a doc TYPE is required (or use --list)")
         if args.type == "EDGE":
             return cmd_edge(args)
+        if args.type == "CLAIM":
+            return cmd_claim(args)
         if args.tooling:
             return cmd_project_tooling(args)
         if args.type == "YAC_MEMORY" and args.json is None and not args.patch:

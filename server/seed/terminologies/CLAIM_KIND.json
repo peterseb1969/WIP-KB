@@ -1,0 +1,12 @@
+{
+  "value": "CLAIM_KIND",
+  "label": "Claim Kind",
+  "description": "What a claim on a case reserves it for. A new kind is a new term here, plus (optionally) a CLAIM_RULE document for it; no template or code change. A kind without a rule document gets the gateway's defaults: one holder, no exclusions, a 60-minute lease.",
+  "mutable": true,
+  "terms": [
+    { "value": "respond",   "label": "Respond",   "sort_order": 10, "description": "Writing a response (analysis) to the case." },
+    { "value": "implement", "label": "Implement", "sort_order": 20, "description": "Implementing the case's fix." },
+    { "value": "fix",       "label": "Fix",       "sort_order": 30, "description": "Fixing what a review of an implementation found." },
+    { "value": "review",    "label": "Review",    "sort_order": 40, "description": "Reviewing an implementation." }
+  ]
+}

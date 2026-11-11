@@ -112,6 +112,7 @@ const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb/topics?type=&namespace=', 'the topic vocabulary a type\'s validated `topics` field draws from, as a hierarchy with aliases'],
   ['POST', 'kb/write/:type', 'THE write path — {data, edges[]} or {patch, match}. Routes to the type’s home namespace (LIBRARY_DOC → library)'],
   ['POST', 'kb/edges', 'attach an edge between two EXISTING docs — the sanctioned retry for a failed edge intent'],
+  ['POST', 'kb/claims/:n/:kind', 'claim a case for a kind of work: {action: acquire|renew|park|release, holder, note?}. An acquire the kind’s claim rule refuses answers 409 naming the holder'],
   ['GET', 'kb/projects/:app/brief?namespace=', 'a project\'s context in one read: PROJECT profile, open cases, newest decisions/lessons/firesides, recent sessions, memories, mirrored docs (handles + titles); :app = any alias'],
   ['GET', 'kb/projects/:app/tooling?namespace=', 'the project\'s tooling archive, streamed as stored (never unpacked or run)'],
   ['POST', 'kb/projects/:app/tooling?namespace=', 'attach or replace the project\'s tooling archive: body = the archive, X-Filename = its name; uploaded with your key and linked to the profile (the replaced archive stays in WIP, unreferenced)'],

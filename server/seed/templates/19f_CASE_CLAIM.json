@@ -1,0 +1,17 @@
+{
+  "value": "CASE_CLAIM",
+  "label": "Case Claim",
+  "description": "One holder's claim on a case for one kind of work (respond, implement, fix, review…), so agents see who is working on a case before starting. Identity [case_number, claim_kind, holder]: each holder's claim is its own document, and acquiring, renewing, parking and releasing are its versions, so the claim history comes for free and nothing is deleted. Whether a claim may be held is not decided by identity but by the CLAIM_RULE for its kind (max_holders, excludes), enforced by the KB gateway at acquire.",
+  "usage": "entity",
+  "identity_fields": ["case_number", "claim_kind", "holder"],
+  "header_fields": ["case_number", "claim_kind", "holder", "state"],
+  "fields": [
+    { "name": "case_number", "label": "Case Number", "type": "integer",  "mandatory": true },
+    { "name": "claim_kind",  "label": "Claim Kind",  "type": "term",     "mandatory": true, "reference_type": "term", "terminology_ref": "CLAIM_KIND" },
+    { "name": "holder",      "label": "Holder",      "type": "string",   "mandatory": true, "validation": {"min_length": 1, "max_length": 200} },
+    { "name": "state",       "label": "State",       "type": "term",     "mandatory": true, "reference_type": "term", "terminology_ref": "CLAIM_STATE" },
+    { "name": "since",       "label": "Since",       "type": "datetime", "mandatory": true },
+    { "name": "lease_until", "label": "Lease Until", "type": "datetime", "mandatory": false },
+    { "name": "note",        "label": "Note",        "type": "string",   "mandatory": false }
+  ]
+}

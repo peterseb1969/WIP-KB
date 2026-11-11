@@ -89,10 +89,24 @@ def _overlay_status(body: str, live: str | None) -> str:
     return f"> **status:** {live}\n\n{body}"
 
 
+def _claim_line(c: dict) -> str:
+    """One claim, e.g. 'implement · active · BE-YAC-20261111-0912 · lease until 10:30'."""
+    state = "expired" if c.get("expired") else c.get("state") or "?"
+    lease = c.get("lease_until") or ""
+    tail = f" · lease until {lease[:16].replace('T', ' ')}" if c.get("state") == "active" and lease else ""
+    note = f" — {c['note']}" if c.get("note") else ""
+    return f"{c.get('kind')} · {state} · {c.get('holder')}{tail}{note}"
+
+
 def render_case(payload: dict, view: str) -> str:
-    """Render the gateway payload to markdown: body, the response thread, or both."""
+    """Render the gateway payload to markdown: body, the response thread, or both.
+    Claims on the case (who is working on it) come first: a reader about to start
+    work must see them before anything else."""
     parts: list[str] = []
     if view in ("case", "both"):
+        claims = payload.get("claims") or []
+        if claims:
+            parts.append("> **claimed:** " + "; ".join(_claim_line(c) for c in claims) + "\n")
         body = _overlay_status(payload.get("body") or "", payload.get("status"))
         parts.append(body.rstrip("\n"))
     if view in ("responses", "both"):
@@ -172,14 +186,20 @@ def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
             "target_yac": it.get("target_yac") or "",
             "app": it.get("app") or "",
             "slug": slug,
+            # Who is working on the case: kind:holder (state when not plain active).
+            "claimed": ", ".join(
+                f"{c.get('kind')}:{c.get('holder')}"
+                + ("" if c.get("state") == "active" and not c.get("expired")
+                   else f" ({'expired' if c.get('expired') else c.get('state')})")
+                for c in it.get("claims") or []),
         })
     return rows
 
 
 def _format_case_table(rows: list[dict]) -> str:
     header = (
-        "| # | Status | Severity | Type | Component | Target | Filed by | Slug |\n"
-        "|---|---|---|---|---|---|---|---|"
+        "| # | Status | Claimed | Severity | Type | Component | Target | Filed by | Slug |\n"
+        "|---|---|---|---|---|---|---|---|---|"
     )
     if not rows:
         return f"{header}\n_(no matches)_\n"
@@ -188,7 +208,7 @@ def _format_case_table(rows: list[dict]) -> str:
         cn = r["case_number"]
         cn_str = f"{cn:03d}" if isinstance(cn, int) else str(cn)
         out.append(
-            f"| {cn_str} | {r['status'] or ''} | {r['severity'] or ''} | "
+            f"| {cn_str} | {r['status'] or ''} | {r.get('claimed') or ''} | {r['severity'] or ''} | "
             f"{r['type'] or ''} | {r['component'] or ''} | "
             f"{r.get('target_yac') or ''} | {r['filed_by'] or ''} | {r['slug'] or ''} |"
         )

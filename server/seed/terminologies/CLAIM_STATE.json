@@ -1,0 +1,11 @@
+{
+  "value": "CLAIM_STATE",
+  "label": "Claim State",
+  "description": "Lifecycle of a CASE_CLAIM. An active claim holds the case until its lease runs out unrenewed; a parked claim holds it with no lease (work waiting on a decision); a released claim holds nothing and stays as the record that someone worked on the case.",
+  "mutable": true,
+  "terms": [
+    { "value": "active",   "label": "Active",   "sort_order": 10, "description": "Held, and counts until lease_until passes unrenewed." },
+    { "value": "parked",   "label": "Parked",   "sort_order": 20, "description": "Held with no lease: the holder saved its state and is waiting for a decision." },
+    { "value": "released", "label": "Released", "sort_order": 30, "description": "No longer held: done, failed, abandoned, or lost a simultaneous acquire." }
+  ]
+}

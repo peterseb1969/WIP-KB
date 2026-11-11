@@ -1,0 +1,15 @@
+{
+  "value": "CLAIM_RULE",
+  "label": "Claim Rule",
+  "description": "The rule for one claim kind, as a config document: how many holders may hold it on one case at once (max_holders), which other kinds it cannot be held together with (excludes, checked in both directions), and how long an active claim's lease runs (lease_minutes). Read by the KB gateway at every acquire. A kind with no rule document gets the defaults: 1 holder, no exclusions, 60 minutes.",
+  "usage": "entity",
+  "identity_fields": ["claim_kind"],
+  "header_fields": ["claim_kind", "max_holders"],
+  "fields": [
+    { "name": "claim_kind",    "label": "Claim Kind",    "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "CLAIM_KIND" },
+    { "name": "max_holders",   "label": "Max Holders",   "type": "integer", "mandatory": true, "validation": {"minimum": 1} },
+    { "name": "excludes",      "label": "Excludes",      "type": "array",   "mandatory": false, "array_item_type": "term", "array_terminology_ref": "CLAIM_KIND" },
+    { "name": "lease_minutes", "label": "Lease Minutes", "type": "integer", "mandatory": false, "validation": {"minimum": 1} },
+    { "name": "note",          "label": "Note",          "type": "string",  "mandatory": false }
+  ]
+}

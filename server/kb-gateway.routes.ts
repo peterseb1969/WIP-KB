@@ -27,6 +27,7 @@ import { createCorpusNamespace } from './lib/bootstrap.js'
 import { identityValue } from './lib/identity-value.js'
 import { resolveWipKey } from './lib/wip-key.js'
 import { MATCH_PAGE_SIZE, describeMatch, matchFilters, resolveMatch, validateMatch } from './lib/patch-match.js'
+import { holds, leaseUntil, verdict, type Claim, type ClaimRule } from './lib/claims.js'
 
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
 // The gateway's default namespace is the KB corpus (cases, decisions, …).
@@ -1103,7 +1104,14 @@ router.get('/cases', async (req, res) => {
   try {
     const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
       { template_id: 'CASE_RECORD', filters, page, page_size: pageSize })
-    res.json({ total: d.total, page: d.page, pages: d.pages, items: (d.items || []).map(caseProjection) })
+    const items = (d.items || []).map(caseProjection)
+    const nums = items.map((it: AnyObj) => Number(it.case)).filter(Number.isFinite)
+    const claims = await readClaims(nums, ns, key)
+    const now = new Date()
+    for (const it of items) {
+      it.claims = shownClaims(claims.filter((c) => c.case_number === Number(it.case)), now)
+    }
+    res.json({ total: d.total, page: d.page, pages: d.pages, items })
   } catch (e) {
     res.status(errStatus(e)).json({ error: (e as Error).message })
   }
@@ -1220,6 +1228,7 @@ router.get('/cases/:n', async (req, res) => {
     if (view === 'case' || view === 'both') {
       const doc = await getDoc(docId, ns, key)
       Object.assign(out, caseProjection(doc), { body: doc.data?.body || '' })
+      out.claims = shownClaims(await readClaims([n], ns, key), new Date())
     }
     if (view === 'responses' || view === 'both') {
       out.case_number = n
@@ -1246,6 +1255,178 @@ router.get('/cases/:n', async (req, res) => {
     res.json(out)
   } catch (e) {
     res.status(errStatus(e)).json({ error: (e as Error).message })
+  }
+})
+
+// --- Claims on cases ---------------------------------------------------------
+// A CASE_CLAIM records that a holder (a session or task id) is working on a case
+// for one kind of work; the CLAIM_RULE of each kind says how many may hold it at
+// once and which kinds exclude each other (server/lib/claims.ts has the rules).
+// Claims are read from the document store, never from reporting: a claimant must
+// see a rival's write at once, and reporting syncs seconds later.
+
+const CLAIM_ACTIONS = ['acquire', 'renew', 'park', 'release'] as const
+type ClaimAction = (typeof CLAIM_ACTIONS)[number]
+
+// Claim changes on one case run one at a time. The ordering in verdict() alone is
+// not enough: a claim's `since` is taken before its write, so a claimant whose
+// write lands late can be ordered EARLIER than a rival that already read, found
+// nothing, and won — and then win too. Serialising per case removes that window.
+// It holds because the KB runs as one server process (the deployable-app
+// contract assumes one replica); with several, this lock would not span them.
+const claimLocks = new Map<string, Promise<unknown>>()
+async function withCaseLock<T>(lockKey: string, fn: () => Promise<T>): Promise<T> {
+  const prev = claimLocks.get(lockKey) ?? Promise.resolve()
+  const run = prev.catch(() => undefined).then(fn)
+  const tail = run.catch(() => undefined)
+  claimLocks.set(lockKey, tail)
+  try {
+    return await run
+  } finally {
+    if (claimLocks.get(lockKey) === tail) claimLocks.delete(lockKey)
+  }
+}
+
+function toClaim(d: AnyObj): Claim {
+  const x = d.data || {}
+  return {
+    document_id: String(d.document_id), case_number: Number(x.case_number), claim_kind: String(x.claim_kind),
+    holder: String(x.holder), state: String(x.state), since: String(x.since),
+    lease_until: x.lease_until ?? null, note: x.note ?? null,
+  }
+}
+
+// Every claim on the given cases, any state. A namespace without the claim model
+// (not yet migrated) has none.
+async function readClaims(caseNumbers: number[], ns: string, key: string): Promise<Claim[]> {
+  if (!caseNumbers.length) return []
+  try {
+    const out: Claim[] = []
+    for (let page = 1; ; page++) {
+      const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key, {
+        template_id: 'CASE_CLAIM', page, page_size: 200,
+        filters: [caseNumbers.length === 1
+          ? { field: 'data.case_number', operator: 'eq', value: caseNumbers[0] }
+          : { field: 'data.case_number', operator: 'in', value: caseNumbers }],
+      })
+      out.push(...((d.items || []) as AnyObj[]).map(toClaim))
+      if (page >= (d.pages || 1)) return out
+    }
+  } catch (e) {
+    if (isNotFound(e)) return []
+    throw e
+  }
+}
+
+async function readClaimRules(ns: string, key: string): Promise<ClaimRule[]> {
+  try {
+    const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
+      { template_id: 'CLAIM_RULE', page: 1, page_size: 200 })
+    return ((d.items || []) as AnyObj[]).map((it) => ({
+      claim_kind: String(it.data?.claim_kind),
+      max_holders: Number(it.data?.max_holders ?? 1),
+      excludes: Array.isArray(it.data?.excludes) ? it.data.excludes.map(String) : [],
+      lease_minutes: Number(it.data?.lease_minutes ?? 60),
+    }))
+  } catch (e) {
+    if (isNotFound(e)) return []
+    throw e
+  }
+}
+
+// What a reader is shown: the claims that hold the case now. An active claim past
+// its lease is shown as expired until someone acquires over it.
+function claimView(c: Claim, now: Date): AnyObj {
+  return {
+    kind: c.claim_kind, holder: c.holder, state: c.state, since: c.since,
+    lease_until: c.lease_until ?? null, note: c.note ?? null,
+    expired: c.state === 'active' && !holds(c, now),
+  }
+}
+function shownClaims(claims: Claim[], now: Date): AnyObj[] {
+  return claims.filter((c) => c.state !== 'released').map((c) => claimView(c, now))
+}
+
+async function writeClaim(data: AnyObj, ns: string, key: string): Promise<void> {
+  const tid = await templateId('CASE_CLAIM', ns, key)
+  const d = await wipReq('POST', '/api/document-store/documents', key, [{ template_id: tid, namespace: ns, data }])
+  const r = (d.results || [])[0] || {}
+  if (!['created', 'updated', 'unchanged'].includes(r.status)) throw await writeError('claim', r, key)
+}
+
+// POST /claims/:n/:kind  { action: acquire|renew|park|release, holder, note? }
+//   acquire — hold the case (or resume one's own parked claim). Refused with 409
+//             naming the holder(s) when the kind's rule does not allow it; the
+//             refused claim is recorded as released.
+//   renew   — extend an active claim's lease.
+//   park    — keep holding with no lease (waiting on a decision).
+//   release — stop holding (done, failed, abandoned).
+router.post('/claims/:n/:kind', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const n = parseInt(req.params.n, 10)
+  if (!Number.isFinite(n)) return res.status(422).json({ error: 'case number must be an integer' })
+  const kind = String(req.params.kind)
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const b: AnyObj = req.body || {}
+  const action = String(b.action || '') as ClaimAction
+  if (!CLAIM_ACTIONS.includes(action)) {
+    return res.status(422).json({ error: `action must be one of: ${CLAIM_ACTIONS.join(', ')}` })
+  }
+  const holder = typeof b.holder === 'string' ? b.holder.trim() : ''
+  if (!holder) return res.status(422).json({ error: 'holder is required (a session or task id)' })
+  const note = typeof b.note === 'string' && b.note.trim() ? b.note.trim() : undefined
+  try {
+    if (!(await resolveCase(n, ns, key))) return res.status(404).json({ error: `CASE-${n} not found in ${ns}` })
+    // One change at a time per case: see withCaseLock.
+    return await withCaseLock(`${ns}/${n}`, async () => {
+      const now = new Date()
+      const [claims, rules] = await Promise.all([readClaims([n], ns, key), readClaimRules(ns, key)])
+      const own = claims.find((c) => c.claim_kind === kind && c.holder === holder)
+      const base = { case_number: n, claim_kind: kind, holder }
+
+      if (action === 'acquire') {
+        // Holding already (active or parked): keep the original since, so a renewed or
+        // resumed claim keeps its place in the order.
+        const since = own && holds(own, now) ? own.since : now.toISOString()
+        await writeClaim({ ...base, state: 'active', since, lease_until: leaseUntil(kind, rules, now),
+          ...(note ? { note } : {}) }, ns, key)
+        const after = await readClaims([n], ns, key)
+        const mine = after.find((c) => c.claim_kind === kind && c.holder === holder)
+        if (!mine) throw new WipError(502, `claim for ${holder} not readable after writing it`)
+        const v = verdict(mine, after, rules, now)
+        if (!v.ok) {
+          await writeClaim({ ...base, state: 'released', since: mine.since,
+            note: `refused at acquire: ${v.reason}` }, ns, key)
+          return res.status(409).json({
+            error: `CASE-${n} cannot be claimed for ${kind}: ${v.reason}`,
+            error_code: 'claimed',
+            holders: v.blockers.map((c) => claimView(c, now)),
+          })
+        }
+        return res.json({ case_number: n, claim: claimView({ ...mine }, now), claims: shownClaims(after, now) })
+      }
+
+      if (!own || own.state === 'released') {
+        return res.status(404).json({ error: `${holder} holds no ${kind} claim on CASE-${n}` })
+      }
+      if (action === 'renew') {
+        if (own.state !== 'active') return res.status(409).json({ error: `the claim is ${own.state}; only an active claim is renewed` })
+        if (!holds(own, now)) return res.status(409).json({ error: 'the lease has run out; acquire again' })
+        await writeClaim({ ...base, state: 'active', since: own.since, lease_until: leaseUntil(kind, rules, now),
+          ...(note ?? own.note ? { note: note ?? own.note } : {}) }, ns, key)
+      } else if (action === 'park') {
+        if (!holds(own, now)) return res.status(409).json({ error: 'the claim no longer holds the case; acquire again' })
+        await writeClaim({ ...base, state: 'parked', since: own.since, ...(note ?? own.note ? { note: note ?? own.note } : {}) }, ns, key)
+      } else {
+        await writeClaim({ ...base, state: 'released', since: own.since, ...(note ? { note } : {}) }, ns, key)
+      }
+      const after = await readClaims([n], ns, key)
+      const mine = after.find((c) => c.claim_kind === kind && c.holder === holder)
+      return res.json({ case_number: n, claim: mine ? claimView(mine, now) : null, claims: shownClaims(after, now) })
+    })
+  } catch (e) {
+    return res.status(errStatus(e)).json({ error: (e as Error).message })
   }
 })
 

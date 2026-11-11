@@ -3,6 +3,33 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-11 — Claims: who is working on a case (CASE-1259)
+
+- **Added (data model):** vocabularies `CLAIM_KIND` (respond, implement, fix, review)
+  and `CLAIM_STATE` (active, parked, released); template `CASE_CLAIM`, identity
+  `[case_number, claim_kind, holder]` (one document per holder's claim, its versions
+  the claim's history); template `CLAIM_RULE`, identity `[claim_kind]` (max_holders,
+  excludes, lease_minutes per kind; defaults 1 / none / 60 without a document). A new
+  kind is a term plus an optional rule document. Seeded for new namespaces;
+  `tools/add-case-claims.py` adds them to an existing one (dry run by default,
+  `APPLY=1`, idempotent; only additions).
+- **Added (gateway):** `POST /server-api/kb/claims/:n/:kind` with
+  `{action: acquire|renew|park|release, holder, note?}`. An acquire is written, then
+  judged against every claim holding the case (read from the document store, not
+  reporting), and refused with 409 naming the holder when the kind's rule does not
+  allow it; the refused claim is recorded as released. Claim changes on one case run
+  one at a time. `GET /cases/:n` and `GET /cases` carry each case's claims.
+- **Added (client 5.2.0):** `kbc kb-write.py CLAIM acquire|renew|park|release <case>
+  <kind> [--note …] [--holder ID]`; the case read shows `> **claimed:** …` first, and
+  the list has a Claimed column. The served playbook explains when to claim.
+- **Added (UI):** a claim chip on case rows and the doc page; the quick flag is not
+  offered while a respond claim holds the case.
+- **Checked:** on the sandbox: lifecycle (acquire, refused second holder, renew,
+  park holds, release frees), a rule excluding respond from implement in both
+  directions, a five-way acquire race three times (exactly one winner, recorded
+  refusals naming it), the client verbs and display, and the UI chip and disabled
+  flag. Unit tests for the rule decisions (7).
+
 ## 2026-11-09 — A flag counts until it is answered; the list flags open cases only
 
 - **Fixed:** the quick flag greyed out only while a flag waited for dispatch, about
