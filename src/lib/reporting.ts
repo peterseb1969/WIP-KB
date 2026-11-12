@@ -484,8 +484,10 @@ export async function fetchFlagTargets(
 // Claims holding cases: who is working on each case, for which kind of work. A
 // claim holds while it is parked, or active with a lease that has not run out
 // (server/lib/claims.ts has the same rule). One query for a page of cases. A
-// namespace without the claim model (not yet migrated) has no claims: its missing
-// table is not an error here.
+// namespace without the claim model (not yet migrated, or a corpus created before
+// it) has no claims. Its table is looked up first, rather than the query being
+// tried and its error swallowed: a failed request is logged by the browser on every
+// page, and reads as a fault where nothing is wrong.
 export interface CaseClaimView {
   kind: string
   holder: string
@@ -500,16 +502,16 @@ export async function fetchCaseClaims(
   const nums = [...new Set(caseNumbers.filter((n) => Number.isInteger(n)))]
   const out = new Map<number, CaseClaimView[]>()
   if (!nums.length) return out
-  let rows: Array<{ case_number: number; claim_kind: string; holder: string; state: string; lease_until: string | null }>
-  try {
-    ;({ rows } = await reportingQuery<{ case_number: number; claim_kind: string; holder: string; state: string; lease_until: string | null }>(
-      namespace,
-      `SELECT case_number, claim_kind, holder, state, lease_until FROM "${namespace}"."doc_case_claim"`
-        + ` WHERE ${ONLY_ACTIVE} AND state IN ('active', 'parked') AND case_number IN (${nums.join(',')})`,
-    ))
-  } catch {
-    return out
-  }
+  const { rows: has } = await reportingQuery<{ present: boolean }>(
+    namespace,
+    `SELECT to_regclass('"${namespace}"."doc_case_claim"') IS NOT NULL AS present`,
+  )
+  if (!has[0]?.present) return out
+  const { rows } = await reportingQuery<{ case_number: number; claim_kind: string; holder: string; state: string; lease_until: string | null }>(
+    namespace,
+    `SELECT case_number, claim_kind, holder, state, lease_until FROM "${namespace}"."doc_case_claim"`
+      + ` WHERE ${ONLY_ACTIVE} AND state IN ('active', 'parked') AND case_number IN (${nums.join(',')})`,
+  )
   const now = Date.now()
   for (const r of rows) {
     if (r.state === 'active' && !(r.lease_until && Date.parse(r.lease_until) > now)) continue
