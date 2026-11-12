@@ -45,13 +45,14 @@ fi
 #   1. an explicit write verb, or curl's -d/--data (which implies POST). -d counts
 #      only in a curl command: `tr -d`, `cut -d` and friends are not writes.
 #   2. a python urllib method= write
-#   3. a migration tool pointed at canonical — `--apply`, or one of the scripts
+#   3. a migration tool pointed at canonical — `--apply` or `APPLY=1` (the switch
+#      the add-* migration tools share, e.g. add-case-claims.py), or one of the scripts
 #      that writes unconditionally. These carry no HTTP verb on the command line,
 #      so pattern (1) never sees them, and they are exactly the runs that must be
 #      deliberate. Their DRY-RUNS stay allowed: rehearsing against canonical is
 #      read-only and is the habit worth encouraging, not taxing.
 if printf '%s' "$CMD" | grep -Eqi -- \
-  '-X[[:space:]]+(POST|PUT|PATCH|DELETE)|--request[[:space:]]+(POST|PUT|PATCH|DELETE)|curl[^|;&]*[[:space:]]-d[[:space:]]|--data|method[[:space:]]*=[[:space:]]*.(POST|PUT|PATCH|DELETE)|--apply|add-document-fields|add-content-hash-field|add-topics-field|create-kb-topic-taxonomy'; then
+  '-X[[:space:]]+(POST|PUT|PATCH|DELETE)|--request[[:space:]]+(POST|PUT|PATCH|DELETE)|curl[^|;&]*[[:space:]]-d[[:space:]]|--data|method[[:space:]]*=[[:space:]]*.(POST|PUT|PATCH|DELETE)|--apply|APPLY=1|add-document-fields|add-content-hash-field|add-topics-field|create-kb-topic-taxonomy'; then
   cat <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"BLOCKED: write-method HTTP call to canonical (prod.internal / kb.internal). Canonical is deletion_mode=retain — nothing written there can be removed, only marked inactive, and a minted number is consumed permanently. Test on localhost (hotwired to the working tree), then prod-test. If this is a deliberate migration Peter asked for, prefix the command with ALLOW_CANONICAL_WRITE=1. See LESSON-44."}}
 JSON
