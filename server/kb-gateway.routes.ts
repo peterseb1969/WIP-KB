@@ -1938,6 +1938,11 @@ router.get('/types', async (req, res) => {
               write_mode: cfg ? 'mint' : 'natural',
               synonym_prefix: cfg?.prefix || null,
               identity_fields: t.identity_fields || [],
+              // The latest version's field names, so a client can tell whether this
+              // namespace's template has a field yet before sending it: WIP refuses
+              // a field the template does not declare, and a field added by a
+              // migration reaches each namespace at its own time.
+              fields: ((t.fields || []) as AnyObj[]).map((f) => f.name),
             }
           })
       }),

@@ -240,6 +240,41 @@ kbc kb-write.py CLAIM release <n> <kind>   # when done, failed or abandoned
 3. If the proposed fix IS right, say so and show the analysis.
    (CASE-50 was implemented blindly and broke; CASE-36 was analysed properly. Be CASE-36.)
 
+**Claim it first** (see Claims above): `kbc kb-write.py CLAIM acquire <n> respond`. A
+refused acquire means someone else is responding: stop. Release when the response is
+posted, or when you give up.
+
+**The response body** — every respond, attended or unattended, has this shape:
+
+```markdown
+**Bottom line:** <verdict in one sentence> · **Root cause:** <one sentence> · **Recommendation:** <implement as filed | implement with the correction below | needs a live check first | cannot form a confident finding>
+
+## Files in scope
+
+- `path/from/repo/root.ts` — change
+- `another/file.py`, `its/test.py` — change, **shared contract** (served schema)
+- `file/only/read.ts` — read
+
+## Analysis
+
+<root cause from the source, file:line per claim; whether the filer's fix is right>
+
+## Verified vs not
+
+<what you read directly, versus inferred or not checkable>
+```
+
+- **Length:** about 600 words, 1,000 at most. Go longer only with a stated reason
+  (several independent findings). Don't restate the case.
+- **Files in scope** comes right after the bottom line. One bullet per line: backticked
+  repo-relative paths, then a dash and `change` or `read`, then any note. Say so when a
+  change touches a shared contract (an API model, a served schema, a template). A file
+  in another repo is named with that repo, as prose, not as a bullet.
+- `kb-write.py` copies the list into the response's `files_change` / `files_read` fields,
+  which is what a scheduler reads to decide whether two cases can be worked in parallel.
+  It warns (it does not refuse) when a respond has no such section, or a bullet in it
+  that it cannot read.
+
 Then, two writes — the response doc + the status transition:
 
 ```bash
@@ -250,6 +285,9 @@ kbc kb-write.py CASE_RESPONSE response.md --edge RESPONDS_TO:CASE_RECORD:<n>
 
 # 2) drive open → responded (only if currently open)
 kbc kb-write.py CASE_RECORD --patch status=responded --match case_number=<n>
+
+# 3) let the case go
+kbc kb-write.py CLAIM release <n> respond
 ```
 
 Confirm the case number + new status to Peter.
@@ -286,7 +324,10 @@ Terminal. Tell Peter it's closed and why.
 ## `/wip-case implement <n>`
 
 The "do the work" command. Read the case (`case-fetch.py case <n>`); if it has no
-proposed fix, tell Peter to `/wip-case respond` first and stop.
+proposed fix, tell Peter to `/wip-case respond` first and stop. Claim it before you
+start (`kbc kb-write.py CLAIM acquire <n> implement`) and release it once the case is
+implemented, or when you stop without finishing (`park` it instead when you stop to
+wait for a decision).
 
 1. **Verify the proposed fix before touching code** — does the analysis convince you?
    Has the target code changed since the response? Side effects on other callers/tests?
@@ -307,6 +348,7 @@ proposed fix, tell Peter to `/wip-case respond` first and stop.
    kbc kb-write.py CASE_RESPONSE implement.md --edge RESPONDS_TO:CASE_RECORD:<n>
    #   implement.md frontmatter: case_number: <n> / response_kind: implement / doc_status: published
    kbc kb-write.py CASE_RECORD --patch status=implemented --match case_number=<n>
+   kbc kb-write.py CLAIM release <n> implement
    ```
 
 Terminal. Tell Peter what was applied and that the case is implemented.

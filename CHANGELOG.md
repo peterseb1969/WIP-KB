@@ -3,6 +3,27 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-12 — A response names the files it touches, as data (CASE-1261)
+
+- **Added (playbook):** the respond section prescribes one body for every response,
+  attended or unattended: a bottom line, `## Files in scope` (one bullet per path,
+  marked `change` or `read`), `## Analysis`, `## Verified vs not`; about 600 words,
+  1,000 at most. Respond and implement now start with a claim and end with its release.
+- **Added (data model):** `CASE_RESPONSE` gains two optional `array<string>` fields,
+  `files_change` and `files_read`. Seeded for new namespaces;
+  `tools/add-response-files.py` adds them to an existing one in one version event and
+  extends `reporting.cross_version_view` so the entity view `doc_case_response` has
+  both columns (dry run by default, `APPLY=1`, idempotent). Existing responses are
+  untouched. A scheduler finds two cases changing one file with a query on
+  `files_change`.
+- **Added (client 5.3.0):** `kb-write.py` copies a response's `## Files in scope`
+  section into the two fields, and warns (never refuses) when a respond lacks the
+  section or has a bullet it cannot read. It sends the fields only where the
+  namespace's template has them, so the image and the migration can reach an instance
+  in either order. Values set explicitly win.
+- **Added (gateway):** `GET /server-api/kb/types` lists each type's field names
+  (`fields`).
+
 ## 2026-11-12 — An implement response citing an all-digit commit hash is checked
 
 - **Fixed:** `kb-write.py` took a token as a commit hash only if it held both digits

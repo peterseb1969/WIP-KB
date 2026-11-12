@@ -30,6 +30,10 @@ Case attribution (CASE_RECORD filed_by / authored_by, CASE_RESPONSE author) is
 filled from .claude/.session-id when omitted; a typed value that is not a session
 ID is refused. --field values win unchecked.
 
+A response's `## Files in scope` section (bullets: `path` — change|read) is copied
+into CASE_RESPONSE's files_change / files_read fields, where the namespace's template
+has them. A respond without the section draws a warning, never a refusal.
+
 An implement response (CASE_RESPONSE, response_kind: implement) is refused when
 a commit hash it cites exists locally but is on no remote branch: push first,
 then cite the hash as it is on the remote.
@@ -837,6 +841,122 @@ def check_implement_hashes(body: str, repo: str) -> list[str]:
     return unpushed
 
 
+# A response names the files its fix would change or read in a `## Files in scope`
+# section, one line per path, marked `change` or `read` (the playbook's respond
+# template). A scheduler deciding whether two cases may run in parallel compares
+# those lists, and branching on parsed markdown would make the body a schema, so
+# the client copies the list into two data fields at write time. The body stays
+# the single source: the fields are derived from it on every write and cannot
+# drift from it.
+FILES_SECTION = "Files in scope"
+FILES_FIELDS = ("files_change", "files_read")
+_SECTION_RE = re.compile(r"^##\s+(.+?)\s*#*\s*$")
+_BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
+_KIND_RE = re.compile(r"^[\s*_`(]*(change|changes|changed|read|reads)\b", re.I)
+# Between the paths and the kind: an em or en dash, a spaced hyphen, or a colon.
+_SEP_RE = re.compile(r"\s+[—–-]\s+|:\s+|\s+[—–]")
+
+
+def parse_files_in_scope(body: str) -> tuple[dict, list[str]] | None:
+    """The `## Files in scope` section of a response body, as
+    ({"files_change": [...], "files_read": [...]}, unparsed lines), or None when
+    the body has no such section. A bullet line names one or more paths (each in
+    backticks, or a single bare path) and then, after a dash or colon, `change` or
+    `read`. A path marked both ways is listed under change only. Bullet lines the
+    rule cannot read come back as the second element, so the writer can be told;
+    prose lines in the section (a note on a shared contract) are not bullets and
+    are left alone."""
+    lines = (body or "").splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        m = _SECTION_RE.match(ln)
+        if m and m.group(1).strip().rstrip(":").lower() == FILES_SECTION.lower():
+            start = i + 1
+            break
+    if start is None:
+        return None
+    change: list[str] = []
+    read: list[str] = []
+    bad: list[str] = []
+    in_fence = False
+    for ln in lines[start:]:
+        if ln.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if re.match(r"^#{1,2}\s", ln):
+            break
+        b = _BULLET_RE.match(ln)
+        if not b:
+            continue
+        text = b.group(1).strip()
+        sep = _SEP_RE.search(text)
+        head, tail = (text[:sep.start()], text[sep.end():]) if sep else (text, "")
+        kind = _KIND_RE.match(tail)
+        paths = re.findall(r"`([^`\s]+)`", head)
+        if not paths:
+            bare = head.strip().strip("*_")
+            paths = [bare] if bare and not re.search(r"\s", bare) else []
+        if not kind or not paths:
+            bad.append(text)
+            continue
+        dest = change if kind.group(1).lower().startswith("change") else read
+        for p in paths:
+            if p not in dest:
+                dest.append(p)
+    read = [p for p in read if p not in change]
+    return {"files_change": change, "files_read": read}, bad
+
+
+def _type_fields(type_: str) -> set[str] | None:
+    """The field names the configured namespace's template for TYPE declares, or
+    None when the gateway does not say (a gateway older than the field list, or
+    the type is not there). WIP refuses a field its template lacks, and a field a
+    migration adds reaches each namespace at its own time, so a derived field is
+    sent only where this answers that it exists."""
+    try:
+        payload = gw_get(f"/types?namespace={urllib.parse.quote(NAMESPACE)}") or {}
+    except RuntimeError:
+        return None
+    for t in payload.get("types") or []:
+        if t.get("type") == type_ and isinstance(t.get("fields"), list):
+            return set(t["fields"])
+    return None
+
+
+def derive_response_files(type_: str, data: dict, explicit: set[str]) -> None:
+    """Fill files_change / files_read on a CASE_RESPONSE from its body's
+    `## Files in scope` section. A respond without the section draws a warning
+    (never a refusal: the section is the playbook's, and a response is still worth
+    posting without it). Values the writer set itself win."""
+    if type_ != "CASE_RESPONSE":
+        return
+    kind = str(data.get("response_kind") or "")
+    parsed = parse_files_in_scope(str(data.get("body") or ""))
+    if parsed is None:
+        if kind == "respond":
+            print(f"WARNING: this respond has no '## {FILES_SECTION}' section — a scheduler "
+                  f"cannot tell which files the fix touches (see the respond template in the "
+                  f"playbook)", file=sys.stderr)
+        return
+    files, bad = parsed
+    for ln in bad:
+        print(f"WARNING: '## {FILES_SECTION}' line not read (want `path` — change|read): {ln}",
+              file=sys.stderr)
+    if not files["files_change"] and not files["files_read"]:
+        print(f"WARNING: '## {FILES_SECTION}' names no file", file=sys.stderr)
+        return
+    if any(f in data or f in explicit for f in FILES_FIELDS):
+        return
+    declared = _type_fields(type_)
+    if declared is None or not set(FILES_FIELDS) <= declared:
+        print(f"note: CASE_RESPONSE in namespace {NAMESPACE} has no files_change/files_read "
+              f"fields yet — the file list stays in the body only", file=sys.stderr)
+        return
+    data.update(files)
+
+
 # Types whose data.case_number names a case. A writer may spell it as the KB prints
 # it (CASE-1179); the template field is an integer.
 _CASE_NUMBER_TYPES = {"CASE_RECORD", "CASE_RESPONSE"}
@@ -877,6 +997,7 @@ def cmd_write(type_: str, args: argparse.Namespace) -> int:
     except ValueError as e:
         print(f"ERROR: rejected — {e}", file=sys.stderr)
         return 1
+    derive_response_files(type_, data, explicit)
     if (type_ == "CASE_RESPONSE" and data.get("response_kind") == "implement"
             and not args.no_hash_check):
         unpushed = check_implement_hashes(str(data.get("body") or ""), args.hash_repo or os.getcwd())
