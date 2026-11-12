@@ -23,7 +23,7 @@
 //   browser-auth exemption is the manifest route line (CASE-439 pattern).
 import { createHash } from 'node:crypto'
 import express, { Router, type Request, type Response, type NextFunction } from 'express'
-import { createCorpusNamespace } from './lib/bootstrap.js'
+import { createCorpusNamespace, NamespaceNotReserved } from './lib/bootstrap.js'
 import { identityValue } from './lib/identity-value.js'
 import { resolveWipKey } from './lib/wip-key.js'
 import { MATCH_PAGE_SIZE, describeMatch, matchFilters, resolveMatch, validateMatch } from './lib/patch-match.js'
@@ -1974,9 +1974,33 @@ router.post('/namespaces', async (req, res) => {
   if (!/^[a-z][a-z0-9-]{0,62}$/.test(ns)) {
     return res.status(400).json({ error: 'namespace must be a lowercase slug: a-z, 0-9, "-", starting with a letter' })
   }
+  // Who may turn a reserved namespace into a knowledge base: a KB administrator,
+  // i.e. a caller holding admin on the deployment's main corpus. Agents that file
+  // cases hold write there and are refused. Whether the namespace may exist at all
+  // is the operator's reservation, checked by WIP when the app's key creates it.
+  let perm: AnyObj | null = null
+  try {
+    perm = await wipReq('GET', `/api/registry/my/namespaces/${encodeURIComponent(NS_DEFAULT)}/permission`, key)
+  } catch (e) {
+    // 401/403/404 all mean this key has no access there; anything else is the
+    // check failing, not an answer, and must not read as a refusal.
+    if (!(e instanceof WipError) || ![401, 403, 404].includes(e.status)) {
+      return res.status(errStatus(e)).json({ error: `cannot check the caller's permission: ${(e as Error).message}` })
+    }
+  }
+  if (perm?.permission !== 'admin') {
+    return res.status(403).json({
+      error: `creating a knowledge base needs admin on '${NS_DEFAULT}'; this key holds `
+        + `${perm?.permission ? `'${perm.permission}'` : 'no access'} there`,
+    })
+  }
+  // Seed with the app's own key, so the app can see everything it seeds; WIP lets it
+  // create only a namespace the install reserved for it. Without an app key (local
+  // dev) the caller's key, already checked above, seeds instead.
+  const seedKey = GATEWAY_KEY || key
   const steps: string[] = []
   try {
-    const out = await createCorpusNamespace(ns, key,
+    const out = await createCorpusNamespace(ns, seedKey,
       typeof b.description === 'string' ? b.description : undefined,
       (p) => { steps.push(p.detail) })
     if (!out) {
@@ -1984,6 +2008,9 @@ router.post('/namespaces', async (req, res) => {
     }
     return res.status(201).json({ ...out, steps })
   } catch (e) {
+    if (e instanceof NamespaceNotReserved) {
+      return res.status(409).json({ error_code: 'not_reserved', error: e.message, namespace: ns, steps })
+    }
     // wip-api errors carry the upstream status in their message ("WIP PUT …: 403 …").
     const m = /: (\d{3}) /.exec((e as Error).message)
     const status = m && Number(m[1]) >= 400 && Number(m[1]) < 500 ? Number(m[1]) : 502

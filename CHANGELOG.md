@@ -3,6 +3,20 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-13 — A new knowledge base needs no platform-admin key (CASE-1041)
+
+- **Changed (gateway):** `POST /server-api/kb/namespaces` seeds with the app's own
+  key instead of the caller's. WIP lets that key create only a namespace the operator
+  reserved for the KB app, so a corpus the app cannot see can no longer be created
+  (the `kb-work` state on the sandbox on 2026-11-01). Run before the reservation, the
+  request is refused with 409 `not_reserved`, naming the operator step for a deployed
+  and for an attached KB, and nothing is created.
+- **Changed (who may):** the caller must hold admin on the main corpus (`kb`); a key
+  with write only, such as the one agents use to file cases, gets 403. Peter's
+  decision on the case's open question. No platform-admin key is needed any more.
+- **Docs:** `kb-namespace.py` help (client 5.3.1), the playbook's knowledge-base
+  steps, ARCHITECTURE.md, CLAUDE.md.
+
 ## 2026-11-12 — A response names the files it touches, as data (CASE-1261)
 
 - **Added (playbook):** the respond section prescribes one body for every response,

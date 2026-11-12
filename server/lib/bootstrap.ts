@@ -288,6 +288,20 @@ export interface CorpusCreated extends Created {
   resumed: boolean
 }
 
+/**
+ * The app's key may not create this namespace: the install has not reserved it for
+ * the KB app. Reserving is an operator decision taken outside the app, and how
+ * depends on how the app is keyed, so the message names both ways.
+ */
+export class NamespaceNotReserved extends Error {
+  constructor(public namespace: string) {
+    super(`namespace '${namespace}' is not reserved for the KB app, so the app's key may not create it `
+      + `(nothing was created). An operator reserves it first — for a KB deployed by wip-deploy: `
+      + `wip-deploy app-namespace add wip-kb ${namespace} --name <install>; for an attached KB: `
+      + `widen the KB's API key with reserve on '${namespace}' in the Console. Then run this again.`)
+  }
+}
+
 /** Does the namespace hold nothing at all — no terminologies, templates, terms or documents? */
 async function isEmptyNamespace(namespace: string, key: string): Promise<boolean> {
   const stats = (await wipGet(`/api/registry/namespaces/${namespace}/stats`, key)) as {
@@ -298,7 +312,8 @@ async function isEmptyNamespace(namespace: string, key: string): Promise<boolean
 
 /**
  * Create and seed ONE new corpus namespace — a separate knowledge domain — from
- * the corpus seed, with the caller's key (gateway `POST /namespaces`).
+ * the corpus seed, with the given key (gateway `POST /namespaces` passes the app's
+ * own key, so the app can always see what it seeds).
  *
  * Same seeding as BootstrapGate, so a domain created from the CLI is identical
  * to one bootstrapped from the UI. Never touches the library namespace, and never
@@ -350,6 +365,13 @@ export async function createCorpusNamespace(
     // created (no grant on it → hidden), so "not visible" must not be reported as
     // "not created".
     const msg = (err as Error).message
+    // A 403 on the namespace step, seeding with the app's own key, means the install
+    // has not reserved this namespace for the app: an app key may create only a
+    // namespace reserved for it (or one it already holds admin on). Nothing was
+    // created, and the fix is an operator step, which the caller is told.
+    if (lastStepId === 'namespace' && !resumed && /: 403 /.test(msg)) {
+      throw new NamespaceNotReserved(namespace)
+    }
     // Failing on the namespace step itself means the namespace call was refused:
     // nothing was created (the normal shape for a caller without admin rights).
     if (lastStepId === 'namespace' && !resumed) {

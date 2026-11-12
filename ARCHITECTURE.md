@@ -45,8 +45,11 @@ Cross-namespace **relationships** are unsupported; Library→corpus links are pl
 inside a domain is a `KB_APP` term, not a namespace. A new domain is created from the
 CLI — `kbc kb-namespace.py create <ns>` → gateway `POST /namespaces` →
 `createCorpusNamespace()` — which seeds the corpus model exactly as BootstrapGate does,
-with the **caller's** key (WIP decides who may create namespaces), never re-seeds an
-existing namespace (409), and leaves the library alone.
+never re-seeds an existing namespace (409), and leaves the library alone. The caller
+must hold admin on the main corpus (403 otherwise); the seeding runs with the **app's
+own** key, so WIP lets it create only a namespace the operator reserved for the app
+(409 `not_reserved` otherwise, nothing created) and the app can always see what it
+seeded.
 
 **Showing a domain.** The UI shows one corpus at a time, chosen in the URL path:
 `<base>ns/<namespace>/…` (no prefix = the server-configured corpus). `namespaces.ts`

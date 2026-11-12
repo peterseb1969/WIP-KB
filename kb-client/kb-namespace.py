@@ -13,25 +13,27 @@ existing namespace.
 Usage:
     kb-namespace.py create <namespace> [--description TEXT]
 
-Creating a knowledge base the KB app can serve takes two steps, in this order:
-
-  1. On the install's host, give the KB app's own key the namespace:
+Creating a knowledge base takes two steps:
+  1. An operator reserves the namespace for the KB app. For a KB deployed by
+     wip-deploy, on the install's host:
          wip-deploy app-namespace add wip-kb <namespace> --name <install>
-     This reserves the namespace for the KB app and grants its key admin on it,
-     and every later wip-deploy apply keeps it. Skip it, and the knowledge base
-     exists but the app's UI and its topic/type listings cannot see it — the
-     app runs with its own deployer-issued key, not yours.
-  2. Run this script with a platform-admin key (wip-admins).
+     For an attached KB: widen the KB's API key with `reserve` on the namespace
+     in the Console.
+  2. Run this script with a key holding admin on the main knowledge base (kb).
+
+The KB seeds the namespace with its OWN key, so the app can always see what it
+created; your key only decides whether you may ask. Run before step 1, the
+gateway refuses with 409 not_reserved (naming step 1) and creates nothing; a key
+with only write on kb is refused with 403.
 
 Never copy another key into the app's key file (secrets/app-wip-kb-api-key):
 the next apply re-issues that file as the app's key, and two keys sharing one
 value resolve inconsistently across WIP services.
 
-The call runs with your API key, so WIP decides whether you may create
-namespaces. An existing namespace with content is never re-seeded — the gateway
-answers 409 and leaves it as it is. An existing EMPTY namespace (what a failed
-earlier attempt leaves behind) is seeded, so a retry after a failure just works;
-the error of a failed attempt says whether it left a namespace behind.
+An existing namespace with content is never re-seeded — the gateway answers 409
+and leaves it as it is. An existing EMPTY namespace (what a failed earlier
+attempt leaves behind) is seeded, so a retry after a failure just works; the
+error of a failed attempt says whether it left a namespace behind.
 
 Env: see kb_client_core (KB_BASE_URL / KB_API_KEY_FILE / KB_PREFER_LOCAL / …).
 Exit codes: 0 created · 1 refused by the gateway (exists, invalid, forbidden) · 2 transport/usage.
@@ -77,9 +79,9 @@ def cmd_create(args: argparse.Namespace) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Create a new KB knowledge domain (namespace).",
-        epilog="First, on the install's host: wip-deploy app-namespace add wip-kb <namespace> "
-               "--name <install> — otherwise the KB app's own key cannot see the new knowledge "
-               "base. Then run this with a platform-admin key.")
+        epilog="First an operator reserves the namespace for the KB app (deployed: wip-deploy "
+               "app-namespace add wip-kb <namespace> --name <install>; attached: reserve it for "
+               "the KB's key in the Console). Then run this with a key holding admin on kb.")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("create", help="create and seed a new namespace")
     c.add_argument("namespace", help="lowercase slug: a-z, 0-9, '-', starting with a letter")

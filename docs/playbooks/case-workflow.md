@@ -590,13 +590,17 @@ kbc case-fetch.py read CASE_RECORD --filter app=<project>
 
 A **knowledge base** is a namespace seeded with the full KB model, with its own
 documents, numbering, vocabularies and relationships; links cannot cross between
-knowledge bases. Making one takes two steps, in this order:
+knowledge bases. Making one takes two steps:
 
-1. On the install's host, `wip-deploy app-namespace add wip-kb <name> --name <install>`
-   gives the KB app's own key the namespace (and every later apply keeps it). Without
-   it the knowledge base exists, but the KB UI and the gateway's topic and type
-   listings cannot see it: they run with the app's key, not yours.
-2. `kbc kb-namespace.py create <name>`, run with a platform-admin key, seeds it.
+1. An operator reserves the namespace for the KB app. For a KB deployed by
+   wip-deploy, on the install's host: `wip-deploy app-namespace add wip-kb <name>
+   --name <install>` (every later apply keeps it). For an attached KB: widen the KB's
+   API key with `reserve` on the namespace in the Console.
+2. `kbc kb-namespace.py create <name>`, run with a key holding **admin on the main
+   knowledge base** (`kb`), creates and seeds it. The KB seeds with its own key, so it
+   can always see what it created. Run before step 1, it is refused (409
+   `not_reserved`, naming step 1) and nothing is created; a key with only write is
+   refused with 403.
 
 Never copy another key into the app's key file to widen it; the next apply
 re-issues that file, and two keys sharing one value resolve inconsistently.
