@@ -44,7 +44,7 @@ import argparse
 import json
 import sys
 
-from kb_client_core import gw_post
+from kb_client_core import GatewayRefusal, gw_post
 
 # Seeding is ~30 sequential WIP writes plus a template-cache settle; well past the
 # 20s that suits every other gateway call.
@@ -57,9 +57,15 @@ def cmd_create(args: argparse.Namespace) -> int:
         body["description"] = args.description
     try:
         out = gw_post("/namespaces", body, timeout=SEED_TIMEOUT_S)
+    except GatewayRefusal as e:
+        # The gateway answered and said no (not allowed, not reserved, exists):
+        # the caller's to fix, so exit 1, never the transport code a retry loop
+        # would read as "try again".
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
-        return 1 if "HTTP 4" in str(e) else 2
+        return 2
     if "namespace" not in out:
         print("ERROR: this KB instance has no POST /namespaces (gateway older than this client)",
               file=sys.stderr)

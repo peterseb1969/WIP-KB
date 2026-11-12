@@ -16,6 +16,9 @@ than 2026-06-21 is in git history and DESIGN.md's Phase notes.
   decision on the case's open question. No platform-admin key is needed any more.
 - **Docs:** `kb-namespace.py` help (client 5.3.1), the playbook's knowledge-base
   steps, ARCHITECTURE.md, CLAUDE.md.
+- **Fixed (client 5.3.2):** `kb-namespace.py` exited 2 (transport failure) on every
+  gateway refusal, because it looked for "HTTP 4" in a message that carries only the
+  gateway's text. A refusal (403, 409) now exits 1, as its help says. Found on prod.
 
 ## 2026-11-12 — A response names the files it touches, as data (CASE-1261)
 
