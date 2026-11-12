@@ -3,6 +3,15 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-12 — An implement response citing an all-digit commit hash is checked
+
+- **Fixed:** `kb-write.py` took a token as a commit hash only if it held both digits
+  and a-f letters, so a short hash made only of digits (e.g. `21137700`, about 2% of
+  8-character hashes) was ignored: the response warned that it "cites no commit hash",
+  and the hash was not checked against the remote. A digits-only or letters-only token
+  now counts when it resolves to a commit in the repo; numbers and words that are not
+  commits stay ignored. Client 5.2.2. Reported by a YAC posting an implement response.
+
 ## 2026-11-11 — Claims: who is working on a case (CASE-1259)
 
 - **Added (data model):** vocabularies `CLAIM_KIND` (respond, implement, fix, review)

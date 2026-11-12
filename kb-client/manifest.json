@@ -1,6 +1,6 @@
 {
   "client": "wip-kb-client",
-  "client_version": "5.2.1",
+  "client_version": "5.2.2",
   "schema_version": "v3",
   "case_record_identity": "case_number is THE identity (mint), surfaced as the CASE-<n> Registry synonym (CASE-481)",
   "served_from": "/server-api/kb-client/download",

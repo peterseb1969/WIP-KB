@@ -809,8 +809,14 @@ def check_implement_hashes(body: str, repo: str) -> list[str]:
     if _git(repo, "rev-parse", "--is-inside-work-tree").returncode != 0:
         print(f"note: {repo} is not a git repository — cited commit hashes not checked", file=sys.stderr)
         return []
+    # A token with both digits and a-f letters is taken as a hash. One of only
+    # digits (a date, a count) or only letters (a word like "decade") is taken as
+    # a hash only when it resolves to a commit here: about 2% of 8-character
+    # short hashes are all digits, and those must count too.
+    def is_commit(t: str) -> bool:
+        return _git(repo, "rev-parse", "--verify", "--quiet", f"{t}^{{commit}}").returncode == 0
     tokens = [t for t in dict.fromkeys(_HASH_RE.findall(body or ""))
-              if re.search(r"[0-9]", t) and re.search(r"[a-f]", t)]
+              if (re.search(r"[0-9]", t) and re.search(r"[a-f]", t)) or is_commit(t)]
     if not tokens:
         print("WARNING: this implement response cites no commit hash — readers will have to "
               "search the log for the fix", file=sys.stderr)
