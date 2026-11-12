@@ -239,6 +239,18 @@ kbc kb-write.py CLAIM release <n> <kind>   # when done, failed or abandoned
    one if warranted, and say why.
 3. If the proposed fix IS right, say so and show the analysis.
    (CASE-50 was implemented blindly and broke; CASE-36 was analysed properly. Be CASE-36.)
+4. Take the whole view — the responder decides whether the case asks for the right thing:
+   - **Is the scope right?** Grep for the same defect beyond the cited lines; check
+     whether part of it is already fixed.
+   - **Does the fix fit the repo?** Release notes, design docs, how sibling code does it.
+     A fix that contradicts a recorded convention is wrong, however small.
+   - **Does it apply beyond the request?** Name every extra site with `file:line`. Do
+     not widen on a hunch.
+5. **Stay proportionate.** Anything bigger than the case asked for — a rewrite or
+   redesign, more sites or another component, a different approach, a change to a shared
+   contract or to stored data — is not the recommendation. Give the fix as filed (or say
+   why it is wrong), and put the bigger change as a question for the project owner, with
+   the evidence, the options and their cost.
 
 **Claim it first** (see Claims above): `kbc kb-write.py CLAIM acquire <n> respond`. A
 refused acquire means someone else is responding: stop. Release when the response is
@@ -247,13 +259,18 @@ posted, or when you give up.
 **The response body** — every respond, attended or unattended, has this shape:
 
 ```markdown
-**Bottom line:** <verdict in one sentence> · **Root cause:** <one sentence> · **Recommendation:** <implement as filed | implement with the correction below | needs a live check first | cannot form a confident finding>
+**Bottom line:** <verdict in one sentence> · **Root cause:** <one sentence> · **Recommendation:** <implement as filed | implement with the correction below | needs a live check first | question for the project owner | cannot form a confident finding>
 
 ## Files in scope
 
 - `path/from/repo/root.ts` — change
 - `another/file.py`, `its/test.py` — change, **shared contract** (served schema)
 - `file/only/read.ts` — read
+
+## Scope
+
+<as filed | widened | narrowed | different fix — and the evidence: the grep, the
+convention, the file:line of every site beyond the request>
 
 ## Analysis
 
@@ -262,6 +279,11 @@ posted, or when you give up.
 ## Verified vs not
 
 <what you read directly, versus inferred or not checkable>
+
+## Questions
+
+<optional: a change bigger than the case asked for, put to the project owner with
+evidence, options and cost — instead of recommending it>
 ```
 
 - **Length:** about 600 words, 1,000 at most. Go longer only with a stated reason
@@ -274,6 +296,11 @@ posted, or when you give up.
   which is what a scheduler reads to decide whether two cases can be worked in parallel.
   It warns (it does not refuse) when a respond has no such section, or a bullet in it
   that it cannot read.
+- **Scope** is a judgement, not a file list: whether the case asks for the right thing.
+  Files in scope lists what the recommended fix touches, for the scheduler; a widened
+  scope that is only a question lists no files there.
+- **Questions** is optional. When it holds the main point, the recommendation is
+  *question for the project owner*, and nothing is implemented until the owner answers.
 
 Then, two writes — the response doc + the status transition:
 
@@ -332,7 +359,9 @@ wait for a decision).
 1. **Verify the proposed fix before touching code** — does the analysis convince you?
    Has the target code changed since the response? Side effects on other callers/tests?
    If anything is wrong, respond with your findings instead of implementing a fix you
-   don't trust.
+   don't trust. Stay in the response's scope: when a finding challenges your
+   instructions (the fix contradicts a convention, the same defect sits elsewhere), stop
+   and say so rather than widening the change yourself.
 2. **Apply each change**; if quoted "current text" no longer matches, flag and skip it.
 3. **Show the diff** (`git diff`) and let Peter review before committing.
 4. **Push, then record + close.** The implement response is where a reader finds the

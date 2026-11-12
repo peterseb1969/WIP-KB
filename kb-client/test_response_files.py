@@ -60,6 +60,10 @@ check("heading is case-insensitive, may end in a colon",
       kb.parse_files_in_scope("## files in scope:\n- `a.py` — change\n")[0]["files_change"], ["a.py"])
 check("the section ends at the next heading",
       kb.parse_files_in_scope("## Files in scope\n- `a` — read\n# Title\n- `b` — read\n")[0]["files_read"], ["a"])
+check("the template's ## Scope section ends the file list",
+      kb.parse_files_in_scope("## Files in scope\n- `a` — change\n\n## Scope\n\n"
+                              "widened:\n- `b.py:12` — change, same defect\n")[0],
+      {"files_change": ["a"], "files_read": []})
 check("a ### subheading does not end it",
       kb.parse_files_in_scope("## Files in scope\n### server\n- `a` — read\n")[0]["files_read"], ["a"])
 check("bullets inside a code fence are not read",

@@ -9,6 +9,12 @@ than 2026-06-21 is in git history and DESIGN.md's Phase notes.
   attended or unattended: a bottom line, `## Files in scope` (one bullet per path,
   marked `change` or `read`), `## Analysis`, `## Verified vs not`; about 600 words,
   1,000 at most. Respond and implement now start with a claim and end with its release.
+  The responder takes the whole view (is the scope right, does the fix fit the repo's
+  conventions, does it apply beyond the request) and raises anything bigger than the
+  case asked for as a question, not a recommendation: a `## Scope` section (as filed /
+  widened / narrowed / different fix, with evidence), an optional `## Questions`, and
+  the recommendation *question for the project owner*. The implementer stays in scope
+  and stops when a finding challenges its instructions (Peter, via FRanC on CASE-1261#2).
 - **Added (data model):** `CASE_RESPONSE` gains two optional `array<string>` fields,
   `files_change` and `files_read`. Seeded for new namespaces;
   `tools/add-response-files.py` adds them to an existing one in one version event and
