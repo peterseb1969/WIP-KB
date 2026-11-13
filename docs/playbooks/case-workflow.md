@@ -231,6 +231,10 @@ kbc kb-write.py CLAIM release <n> <kind>   # when done, failed or abandoned
 ```
 
 - The holder is your session (`.claude/.session-id`); a task runner passes `--holder <task-id>`.
+- A claim stays with the session that took it. After a `/wip-wake` the new session holds
+  none of its predecessor's claims: to finish or release a claim the predecessor parked,
+  pass `--holder <prior-session-id>` (the `continues_from` in your `session.md`).
+  Use this only for your own lineage. A claim held by any other session is that session's to release.
 - A refused acquire names who holds the case. Do not work around it: ask them, or wait.
 - An **active** claim has a lease (60 minutes unless the kind's `CLAIM_RULE` says
   otherwise). Renew on long work; an unrenewed lease runs out and the case is free.
