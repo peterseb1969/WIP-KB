@@ -25,6 +25,7 @@ import { createHash } from 'node:crypto'
 import express, { Router, type Request, type Response, type NextFunction } from 'express'
 import { createCorpusNamespace, NamespaceNotReserved } from './lib/bootstrap.js'
 import { identityValue } from './lib/identity-value.js'
+import { applyHistory, summariseThread, type ThreadEntry } from './lib/case-thread.js'
 import { resolveWipKey } from './lib/wip-key.js'
 import { MATCH_PAGE_SIZE, describeMatch, matchFilters, resolveMatch, validateMatch } from './lib/patch-match.js'
 import { holds, leaseUntil, verdict, type Claim, type ClaimRule } from './lib/claims.js'
@@ -1078,7 +1079,78 @@ function caseProjection(it: AnyObj): AnyObj {
   }
 }
 
-// GET /cases?status=&since=&page=&page_size=  (since: ISO date, on updated_at)
+// Case threads for a list, read from reporting: one query for a page of cases
+// instead of a document query that would carry every response's body just to
+// count them. Null when reporting cannot answer (a corpus without the table yet,
+// reporting down): the list then carries no thread fields rather than wrong ones.
+// The reporting query endpoint's ceiling for max_rows (it refuses more with 422).
+const REPORTING_MAX_ROWS = 50000
+async function readThreads(nums: number[], ns: string, key: string): Promise<Map<number, ThreadEntry[]> | null> {
+  const out = new Map<number, ThreadEntry[]>()
+  if (!nums.length) return out
+  try {
+    const d = await wipReq('POST', '/api/reporting-sync/query', key, {
+      namespace: ns, max_rows: REPORTING_MAX_ROWS,
+      sql: `SELECT case_number, response_kind, response_seq FROM doc_case_response`
+        + ` WHERE status = 'active' AND case_number IN (${nums.map((n) => Math.trunc(n)).join(',')})`,
+    })
+    for (const r of (d.rows || []) as AnyObj[]) {
+      const list = out.get(Number(r.case_number)) || []
+      list.push({ response_kind: String(r.response_kind), response_seq: Number(r.response_seq) })
+      out.set(Number(r.case_number), list)
+    }
+    return out
+  } catch (e) {
+    console.warn(`[kb-gateway] case threads unavailable in ${ns}: ${(e as Error).message}`)
+    return null
+  }
+}
+
+// Open cases with no respond and no implement or close response: the cases that
+// may be unanswered. A pre-thread reopen among them is removed afterwards by the
+// history check. Null when reporting cannot answer.
+async function unansweredCandidates(ns: string, key: string): Promise<number[] | null> {
+  try {
+    const d = await wipReq('POST', '/api/reporting-sync/query', key, {
+      namespace: ns, max_rows: REPORTING_MAX_ROWS,
+      sql: `SELECT c.case_number FROM doc_case_record c WHERE c.status = 'active' AND c.data_status = 'open'`
+        + ` AND NOT EXISTS (SELECT 1 FROM doc_case_response r WHERE r.case_number = c.case_number`
+        + ` AND r.status = 'active' AND r.response_kind IN ('respond', 'implement', 'close'))`,
+    })
+    return ((d.rows || []) as AnyObj[]).map((r) => Number(r.case_number)).filter(Number.isFinite)
+  } catch (e) {
+    console.warn(`[kb-gateway] unanswered candidates unavailable in ${ns}: ${(e as Error).message}`)
+    return null
+  }
+}
+
+// The workflow statuses a case had before its current version. Read only for a row
+// the thread cannot settle (summariseThread's needsHistory): reporting keeps the
+// latest version only, so each earlier version is one read. Capped, newest first.
+const HISTORY_MAX_VERSIONS = 25
+async function earlierStatuses(documentId: string, ns: string, key: string): Promise<string[]> {
+  try {
+    const v = await wipReq('GET', `/api/document-store/documents/${documentId}/versions?namespace=${encodeURIComponent(ns)}`, key)
+    const cur = Number(v.current_version)
+    const older = ((v.versions || []) as AnyObj[]).map((x) => Number(x.version))
+      .filter((n) => n < cur).sort((a, b) => b - a).slice(0, HISTORY_MAX_VERSIONS)
+    const out: string[] = []
+    for (const n of older) {
+      const doc = await wipReq('GET', `/api/document-store/documents/${documentId}/versions/${n}?namespace=${encodeURIComponent(ns)}`, key)
+      out.push(String(doc.data?.status || ''))
+      if (out[out.length - 1] === 'implemented' || out[out.length - 1] === 'closed') break
+    }
+    return out
+  } catch (e) {
+    console.warn(`[kb-gateway] history of ${documentId} unavailable: ${(e as Error).message}`)
+    return []
+  }
+}
+
+// GET /cases?status=&since=&unanswered=1&page=&page_size=  (since: ISO date, on updated_at)
+// Each item carries its thread when reporting can read it: responses (counts by
+// kind), reopened, reanswered, unanswered. unanswered=1 lists only open cases
+// that were never answered and are not reopens.
 router.get('/cases', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
@@ -1111,17 +1183,41 @@ router.get('/cases', async (req, res) => {
     filters.push({ field: `data.${f}`, operator: 'eq', value: v })
   }
   if (req.query.since) filters.push({ field: 'updated_at', operator: 'gte', value: String(req.query.since) })
+  const onlyUnanswered = req.query.unanswered === '1' || req.query.unanswered === 'true'
   try {
+    if (onlyUnanswered) {
+      // Narrow to the candidates first, in reporting, so pagination and --limit
+      // apply to unanswered cases rather than cutting them out of a wider page.
+      const cand = await unansweredCandidates(ns, key)
+      if (cand === null) return res.status(503).json({ error: 'cannot read case threads from reporting; try again' })
+      if (!cand.length) return res.json({ total: 0, page, pages: 0, items: [] })
+      filters.push({ field: 'data.case_number', operator: 'in', value: cand })
+    }
     const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
       { template_id: 'CASE_RECORD', filters, page, page_size: pageSize })
-    const items = (d.items || []).map(caseProjection)
+    let items = (d.items || []).map(caseProjection)
     const nums = items.map((it: AnyObj) => Number(it.case)).filter(Number.isFinite)
-    const claims = await readClaims(nums, ns, key)
+    const [claims, threads] = await Promise.all([readClaims(nums, ns, key), readThreads(nums, ns, key)])
     const now = new Date()
     for (const it of items) {
       it.claims = shownClaims(claims.filter((c) => c.case_number === Number(it.case)), now)
+      if (threads) {
+        let s = summariseThread(it.status, threads.get(Number(it.case)) || [])
+        if (s.needsHistory) s = applyHistory(s, await earlierStatuses(it.document_id, ns, key))
+        it.responses = { respond: s.respond, implement: s.implement, comment: s.comment, close: s.close }
+        it.reopened = s.reopened
+        it.reanswered = s.reanswered
+        it.unanswered = s.unanswered
+      }
     }
-    res.json({ total: d.total, page: d.page, pages: d.pages, items })
+    let total = d.total
+    if (onlyUnanswered) {
+      // A candidate whose earlier versions show it finished is a reopen, not unanswered.
+      const kept = items.filter((it: AnyObj) => it.unanswered)
+      total -= items.length - kept.length
+      items = kept
+    }
+    res.json({ total, page: d.page, pages: d.pages, items })
   } catch (e) {
     res.status(errStatus(e)).json({ error: (e as Error).message })
   }

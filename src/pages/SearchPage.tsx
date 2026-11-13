@@ -3,8 +3,9 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
-import { fetchCaseClaims, fetchCorpusHeaders, fetchOutstandingRespondFlags, type CaseClaimView, type HeaderDoc, type OutstandingFlag } from '../lib/reporting'
+import { fetchCaseClaims, fetchCaseThreads, fetchCorpusHeaders, fetchOutstandingRespondFlags, type CaseClaimView, type HeaderDoc, type OutstandingFlag, type ThreadSummary } from '../lib/reporting'
 import { ClaimChips, respondClaimReason } from '../components/ClaimChips'
+import { ThreadChip } from '../components/ThreadChip'
 import { fetchTopicTree, type TopicNode, type TopicTree } from '../lib/topics'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
@@ -797,9 +798,17 @@ export default function SearchPage() {
       visible
         .map((v) => v.doc)
         .filter((d) => d.template_value === 'CASE_RECORD' && d.namespace === CORPUS_NS)
-        .map((d) => ({ documentId: d.document_id, caseNumber: d.data.case_number ?? null })),
+        .map((d) => ({ documentId: d.document_id, caseNumber: d.data.case_number ?? null, status: workflowStatus(d) })),
     [visible],
   )
+  // Each listed case's response thread: counts, reopened, never answered.
+  const threadsQ = useQuery<Map<number, ThreadSummary>>({
+    queryKey: ['case-threads', CORPUS_NS, flaggableCases.map((c) => `${c.caseNumber}:${c.status}`).join(',')],
+    queryFn: () => fetchCaseThreads(CORPUS_NS, flaggableCases
+      .filter((c): c is typeof c & { caseNumber: number } => c.caseNumber != null)),
+    enabled: flaggableCases.length > 0,
+    staleTime: 15_000,
+  })
   const outstandingFlagsQ = useQuery<Map<string, OutstandingFlag>>({
     queryKey: ['outstanding-respond-flags', CORPUS_NS, flaggableCases.map((c) => c.documentId).join(',')],
     queryFn: () => fetchOutstandingRespondFlags(CORPUS_NS, flaggableCases),
@@ -1184,6 +1193,9 @@ export default function SearchPage() {
                           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-text-muted">
                             {workflowStatus(doc)}
                           </span>
+                        )}
+                        {doc.data.case_number != null && doc.namespace === CORPUS_NS && (
+                          <ThreadChip thread={threadsQ.data?.get(doc.data.case_number)} />
                         )}
                         {doc.data.case_number != null && (
                           <ClaimChips claims={claimsQ.data?.get(doc.data.case_number)} />

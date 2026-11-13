@@ -3,6 +3,21 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-13 — Case lists show the thread: reopened or never answered (CASE-1281)
+
+- **Added (gateway):** `GET /server-api/kb/cases` gives each case its thread when
+  reporting can read it: `responses` (counts by kind), `reopened`, `reanswered`,
+  `unanswered`. `unanswered=1` lists only open cases never answered that are not
+  reopens. One reporting query per page; reporting keeps only a case's latest
+  version, so "reopened" is read from an implement or close response in the thread.
+  For an open case with no answer, which could be a reopen from before threaded
+  responses, the case's earlier versions are read instead. The rule lives in
+  `server/lib/case-thread.ts`, shared with the UI.
+- **Added (client 5.4.0):** `case-fetch.py list` has a Thread column
+  (`R1 I1 C3 · reopened`), the same fields in `--format json`, and `--unanswered`.
+- **Added (UI):** the case list shows the counts and a `reopened` / `unanswered`
+  chip beside the claim chips.
+
 ## 2026-11-13 — A new knowledge base needs no platform-admin key (CASE-1041)
 
 - **Changed (gateway):** `POST /server-api/kb/namespaces` seeds with the app's own

@@ -178,6 +178,18 @@ kbc case-fetch.py list --status open,responded
 APP-YACs: filter to your app (`--app <name>`) or cases you filed (`--filed-by <id>`).
 BE-YACs: list all. If none, say "No cases" and stop.
 
+The **Thread** column reads each case's responses: counts by kind (`R` respond,
+`I` implement, `C` comment, `X` close) and a marker:
+- `unanswered` — open, and no respond response yet;
+- `reopened` — finished once (implemented or closed) and open again, read from an
+  implement or close response in the thread, or from the case's earlier versions for
+  cases older than threaded responses;
+- `reopened · re-answered` — reopened, and a respond came after the reopen.
+
+`list --unanswered` lists only open cases never answered that are not reopens: the
+ones to send for a first response. `--format json` carries the same per row
+(`responses`, `reopened`, `reanswered`, `unanswered`).
+
 ---
 
 ## `/wip-case read <n>`

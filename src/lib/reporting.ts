@@ -1,5 +1,7 @@
 import { wipFetchJson } from './wipBulk'
 import { wipClient } from './wipClient'
+import { applyHistory, summariseThread, type ThreadEntry, type ThreadSummary } from '../../server/lib/case-thread'
+export type { ThreadSummary } from '../../server/lib/case-thread'
 
 // Read-only SQL against the reporting-sync PostgreSQL layer. Tables are per
 // template — "<namespace>"."doc_<template_value>", one row per latest document
@@ -520,6 +522,72 @@ export async function fetchCaseClaims(
     out.set(r.case_number, list)
   }
   return out
+}
+
+// What each listed case's response thread says: counts by kind, reopened, never
+// answered. The rule is server/lib/case-thread.ts, shared with the gateway's
+// /cases, so the list and kbc agree. One reporting query for a page of cases; a
+// case the thread cannot settle (open, no answer, possibly a reopen from before
+// threaded responses) has its earlier versions read, which is rare. A namespace
+// without responses yet has no thread table: then every case has an empty thread.
+export interface ThreadCase {
+  caseNumber: number
+  documentId: string
+  status: string | null | undefined
+}
+export async function fetchCaseThreads(
+  namespace: string,
+  cases: ThreadCase[],
+): Promise<Map<number, ThreadSummary>> {
+  if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
+  const byNum = new Map(cases.filter((c) => Number.isInteger(c.caseNumber)).map((c) => [c.caseNumber, c]))
+  const out = new Map<number, ThreadSummary>()
+  if (!byNum.size) return out
+  const { rows: has } = await reportingQuery<{ present: boolean }>(
+    namespace,
+    `SELECT to_regclass('"${namespace}"."doc_case_response"') IS NOT NULL AS present`,
+  )
+  const entries = new Map<number, ThreadEntry[]>()
+  if (has[0]?.present) {
+    const { rows } = await reportingQuery<{ case_number: number; response_kind: string; response_seq: number }>(
+      namespace,
+      `SELECT case_number, response_kind, response_seq FROM "${namespace}"."doc_case_response"`
+        + ` WHERE ${ONLY_ACTIVE} AND case_number IN (${[...byNum.keys()].join(',')})`,
+      50000,
+    )
+    for (const r of rows) {
+      const list = entries.get(r.case_number) ?? []
+      list.push({ response_kind: r.response_kind, response_seq: r.response_seq })
+      entries.set(r.case_number, list)
+    }
+  }
+  for (const [n, c] of byNum) {
+    let s = summariseThread(c.status, entries.get(n) ?? [])
+    if (s.needsHistory) s = applyHistory(s, await earlierCaseStatuses(namespace, c.documentId))
+    out.set(n, s)
+  }
+  return out
+}
+
+// The workflow statuses a case had before its current version, newest first,
+// stopping at the first finished one. Reporting keeps only the latest version.
+async function earlierCaseStatuses(namespace: string, documentId: string): Promise<string[]> {
+  try {
+    const ns = encodeURIComponent(namespace)
+    const v = await wipFetchJson<{ current_version: number; versions: Array<{ version: number }> }>(
+      `/api/document-store/documents/${documentId}/versions?namespace=${ns}`)
+    const older = v.versions.map((x) => x.version).filter((n) => n < v.current_version).sort((a, b) => b - a).slice(0, 25)
+    const out: string[] = []
+    for (const n of older) {
+      const d = await wipFetchJson<{ data?: { status?: string } }>(
+        `/api/document-store/documents/${documentId}/versions/${n}?namespace=${ns}`)
+      out.push(d.data?.status ?? '')
+      if (out[out.length - 1] === 'implemented' || out[out.length - 1] === 'closed') break
+    }
+    return out
+  } catch {
+    return []
+  }
 }
 
 // Which of a set of documents carry an OUTSTANDING respond flag — one asked for and

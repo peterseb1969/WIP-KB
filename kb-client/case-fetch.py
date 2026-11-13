@@ -169,6 +169,8 @@ def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
         params["component"] = args.component
     if args.app:
         params["app"] = args.app
+    if getattr(args, "unanswered", False):
+        params["unanswered"] = "1"
     payload = gw_get("/cases?" + urllib.parse.urlencode(params)) or {}
     rows = []
     for it in payload.get("items") or []:
@@ -192,14 +194,35 @@ def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
                 + ("" if c.get("state") == "active" and not c.get("expired")
                    else f" ({'expired' if c.get('expired') else c.get('state')})")
                 for c in it.get("claims") or []),
+            # The case's thread, when the gateway reads it (older gateways do not):
+            # response counts by kind and whether it was reopened or never answered.
+            "responses": it.get("responses"),
+            "reopened": it.get("reopened"),
+            "reanswered": it.get("reanswered"),
+            "unanswered": it.get("unanswered"),
+            "thread": _thread_text(it),
         })
     return rows
 
 
+def _thread_text(it: dict) -> str:
+    """The Thread cell: response counts (R respond, I implement, C comment, X close)
+    and the marker, e.g. "R1 I1 C3 · reopened", "C1 · unanswered". Empty when the
+    gateway sent no thread (an older gateway, or reporting unavailable)."""
+    r = it.get("responses")
+    if not isinstance(r, dict):
+        return ""
+    counts = " ".join(f"{k}{r.get(f)}" for k, f in (("R", "respond"), ("I", "implement"),
+                                                    ("C", "comment"), ("X", "close")) if r.get(f))
+    marker = ("reopened · re-answered" if it.get("reanswered") else "reopened") if it.get("reopened") \
+        else ("unanswered" if it.get("unanswered") else "")
+    return " · ".join(x for x in (counts, marker) if x)
+
+
 def _format_case_table(rows: list[dict]) -> str:
     header = (
-        "| # | Status | Claimed | Severity | Type | Component | Target | Filed by | Slug |\n"
-        "|---|---|---|---|---|---|---|---|---|"
+        "| # | Status | Thread | Claimed | Severity | Type | Component | Target | Filed by | Slug |\n"
+        "|---|---|---|---|---|---|---|---|---|---|"
     )
     if not rows:
         return f"{header}\n_(no matches)_\n"
@@ -208,7 +231,7 @@ def _format_case_table(rows: list[dict]) -> str:
         cn = r["case_number"]
         cn_str = f"{cn:03d}" if isinstance(cn, int) else str(cn)
         out.append(
-            f"| {cn_str} | {r['status'] or ''} | {r.get('claimed') or ''} | {r['severity'] or ''} | "
+            f"| {cn_str} | {r['status'] or ''} | {r.get('thread') or ''} | {r.get('claimed') or ''} | {r['severity'] or ''} | "
             f"{r['type'] or ''} | {r['component'] or ''} | "
             f"{r.get('target_yac') or ''} | {r['filed_by'] or ''} | {r['slug'] or ''} |"
         )
@@ -590,6 +613,8 @@ def main() -> None:
     list_sp.add_argument("--target-yac", dest="target_yac",
                          help="filter by assigned YAC, comma-separated (e.g. APP-KB or APP-KB,any). "
                               "Client-side: the gateway returns target_yac but does not facet on it.")
+    list_sp.add_argument("--unanswered", action="store_true",
+                         help="only open cases never answered (no respond response) that are not reopens")
     list_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
     list_sp.add_argument("--format", choices=["table", "json"], default="table")
 
