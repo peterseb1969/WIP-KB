@@ -64,6 +64,10 @@ export function watchFailures(page: Page, basePath: string) {
 
 /**
  * Search words from a title: long enough to be selective, free of query syntax.
+ * Up to six words: full-text search requires every word, so more words narrow the
+ * hits. Three were not enough once the first case was "Commit-review backfill
+ * batch 4 …": dozens of documents share those words, and the case fell off the
+ * first page.
  * URLs, paths and code spans are dropped first: full-text search indexes
  * `https://rc.<host>/` as one URL token, not as the word "https", so a word taken
  * from inside one can never match.
@@ -74,6 +78,6 @@ export function searchTermsFrom(title: string): string {
     .replace(/\S*(?:\/|:\/\/|<|>)\S*/g, ' ')
     .split(/[^\p{L}\p{N}]+/u)
     .filter((w) => w.length >= 5)
-    .slice(0, 3)
+    .slice(0, 6)
     .join(' ')
 }
