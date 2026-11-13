@@ -127,6 +127,53 @@ data = {"response_kind": "respond", "body": BODY}
 kb.derive_response_files("CASE_RECORD", data, set())
 check("other types are left alone", "files_change" in data, False)
 
+# --- ## Questions (CASE-1290) ---------------------------------------------------
+Q = """**Bottom line:** x
+
+## Files in scope
+
+- `a.py` — change
+
+## Questions
+
+1. **Split the bundle?** Into four cases:
+   - (a) merge
+   - (b) backup
+2. **Read or admin for downloads?** Today read.
+3. **Locked namespaces?** A policy call.
+"""
+check("numbered questions, nested options not counted", kb.parse_questions(Q), 3)
+check("no section → None", kb.parse_questions("## Analysis\n1. x\n"), None)
+check("prose-only section asks one",
+      kb.parse_questions("## Questions\n\nShould the release cut also freeze wip-auth?\n"), 1)
+check("bulleted questions count", kb.parse_questions("## Questions\n- a?\n- b?\n"), 2)
+check("an empty section asks none", kb.parse_questions("## Questions\n\n## Next\n"), 0)
+check("the section ends at the next heading",
+      kb.parse_questions("## Questions\n1. a?\n## Notes\n1. not a question\n"), 1)
+
+
+def derive_q(data, declared, explicit=frozenset()):
+    real = kb._type_fields
+    kb._type_fields = lambda t: declared
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            kb.derive_response_questions("CASE_RESPONSE", data, set(explicit))
+    finally:
+        kb._type_fields = real
+    return data, err.getvalue()
+
+
+d, err = derive_q({"response_kind": "respond", "body": Q}, {"questions", "body"})
+check("declared: questions filled", d.get("questions"), 3)
+d, err = derive_q({"response_kind": "respond", "body": Q}, {"body"})
+check("namespace without the field: not sent, a note says so",
+      ("questions" in d, "no questions field" in err), (False, True))
+d, err = derive_q({"response_kind": "respond", "body": "## Analysis\nnone"}, {"questions"})
+check("no section: nothing sent, no note", ("questions" in d, err), (False, ""))
+d, err = derive_q({"response_kind": "respond", "body": Q, "questions": 7}, {"questions"})
+check("a value the writer set wins", d["questions"], 7)
+
 if _fails:
     print("FAIL:")
     for f in _fails:

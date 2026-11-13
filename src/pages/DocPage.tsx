@@ -14,7 +14,8 @@ import { DocIdentityStrip } from '../components/DocIdentityStrip'
 import { TopicPicker } from '../components/TopicPicker'
 import { CaseThread, type ResponseDoc, type ResponseLink } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
-import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees, fetchOutstandingRespondFlags, fetchCaseClaims, type CaseClaimView, type OutstandingFlag } from '../lib/reporting'
+import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees, fetchOutstandingRespondFlags, fetchCaseClaims, fetchCaseThreads, type CaseClaimView, type OutstandingFlag, type ThreadSummary } from '../lib/reporting'
+import { CaseAnswer } from '../components/CaseAnswer'
 import { ClaimChips, respondClaimReason } from '../components/ClaimChips'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 import { formatWipDateTime } from '../lib/datetime'
@@ -264,6 +265,16 @@ export default function DocPage() {
     staleTime: 15_000,
   })
   const claimsHere = docCaseNumber != null ? caseClaims?.get(docCaseNumber) : undefined
+  // This case's thread summary: whether questions to the owner wait for an answer.
+  const docStatus = typeof doc?.data?.status === 'string' ? (doc.data.status as string) : null
+  const { data: caseThreads } = useQuery<Map<number, ThreadSummary>>({
+    queryKey: ['case-threads', CORPUS_NS, `${docCaseNumber}:${docStatus}`],
+    queryFn: () => fetchCaseThreads(CORPUS_NS, docCaseNumber != null && id
+      ? [{ caseNumber: docCaseNumber, documentId: id, status: docStatus }] : []),
+    enabled: docCaseNumber != null && doc?.namespace === CORPUS_NS,
+    staleTime: 15_000,
+  })
+  const threadHere = docCaseNumber != null ? caseThreads?.get(docCaseNumber) : undefined
 
   // CASE-506: the include=peers projection carries only title/status/case_number
   // for response peers — NOT body/response_kind/response_seq — so fetch each
@@ -708,6 +719,16 @@ export default function DocPage() {
 
         {/* CASE-506: inline collapsible response thread */}
         {responseDocs && responseDocs.length > 0 && <CaseThread responses={responseDocs} links={responseLinks} />}
+        {isCase && caseNumber !== null && doc.namespace === CORPUS_NS && (
+          <CaseAnswer
+            key={`${id}:${!!threadHere?.awaitingOwner}`}
+            docId={id}
+            caseNumber={caseNumber}
+            caseTitle={docLabel(data, id)}
+            targetYac={typeof data.target_yac === 'string' ? data.target_yac : null}
+            waiting={!!threadHere?.awaitingOwner}
+          />
+        )}
       </article>
 
       {hasEdges && (

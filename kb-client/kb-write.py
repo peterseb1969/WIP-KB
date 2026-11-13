@@ -909,16 +909,21 @@ def parse_files_in_scope(body: str) -> tuple[dict, list[str]] | None:
     return {"files_change": change, "files_read": read}, bad
 
 
+_TYPES_CACHE: dict = {}
+
+
 def _type_fields(type_: str) -> set[str] | None:
     """The field names the configured namespace's template for TYPE declares, or
     None when the gateway does not say (a gateway older than the field list, or
     the type is not there). WIP refuses a field its template lacks, and a field a
     migration adds reaches each namespace at its own time, so a derived field is
-    sent only where this answers that it exists."""
-    try:
-        payload = gw_get(f"/types?namespace={urllib.parse.quote(NAMESPACE)}") or {}
-    except RuntimeError:
-        return None
+    sent only where this answers that it exists. Asked once per run."""
+    if "payload" not in _TYPES_CACHE:
+        try:
+            _TYPES_CACHE["payload"] = gw_get(f"/types?namespace={urllib.parse.quote(NAMESPACE)}") or {}
+        except RuntimeError:
+            return None
+    payload = _TYPES_CACHE["payload"]
     for t in payload.get("types") or []:
         if t.get("type") == type_ and isinstance(t.get("fields"), list):
             return set(t["fields"])
@@ -955,6 +960,64 @@ def derive_response_files(type_: str, data: dict, explicit: set[str]) -> None:
               f"fields yet — the file list stays in the body only", file=sys.stderr)
         return
     data.update(files)
+
+
+# A response may end with a `## Questions` section: questions put to the project
+# owner instead of being recommended outright. The KB lists the cases whose
+# questions wait for an answer, which needs the count as data, not as markdown a
+# reader parses; the client derives it here, as it does the file list.
+QUESTIONS_SECTION = "Questions"
+QUESTIONS_FIELD = "questions"
+_TOP_ITEM_RE = re.compile(r"^(?:\d+[.)]|[-*+])\s+\S")
+
+
+def parse_questions(body: str) -> int | None:
+    """How many questions a response's `## Questions` section asks, or None when it
+    has no such section. Each top-level list item is a question; an indented item
+    is an option under one. A section of prose with no list asks one. An empty
+    section asks none."""
+    lines = (body or "").splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        m = _SECTION_RE.match(ln)
+        if m and m.group(1).strip().rstrip(":").lower() == QUESTIONS_SECTION.lower():
+            start = i + 1
+            break
+    if start is None:
+        return None
+    items = 0
+    text = False
+    in_fence = False
+    for ln in lines[start:]:
+        if ln.lstrip().startswith("```"):
+            in_fence = not in_fence
+            text = True
+            continue
+        if in_fence:
+            continue
+        if re.match(r"^#{1,2}\s", ln):
+            break
+        if _TOP_ITEM_RE.match(ln):
+            items += 1
+        elif ln.strip():
+            text = True
+    return items if items else (1 if text else 0)
+
+
+def derive_response_questions(type_: str, data: dict, explicit: set[str]) -> None:
+    """Fill `questions` on a CASE_RESPONSE from its body's `## Questions` section,
+    where the namespace's template has the field. A value the writer set wins."""
+    if type_ != "CASE_RESPONSE" or QUESTIONS_FIELD in data or QUESTIONS_FIELD in explicit:
+        return
+    n = parse_questions(str(data.get("body") or ""))
+    if not n:
+        return
+    declared = _type_fields(type_)
+    if declared is None or QUESTIONS_FIELD not in declared:
+        print(f"note: CASE_RESPONSE in namespace {NAMESPACE} has no questions field yet — "
+              f"the questions are not listed as waiting for an answer", file=sys.stderr)
+        return
+    data[QUESTIONS_FIELD] = n
 
 
 # Types whose data.case_number names a case. A writer may spell it as the KB prints
@@ -998,6 +1061,7 @@ def cmd_write(type_: str, args: argparse.Namespace) -> int:
         print(f"ERROR: rejected — {e}", file=sys.stderr)
         return 1
     derive_response_files(type_, data, explicit)
+    derive_response_questions(type_, data, explicit)
     if (type_ == "CASE_RESPONSE" and data.get("response_kind") == "implement"
             and not args.no_hash_check):
         unpushed = check_implement_hashes(str(data.get("body") or ""), args.hash_repo or os.getcwd())

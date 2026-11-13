@@ -1,6 +1,6 @@
 import { wipFetchJson } from './wipBulk'
 import { wipClient } from './wipClient'
-import { applyHistory, summariseThread, type ThreadEntry, type ThreadSummary } from '../../server/lib/case-thread'
+import { applyHistory, sqlByPerson, sqlQuestions, summariseThread, type ThreadEntry, type ThreadSummary } from '../../server/lib/case-thread'
 export type { ThreadSummary } from '../../server/lib/case-thread'
 import { sqlHolds, sqlLapsed } from '../../server/lib/claims'
 
@@ -525,6 +525,54 @@ export async function fetchCaseClaims(
   return out
 }
 
+// Cases whose questions to the owner wait for an answer, for the home page's
+// "Waiting for you" panel: the latest response with questions has no later
+// response by a person, and the case is not implemented or closed (the rule is
+// case-thread.ts awaitingOwner, shared with the gateway). Oldest question first.
+export interface WaitingCase {
+  caseNumber: number
+  caseDocumentId: string
+  title: string | null
+  caseStatus: string | null
+  askedBy: string
+  questions: number
+  askedAt: string
+  responseSeq: number
+}
+export async function fetchAwaitingOwner(namespace: string): Promise<WaitingCase[]> {
+  if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
+  const { rows: has } = await reportingQuery<{ present: boolean }>(
+    namespace,
+    `SELECT to_regclass('"${namespace}"."doc_case_response"') IS NOT NULL AS present`,
+  )
+  if (!has[0]?.present) return []
+  const ns = `"${namespace}"`
+  const { rows } = await reportingQuery<{
+    case_number: number; document_id: string; title: string | null; case_status: string | null
+    author: string; questions: number; asked_at: string; response_seq: number
+  }>(
+    namespace,
+    `SELECT DISTINCT ON (c.case_number) c.case_number, c.document_id, c.title, c.data_status AS case_status,`
+      + ` r.author, ${sqlQuestions('r.')} AS questions, r.created_at AS asked_at, r.response_seq`
+      + ` FROM ${ns}."doc_case_record" c JOIN ${ns}."doc_case_response" r`
+      + `   ON r.case_number = c.case_number AND r.${ONLY_ACTIVE} AND ${sqlQuestions('r.')} > 0`
+      + ` WHERE c.${ONLY_ACTIVE} AND c.data_status NOT IN ('implemented', 'closed')`
+      + ` AND NOT EXISTS (SELECT 1 FROM ${ns}."doc_case_response" p WHERE p.case_number = c.case_number`
+      + `   AND p.${ONLY_ACTIVE} AND p.response_seq > r.response_seq AND ${sqlByPerson('p.')})`
+      + ` ORDER BY c.case_number, r.response_seq DESC`,
+    50000,
+  )
+  // A person's answer after the latest questions also follows every earlier one,
+  // so a case whose latest questions were answered has no row left at all, and
+  // DISTINCT ON keeps the latest asking response of each case that does.
+  return rows
+    .map((r) => ({
+      caseNumber: r.case_number, caseDocumentId: r.document_id, title: r.title, caseStatus: r.case_status,
+      askedBy: r.author, questions: r.questions, askedAt: r.asked_at, responseSeq: r.response_seq,
+    }))
+    .sort((a, b) => Date.parse(a.askedAt) - Date.parse(b.askedAt))
+}
+
 // Every claim in progress across the KB, for the home page's panel: claims that
 // hold a case (parked first, then by soonest lease end) and lapsed ones (active,
 // lease ran out, never released). The rule is server/lib/claims.ts, shared with
@@ -603,15 +651,18 @@ export async function fetchCaseThreads(
   )
   const entries = new Map<number, ThreadEntry[]>()
   if (has[0]?.present) {
-    const { rows } = await reportingQuery<{ case_number: number; response_kind: string; response_seq: number }>(
+    const { rows } = await reportingQuery<{
+      case_number: number; response_kind: string; response_seq: number; author: string | null; questions: number | null
+    }>(
       namespace,
-      `SELECT case_number, response_kind, response_seq FROM "${namespace}"."doc_case_response"`
+      `SELECT case_number, response_kind, response_seq, author, ${sqlQuestions()} AS questions`
+        + ` FROM "${namespace}"."doc_case_response"`
         + ` WHERE ${ONLY_ACTIVE} AND case_number IN (${[...byNum.keys()].join(',')})`,
       50000,
     )
     for (const r of rows) {
       const list = entries.get(r.case_number) ?? []
-      list.push({ response_kind: r.response_kind, response_seq: r.response_seq })
+      list.push({ response_kind: r.response_kind, response_seq: r.response_seq, author: r.author, questions: r.questions })
       entries.set(r.case_number, list)
     }
   }

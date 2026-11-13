@@ -3,6 +3,28 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-13 — Questions for the owner: find them, answer them (CASE-1290)
+
+- **Added (data model):** `CASE_RESPONSE` gains an optional `questions` integer: how
+  many questions the response's `## Questions` section puts to the owner. Seeded;
+  `tools/add-response-questions.py` adds it to an existing namespace (one version
+  event, merged into `cross_version_view`) and backfills the responses that already
+  have the section, re-posting only those, pinned to the new version, data unchanged
+  (dry run by default, `APPLY=1`, idempotent).
+- **Added (client 5.6.0):** `kb-write.py` counts the questions (top-level list items;
+  a prose paragraph is one) where the namespace's template has the field.
+  `case-fetch.py list --questions`; the Thread column says "N questions for the owner".
+- **Added (gateway):** `GET /cases` gives `awaiting_owner` and `open_questions` per
+  case and filters with `questions=1`. Waiting means the latest response with questions
+  has no later response by a person (an email author or WEB-UI) and the case is not
+  implemented or closed; the rule is `server/lib/case-thread.ts`, shared with the UI.
+- **Added (UI):** a "Waiting for you" panel on the home page, a "N questions" chip in
+  the case list, and an Answer box on the case page: a comment under the signed-in
+  user, then (by default) the case's respond flag raised again for its target.
+- **Changed (playbook):** `## Questions` is for the project owner only; how the owner
+  sees and answers them. CLAUDE.md's write-discipline section now lists every UI write
+  the guards admit.
+
 ## 2026-11-13 — Everything in progress, in one view (CASE-1285)
 
 - **Added (gateway):** `GET /server-api/kb/claims` lists every claim holding a case

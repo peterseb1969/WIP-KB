@@ -99,7 +99,7 @@ const SERVING_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb-client/install', 'the bootstrap shell script (curl | sh target)'],
 ]
 const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
-  ['GET', 'kb/cases?status=&filed_by=&severity=&type=&component=&app=&unanswered=1&claimed=held|none', 'list cases (faceted, server-side); each carries its claims and its response thread (counts, reopened, unanswered)'],
+  ['GET', 'kb/cases?status=&filed_by=&severity=&type=&component=&app=&unanswered=1&questions=1&claimed=held|none', 'list cases (faceted, server-side); each carries its claims and its response thread (counts, reopened, unanswered, questions waiting for the owner)'],
   ['GET', 'kb/claims?kind=&holder=&state=active|parked|lapsed', 'every claim in progress across the KB, with its case’s title and status: claims holding a case, then lapsed ones (lease ran out, never released)'],
   ['GET', 'kb/cases/:n?view=both|case|responses[&response=latest|<seq>]', 'one case: body, response thread, or both (default both)'],
   ['GET', 'kb/sessions  ·  kb/journeys/:day', 'list sessions / a journey day'],

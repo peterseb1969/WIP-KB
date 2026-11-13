@@ -16,6 +16,30 @@
 export interface ThreadEntry {
   response_kind: string
   response_seq: number
+  /** How many questions the response puts to the owner (its `## Questions` section). */
+  questions?: number | null
+  /** Who wrote it: a session id for an agent; an email, or WEB-UI, for a person. */
+  author?: string | null
+}
+
+/** A response written by a person (signed in, or the UI on an install without login). */
+export function byPerson(author: string | null | undefined): boolean {
+  const a = String(author || '')
+  return a === 'WEB-UI' || a.includes('@')
+}
+
+/**
+ * A response's question count as SQL over the CASE_RESPONSE reporting view. Read
+ * from the stored data rather than the view's column, so a namespace whose template
+ * has no `questions` field yet answers "none" instead of failing the query.
+ */
+export function sqlQuestions(p = ''): string {
+  return `NULLIF(${p}data_json->>'questions', '')::int`
+}
+
+/** `byPerson` as SQL. */
+export function sqlByPerson(p = ''): string {
+  return `(${p}author = 'WEB-UI' OR ${p}author LIKE '%@%')`
 }
 
 export interface ThreadSummary {
@@ -31,6 +55,14 @@ export interface ThreadSummary {
   unanswered: boolean
   /** The thread cannot rule out a reopen: check the case's earlier statuses. */
   needsHistory: boolean
+  /**
+   * Questions put to the owner that no person has answered: the latest response
+   * with questions has no later response by a person, and the case is not
+   * implemented or closed. Agents' comments do not answer the owner's questions.
+   */
+  awaitingOwner: boolean
+  /** How many questions that response asks (0 when nothing is waiting). */
+  openQuestions: number
 }
 
 const TERMINAL = new Set(['implemented', 'closed'])
@@ -39,10 +71,16 @@ export function summariseThread(status: string | null | undefined, entries: Thre
   const s: ThreadSummary = {
     respond: 0, implement: 0, comment: 0, close: 0,
     reopened: false, reanswered: false, unanswered: false, needsHistory: false,
+    awaitingOwner: false, openQuestions: 0,
   }
   let finishedSeq = -Infinity
   let respondSeq = -Infinity
+  let askedSeq = -Infinity
+  let asked = 0
+  let personSeq = -Infinity
   for (const e of entries) {
+    if ((e.questions ?? 0) > 0 && e.response_seq > askedSeq) { askedSeq = e.response_seq; asked = e.questions! }
+    if (byPerson(e.author)) personSeq = Math.max(personSeq, e.response_seq)
     const k = e.response_kind
     if (k === 'respond' || k === 'implement' || k === 'comment' || k === 'close') s[k]++
     if (k === 'implement' || k === 'close') finishedSeq = Math.max(finishedSeq, e.response_seq)
@@ -53,6 +91,8 @@ export function summariseThread(status: string | null | undefined, entries: Thre
   s.reanswered = s.reopened && respondSeq > finishedSeq
   s.unanswered = status === 'open' && s.respond === 0 && !s.reopened
   s.needsHistory = s.unanswered
+  s.awaitingOwner = !terminal && askedSeq > -Infinity && personSeq < askedSeq
+  s.openQuestions = s.awaitingOwner ? asked : 0
   return s
 }
 
@@ -67,6 +107,12 @@ export function applyHistory(s: ThreadSummary, earlierStatuses: Array<string | n
 export function threadCounts(s: ThreadSummary): string {
   return [['R', s.respond], ['I', s.implement], ['C', s.comment], ['X', s.close]]
     .filter(([, n]) => (n as number) > 0).map(([k, n]) => `${k}${n}`).join(' ')
+}
+
+/** The questions marker, e.g. "2 questions", or '' when none wait for the owner. */
+export function questionsMarker(s: ThreadSummary): string {
+  if (!s.awaitingOwner) return ''
+  return `${s.openQuestions} question${s.openQuestions === 1 ? '' : 's'}`
 }
 
 /** The marker a list shows, or '' for none. */

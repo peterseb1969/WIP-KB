@@ -1,4 +1,4 @@
-import { threadCounts, threadMarker, type ThreadSummary } from '../../server/lib/case-thread'
+import { questionsMarker, threadCounts, threadMarker, type ThreadSummary } from '../../server/lib/case-thread'
 
 /**
  * A case's thread at a glance on the case list: response counts ("R1 I1 C3":
@@ -9,8 +9,17 @@ export function ThreadChip({ thread }: { thread: ThreadSummary | undefined }) {
   if (!thread) return null
   const counts = threadCounts(thread)
   const marker = threadMarker(thread)
+  const asks = questionsMarker(thread)
   return (
     <>
+      {asks && (
+        <span
+          title="A response asks you questions, and no one has answered them yet"
+          className="rounded-full bg-primary px-2 py-0.5 text-xs text-white"
+        >
+          {asks}
+        </span>
+      )}
       {counts && (
         <span
           title="Responses: R respond, I implement, C comment, X close"

@@ -40,7 +40,7 @@ const TARGET_YAC_TERMINOLOGY = 'KB_TARGET_YAC'
 // on the same doc upserts (re-arms the dispatch queue), never duplicates.
 // doc_status must be sent explicitly — the platform does not apply the
 // template's default_value on create; 'published' means pending dispatch.
-async function createFlagWithEdge(opts: {
+export async function createFlagWithEdge(opts: {
   namespace: string
   sourceDocId: string
   flagType: FlagIntent['id']

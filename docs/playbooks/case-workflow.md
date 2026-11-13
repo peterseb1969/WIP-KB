@@ -318,8 +318,16 @@ evidence, options and cost — instead of recommending it>
 - **Scope** is a judgement, not a file list: whether the case asks for the right thing.
   Files in scope lists what the recommended fix touches, for the scheduler; a widened
   scope that is only a question lists no files there.
-- **Questions** is optional. When it holds the main point, the recommendation is
-  *question for the project owner*, and nothing is implemented until the owner answers.
+- **Questions** is optional, and it is **for the project owner only**. A question for
+  another agent is a comment on that agent's case, not a section here. When the
+  questions hold the main point, the recommendation is *question for the project
+  owner*, and nothing is implemented until the owner answers. `kb-write.py` counts the
+  questions into the response's `questions` field (each top-level list item is one; a
+  prose paragraph is one). The case then shows as **waiting for the owner** until a
+  person writes in the thread: on the KB's home page, as a chip in the case list, and
+  in `kbc case-fetch.py list --questions`. The owner answers with the case page's
+  Answer box: a comment under their name, and by default the case's respond flag is
+  raised again so the work continues from the answer.
 
 Then, two writes — the response doc + the status transition:
 

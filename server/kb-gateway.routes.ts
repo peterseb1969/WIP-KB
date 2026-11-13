@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto'
 import express, { Router, type Request, type Response, type NextFunction } from 'express'
 import { createCorpusNamespace, NamespaceNotReserved } from './lib/bootstrap.js'
 import { identityValue } from './lib/identity-value.js'
-import { applyHistory, summariseThread, type ThreadEntry } from './lib/case-thread.js'
+import { applyHistory, sqlByPerson, sqlQuestions, summariseThread, type ThreadEntry } from './lib/case-thread.js'
 import { resolveWipKey } from './lib/wip-key.js'
 import { MATCH_PAGE_SIZE, describeMatch, matchFilters, resolveMatch, validateMatch } from './lib/patch-match.js'
 import { holds, leaseUntil, sqlHolds, sqlLapsed, verdict, type Claim, type ClaimRule } from './lib/claims.js'
@@ -1091,12 +1091,15 @@ async function readThreads(nums: number[], ns: string, key: string): Promise<Map
   try {
     const d = await wipReq('POST', '/api/reporting-sync/query', key, {
       namespace: ns, max_rows: REPORTING_MAX_ROWS,
-      sql: `SELECT case_number, response_kind, response_seq FROM doc_case_response`
+      sql: `SELECT case_number, response_kind, response_seq, author, ${SQL_QUESTIONS} AS questions FROM doc_case_response`
         + ` WHERE status = 'active' AND case_number IN (${nums.map((n) => Math.trunc(n)).join(',')})`,
     })
     for (const r of (d.rows || []) as AnyObj[]) {
       const list = out.get(Number(r.case_number)) || []
-      list.push({ response_kind: String(r.response_kind), response_seq: Number(r.response_seq) })
+      list.push({
+        response_kind: String(r.response_kind), response_seq: Number(r.response_seq),
+        author: r.author ?? null, questions: r.questions == null ? null : Number(r.questions),
+      })
       out.set(Number(r.case_number), list)
     }
     return out
@@ -1124,6 +1127,29 @@ async function unansweredCandidates(ns: string, key: string): Promise<number[] |
   }
 }
 
+const SQL_QUESTIONS = sqlQuestions()
+const SQL_BY_PERSON = sqlByPerson
+
+// Cases whose latest questions no person has answered and which are not finished:
+// the candidates for `GET /cases?questions=1` (case-thread.ts awaitingOwner).
+async function awaitingOwnerCandidates(ns: string, key: string): Promise<number[] | null> {
+  try {
+    const d = await wipReq('POST', '/api/reporting-sync/query', key, {
+      namespace: ns, max_rows: REPORTING_MAX_ROWS,
+      sql: `SELECT c.case_number FROM doc_case_record c`
+        + ` JOIN (SELECT case_number, max(response_seq) AS asked FROM doc_case_response`
+        + `   WHERE status = 'active' AND ${SQL_QUESTIONS} > 0 GROUP BY case_number) q ON q.case_number = c.case_number`
+        + ` WHERE c.status = 'active' AND c.data_status NOT IN ('implemented', 'closed')`
+        + ` AND NOT EXISTS (SELECT 1 FROM doc_case_response p WHERE p.case_number = c.case_number`
+        + `   AND p.status = 'active' AND p.response_seq > q.asked AND ${SQL_BY_PERSON('p.')})`,
+    })
+    return ((d.rows || []) as AnyObj[]).map((r) => Number(r.case_number)).filter(Number.isFinite)
+  } catch (e) {
+    console.warn(`[kb-gateway] questions candidates unavailable in ${ns}: ${(e as Error).message}`)
+    return null
+  }
+}
+
 // The workflow statuses a case had before its current version. Read only for a row
 // the thread cannot settle (summariseThread's needsHistory): reporting keeps the
 // latest version only, so each earlier version is one read. Capped, newest first.
@@ -1147,10 +1173,11 @@ async function earlierStatuses(documentId: string, ns: string, key: string): Pro
   }
 }
 
-// GET /cases?status=&since=&unanswered=1&claimed=held|none&page=&page_size=  (since: ISO date, on updated_at)
+// GET /cases?status=&since=&unanswered=1&questions=1&claimed=held|none&page=&page_size=  (since: ISO date, on updated_at)
 // Each item carries its thread when reporting can read it: responses (counts by
-// kind), reopened, reanswered, unanswered. unanswered=1 lists only open cases
-// that were never answered and are not reopens.
+// kind), reopened, reanswered, unanswered, awaiting_owner, open_questions.
+// unanswered=1 lists only open cases that were never answered and are not
+// reopens; questions=1 only cases whose questions to the owner wait for an answer.
 router.get('/cases', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
@@ -1193,6 +1220,13 @@ router.get('/cases', async (req, res) => {
       if (!cand.length) return res.json({ total: 0, page, pages: 0, items: [] })
       filters.push({ field: 'data.case_number', operator: 'in', value: cand })
     }
+    // questions=1: only cases whose questions to the owner wait for an answer.
+    if (req.query.questions === '1' || req.query.questions === 'true') {
+      const cand = await awaitingOwnerCandidates(ns, key)
+      if (cand === null) return res.status(503).json({ error: 'cannot read case threads from reporting; try again' })
+      if (!cand.length) return res.json({ total: 0, page, pages: 0, items: [] })
+      filters.push({ field: 'data.case_number', operator: 'in', value: cand })
+    }
     // claimed=held: only cases a claim holds now; claimed=none: only cases none holds.
     const claimed = String(req.query.claimed || '')
     if (claimed && claimed !== 'held' && claimed !== 'none') {
@@ -1222,6 +1256,8 @@ router.get('/cases', async (req, res) => {
         it.reopened = s.reopened
         it.reanswered = s.reanswered
         it.unanswered = s.unanswered
+        it.awaiting_owner = s.awaitingOwner
+        it.open_questions = s.openQuestions
       }
     }
     let total = d.total

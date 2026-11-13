@@ -171,6 +171,8 @@ def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
         params["app"] = args.app
     if getattr(args, "unanswered", False):
         params["unanswered"] = "1"
+    if getattr(args, "questions", False):
+        params["questions"] = "1"
     if getattr(args, "claimed", False):
         params["claimed"] = "held"
     elif getattr(args, "unclaimed", False):
@@ -204,6 +206,8 @@ def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
             "reopened": it.get("reopened"),
             "reanswered": it.get("reanswered"),
             "unanswered": it.get("unanswered"),
+            "awaiting_owner": it.get("awaiting_owner"),
+            "open_questions": it.get("open_questions"),
             "thread": _thread_text(it),
         })
     return rows
@@ -251,7 +255,9 @@ def _thread_text(it: dict) -> str:
                                                     ("C", "comment"), ("X", "close")) if r.get(f))
     marker = ("reopened · re-answered" if it.get("reanswered") else "reopened") if it.get("reopened") \
         else ("unanswered" if it.get("unanswered") else "")
-    return " · ".join(x for x in (counts, marker) if x)
+    n = it.get("open_questions") or 0
+    asks = f"{n} question{'' if n == 1 else 's'} for the owner" if it.get("awaiting_owner") else ""
+    return " · ".join(x for x in (counts, marker, asks) if x)
 
 
 def _format_case_table(rows: list[dict]) -> str:
@@ -651,6 +657,8 @@ def main() -> None:
     claimed_g = list_sp.add_mutually_exclusive_group()
     claimed_g.add_argument("--claimed", action="store_true", help="only cases a claim holds now")
     claimed_g.add_argument("--unclaimed", action="store_true", help="only cases no claim holds")
+    list_sp.add_argument("--questions", action="store_true",
+                         help="only cases whose questions to the owner wait for an answer")
     list_sp.add_argument("--unanswered", action="store_true",
                          help="only open cases never answered (no respond response) that are not reopens")
     list_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")

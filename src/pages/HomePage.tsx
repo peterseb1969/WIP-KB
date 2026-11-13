@@ -7,6 +7,7 @@ import { CaseLabel } from '../components/CaseLabel'
 import { CaseStats } from '../components/CaseStats'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 import { InProgressPanel } from '../components/InProgressPanel'
+import { WaitingPanel } from '../components/WaitingPanel'
 import { formatWipDate, formatWipDateTime } from '../lib/datetime'
 
 // Structural / config doc types — not KB content, hidden from the start page.
@@ -316,6 +317,7 @@ export default function HomePage() {
         <CaseStats open={caseStats.open} responded={caseStats.responded} />
       </div>
 
+      <WaitingPanel namespace={CORPUS_NS} />
       <InProgressPanel namespace={CORPUS_NS} />
 
       <div className="space-y-3">
