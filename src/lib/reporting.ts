@@ -1,6 +1,6 @@
 import { wipFetchJson } from './wipBulk'
 import { wipClient } from './wipClient'
-import { applyHistory, sqlByPerson, sqlQuestions, summariseThread, type ThreadEntry, type ThreadSummary } from '../../server/lib/case-thread'
+import { applyHistory, sqlAnswersOwner, sqlOwnerAnswer, sqlQuestions, summariseThread, type ThreadEntry, type ThreadSummary } from '../../server/lib/case-thread'
 export type { ThreadSummary } from '../../server/lib/case-thread'
 import { sqlHolds, sqlLapsed } from '../../server/lib/claims'
 
@@ -558,11 +558,11 @@ export async function fetchAwaitingOwner(namespace: string): Promise<WaitingCase
       + `   ON r.case_number = c.case_number AND r.${ONLY_ACTIVE} AND ${sqlQuestions('r.')} > 0`
       + ` WHERE c.${ONLY_ACTIVE} AND c.data_status NOT IN ('implemented', 'closed')`
       + ` AND NOT EXISTS (SELECT 1 FROM ${ns}."doc_case_response" p WHERE p.case_number = c.case_number`
-      + `   AND p.${ONLY_ACTIVE} AND p.response_seq > r.response_seq AND ${sqlByPerson('p.')})`
+      + `   AND p.${ONLY_ACTIVE} AND p.response_seq > r.response_seq AND ${sqlAnswersOwner('p.')})`
       + ` ORDER BY c.case_number, r.response_seq DESC`,
     50000,
   )
-  // A person's answer after the latest questions also follows every earlier one,
+  // An answer after the latest questions also follows every earlier one,
   // so a case whose latest questions were answered has no row left at all, and
   // DISTINCT ON keeps the latest asking response of each case that does.
   return rows
@@ -653,16 +653,21 @@ export async function fetchCaseThreads(
   if (has[0]?.present) {
     const { rows } = await reportingQuery<{
       case_number: number; response_kind: string; response_seq: number; author: string | null; questions: number | null
+      owner_answer: boolean | null
     }>(
       namespace,
-      `SELECT case_number, response_kind, response_seq, author, ${sqlQuestions()} AS questions`
+      `SELECT case_number, response_kind, response_seq, author, ${sqlQuestions()} AS questions,`
+        + ` ${sqlOwnerAnswer()} AS owner_answer`
         + ` FROM "${namespace}"."doc_case_response"`
         + ` WHERE ${ONLY_ACTIVE} AND case_number IN (${[...byNum.keys()].join(',')})`,
       50000,
     )
     for (const r of rows) {
       const list = entries.get(r.case_number) ?? []
-      list.push({ response_kind: r.response_kind, response_seq: r.response_seq, author: r.author, questions: r.questions })
+      list.push({
+        response_kind: r.response_kind, response_seq: r.response_seq, author: r.author,
+        questions: r.questions, owner_answer: r.owner_answer === true,
+      })
       entries.set(r.case_number, list)
     }
   }

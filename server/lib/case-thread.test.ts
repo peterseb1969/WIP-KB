@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { applyHistory, byPerson, questionsMarker, summariseThread, threadCounts, threadMarker } from './case-thread.ts'
+import { answersOwner, applyHistory, byPerson,questionsMarker, summariseThread, threadCounts, threadMarker } from './case-thread.ts'
 
 const t = (...kinds: string[]) => kinds.map((k, i) => ({ response_kind: k, response_seq: i + 1 }))
 
@@ -115,6 +115,40 @@ test('a finished case waits for nothing', () => {
 
 test('responses without questions never wait', () => {
   assert.equal(summariseThread('responded', [q(1, 'respond', 'BE-YAC-20261113-005434')]).awaitingOwner, false)
+})
+
+test("a session's response marked as the owner's answer answers them (CASE-1291#2)", () => {
+  const s = summariseThread('responded', [
+    q(1, 'respond', 'APP-KB-20261113-182018', 2),
+    { ...q(2, 'comment', 'APP-KB-20261113-182018'), owner_answer: true }])
+  assert.equal(s.awaitingOwner, false)
+  assert.equal(s.openQuestions, 0)
+})
+
+test('an unmarked comment by the same session still leaves them waiting', () => {
+  const s = summariseThread('responded', [
+    q(1, 'respond', 'APP-KB-20261113-182018', 2),
+    { ...q(2, 'comment', 'APP-KB-20261113-182018'), owner_answer: false }])
+  assert.equal(s.awaitingOwner, true)
+})
+
+test('a later implement or close settles them, also after a reopen (prod CASE-1272)', () => {
+  for (const kind of ['implement', 'close']) {
+    const s = summariseThread('open', [
+      q(1, 'comment', 'FRanC-20261112-094321'), q(2, 'respond', 'BE-YAC-20261113-005434', 1),
+      q(3, kind, 'BE-YAC-20261113-005434'), q(4, 'comment', 'FRanC-20261112-094321')])
+    assert.equal(s.awaitingOwner, false, kind)
+    assert.equal(s.reopened, true, kind)
+  }
+})
+
+test('answersOwner: person, owner mark, implement or close; nothing else', () => {
+  assert.equal(answersOwner({ author: 'peter@example.org', response_kind: 'comment' }), true)
+  assert.equal(answersOwner({ author: 'FRanC-20261113-180909', response_kind: 'comment', owner_answer: true }), true)
+  assert.equal(answersOwner({ author: 'BE-YAC-20261113-005434', response_kind: 'implement' }), true)
+  assert.equal(answersOwner({ author: 'BE-YAC-20261113-005434', response_kind: 'close' }), true)
+  assert.equal(answersOwner({ author: 'BE-YAC-20261113-005434', response_kind: 'respond' }), false)
+  assert.equal(answersOwner({ author: 'FRanC-20261113-180909', response_kind: 'comment', owner_answer: null }), false)
 })
 
 test('byPerson tells people from agents', () => {

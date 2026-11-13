@@ -174,6 +174,30 @@ check("no section: nothing sent, no note", ("questions" in d, err), (False, ""))
 d, err = derive_q({"response_kind": "respond", "body": Q, "questions": 7}, {"questions"})
 check("a value the writer set wins", d["questions"], 7)
 
+
+def owner_answer(type_, data, flag, declared):
+    real = kb._type_fields
+    kb._type_fields = lambda t: declared
+    try:
+        return kb.apply_owner_answer(type_, data, flag), data
+    finally:
+        kb._type_fields = real
+
+
+err, d = owner_answer("CASE_RESPONSE", {"body": "x"}, True, {"body", "owner_answer"})
+check("--owner-answer where declared: set, no refusal", (err, d.get("owner_answer")), (None, True))
+err, d = owner_answer("CASE_RESPONSE", {"body": "x"}, True, {"body"})
+check("--owner-answer where the template lacks it: refused, nothing set",
+      (err is not None and "no owner_answer field" in err, "owner_answer" in d), (True, False))
+err, d = owner_answer("CASE_RESPONSE", {"body": "x"}, True, None)
+check("--owner-answer when the gateway lists no fields: refused", err is not None, True)
+err, d = owner_answer("CASE_RESPONSE", {"body": "x", "owner_answer": True}, False, {"body"})
+check("owner_answer typed as a field is checked the same way", err is not None, True)
+err, d = owner_answer("CASE_RECORD", {"body": "x"}, True, {"body", "owner_answer"})
+check("--owner-answer on another type: refused", "CASE_RESPONSE only" in (err or ""), True)
+err, d = owner_answer("CASE_RESPONSE", {"body": "x"}, False, {"body"})
+check("no mark: nothing asked, nothing set", (err, "owner_answer" in d), (None, False))
+
 if _fails:
     print("FAIL:")
     for f in _fails:

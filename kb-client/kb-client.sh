@@ -163,7 +163,10 @@ bundle, kbc, ver = sys.argv[1], sys.argv[2], sys.argv[3]
 d = json.load(open(bundle))
 for name, content in d["files"].items():
     src = content if isinstance(content, str) else content.get("content", "")
-    open(os.path.join(kbc, name), "w").write(src)
+    path = os.path.join(kbc, name)
+    open(path, "w").write(src)
+    if name.endswith(".sh"):
+        os.chmod(path, 0o755)  # the runner is also called directly, not only through kbc
 open(os.path.join(kbc, ".bundle_digest"), "w").write(ver)  # refetch gate (bundle_digest; client_version fallback)
 PY
   rm -f "$tmp"

@@ -20,6 +20,8 @@ export interface ThreadEntry {
   questions?: number | null
   /** Who wrote it: a session id for an agent; an email, or WEB-UI, for a person. */
   author?: string | null
+  /** The project owner's answer, written down by whoever typed it (a session). */
+  owner_answer?: boolean | null
 }
 
 /** A response written by a person (signed in, or the UI on an install without login). */
@@ -42,6 +44,28 @@ export function sqlByPerson(p = ''): string {
   return `(${p}author = 'WEB-UI' OR ${p}author LIKE '%@%')`
 }
 
+/**
+ * Whether a response settles the owner's questions asked before it: a person wrote
+ * it; or it records the owner's answer (a session wrote down what the owner said in
+ * a chat or typed in a terminal); or it implements or closes the case, which shows
+ * the decisions were taken. An agent's plain comment or respond does not.
+ */
+export function answersOwner(e: Pick<ThreadEntry, 'author' | 'owner_answer' | 'response_kind'>): boolean {
+  return byPerson(e.author) || e.owner_answer === true
+    || e.response_kind === 'implement' || e.response_kind === 'close'
+}
+
+/** `answersOwner` as SQL. owner_answer is read from the stored data, as `sqlQuestions` is. */
+export function sqlAnswersOwner(p = ''): string {
+  return `(${sqlByPerson(p)} OR ${p}data_json->>'owner_answer' = 'true'`
+    + ` OR ${p}response_kind IN ('implement', 'close'))`
+}
+
+/** A response's owner_answer mark as SQL, for selects that feed `summariseThread`. */
+export function sqlOwnerAnswer(p = ''): string {
+  return `(${p}data_json->>'owner_answer' = 'true')`
+}
+
 export interface ThreadSummary {
   respond: number
   implement: number
@@ -56,9 +80,9 @@ export interface ThreadSummary {
   /** The thread cannot rule out a reopen: check the case's earlier statuses. */
   needsHistory: boolean
   /**
-   * Questions put to the owner that no person has answered: the latest response
-   * with questions has no later response by a person, and the case is not
-   * implemented or closed. Agents' comments do not answer the owner's questions.
+   * Questions put to the owner that nobody has settled: the latest response with
+   * questions has no later response that answers the owner (`answersOwner`), and
+   * the case is not implemented or closed. Agents' plain comments do not count.
    */
   awaitingOwner: boolean
   /** How many questions that response asks (0 when nothing is waiting). */
@@ -77,10 +101,10 @@ export function summariseThread(status: string | null | undefined, entries: Thre
   let respondSeq = -Infinity
   let askedSeq = -Infinity
   let asked = 0
-  let personSeq = -Infinity
+  let answeredSeq = -Infinity
   for (const e of entries) {
     if ((e.questions ?? 0) > 0 && e.response_seq > askedSeq) { askedSeq = e.response_seq; asked = e.questions! }
-    if (byPerson(e.author)) personSeq = Math.max(personSeq, e.response_seq)
+    if (answersOwner(e)) answeredSeq = Math.max(answeredSeq, e.response_seq)
     const k = e.response_kind
     if (k === 'respond' || k === 'implement' || k === 'comment' || k === 'close') s[k]++
     if (k === 'implement' || k === 'close') finishedSeq = Math.max(finishedSeq, e.response_seq)
@@ -91,7 +115,7 @@ export function summariseThread(status: string | null | undefined, entries: Thre
   s.reanswered = s.reopened && respondSeq > finishedSeq
   s.unanswered = status === 'open' && s.respond === 0 && !s.reopened
   s.needsHistory = s.unanswered
-  s.awaitingOwner = !terminal && askedSeq > -Infinity && personSeq < askedSeq
+  s.awaitingOwner = !terminal && askedSeq > -Infinity && answeredSeq < askedSeq
   s.openQuestions = s.awaitingOwner ? asked : 0
   return s
 }

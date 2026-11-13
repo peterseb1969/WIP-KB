@@ -3,6 +3,17 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-13 — An owner's answer counts wherever it is written (CASE-1313)
+
+- **Added (data model):** `CASE_RESPONSE` gains an optional boolean `owner_answer`:
+  the response records the project owner's answer, written down by a session.
+  `tools/add-response-owner-answer.py` adds it; nothing is backfilled.
+- **Changed (waiting rule):** questions stop waiting at a later response by a person,
+  one marked `owner_answer`, or an `implement` or `close` (`server/lib/case-thread.ts`
+  `answersOwner`, shared by the gateway and the UI).
+- **Added (client 5.7.0):** `kb-write.py --owner-answer`, refused where the namespace's
+  template lacks the field. The client runner is installed executable.
+
 ## 2026-11-13 — Questions for the owner: find them, answer them (CASE-1290)
 
 - **Added (data model):** `CASE_RESPONSE` gains an optional `questions` integer: how

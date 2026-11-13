@@ -323,11 +323,19 @@ evidence, options and cost — instead of recommending it>
   questions hold the main point, the recommendation is *question for the project
   owner*, and nothing is implemented until the owner answers. `kb-write.py` counts the
   questions into the response's `questions` field (each top-level list item is one; a
-  prose paragraph is one). The case then shows as **waiting for the owner** until a
-  person writes in the thread: on the KB's home page, as a chip in the case list, and
-  in `kbc case-fetch.py list --questions`. The owner answers with the case page's
-  Answer box: a comment under their name, and by default the case's respond flag is
-  raised again so the work continues from the answer.
+  prose paragraph is one). The case then shows as **waiting for the owner**: on the
+  KB's home page, as a chip in the case list, and in `kbc case-fetch.py list
+  --questions`. It stops waiting at the first later response that is the owner's
+  answer, or an `implement` or `close` (the decisions were taken):
+  - **In the browser**, the owner answers with the case page's Answer box: a comment
+    under their name, and by default the case's respond flag is raised again so the
+    work continues from the answer.
+  - **Anywhere else** (the owner typing in a terminal, or deciding in a chat with an
+    agent), the response that records the answer carries `--owner-answer`:
+    `kbc kb-write.py CASE_RESPONSE answer.md --edge RESPONDS_TO:CASE_RECORD:<n> --owner-answer`.
+    The author stays the session that wrote it. Use it only for what the owner
+    actually said, quoted or attributed in the body. It raises no flag. It is refused
+    where the namespace's template has no `owner_answer` field yet.
 
 Then, two writes — the response doc + the status transition:
 

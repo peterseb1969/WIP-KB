@@ -25,6 +25,9 @@ Usage:
     --format text|json output shape (default text)
     --hash-repo PATH   CASE_RESPONSE implement: check cited commits in PATH, not the cwd
     --no-hash-check    CASE_RESPONSE implement: skip that check
+    --owner-answer     CASE_RESPONSE: this response is the project owner's answer
+                       (written down by whoever typed it); refused where the
+                       namespace's template has no owner_answer field
 
 Case attribution (CASE_RECORD filed_by / authored_by, CASE_RESPONSE author) is
 filled from .claude/.session-id when omitted; a typed value that is not a session
@@ -1004,6 +1007,31 @@ def parse_questions(body: str) -> int | None:
     return items if items else (1 if text else 0)
 
 
+# A response written in the browser is a person's by its author (an email, or
+# WEB-UI). An answer the owner gives in a chat, or types in a terminal, is written
+# by a session, so the response says so itself: owner_answer. Its waiting cases
+# count it as the owner's answer; the author stays the session that wrote it.
+OWNER_ANSWER_FIELD = "owner_answer"
+
+
+def apply_owner_answer(type_: str, data: dict, owner_answer: bool) -> str | None:
+    """Set owner_answer on a CASE_RESPONSE marked --owner-answer, or say why not.
+    Refused, not warned, where the template lacks the field: an answer that is
+    written but never counts as one is the failure the mark exists to prevent."""
+    if not owner_answer and OWNER_ANSWER_FIELD not in data:
+        return None
+    if type_ != "CASE_RESPONSE":
+        return f"--owner-answer applies to CASE_RESPONSE only, not {type_}"
+    declared = _type_fields(type_)
+    if declared is None or OWNER_ANSWER_FIELD not in declared:
+        return (f"CASE_RESPONSE in namespace {NAMESPACE} has no {OWNER_ANSWER_FIELD} field yet, "
+                f"so this answer would not count as the owner's. Answer from the case page, "
+                f"or wait for the namespace's migration. Nothing was written.")
+    if owner_answer:
+        data[OWNER_ANSWER_FIELD] = True
+    return None
+
+
 def derive_response_questions(type_: str, data: dict, explicit: set[str]) -> None:
     """Fill `questions` on a CASE_RESPONSE from its body's `## Questions` section,
     where the namespace's template has the field. A value the writer set wins."""
@@ -1062,6 +1090,10 @@ def cmd_write(type_: str, args: argparse.Namespace) -> int:
         return 1
     derive_response_files(type_, data, explicit)
     derive_response_questions(type_, data, explicit)
+    refusal = apply_owner_answer(type_, data, bool(getattr(args, "owner_answer", False)))
+    if refusal:
+        print(f"ERROR: rejected — {refusal}", file=sys.stderr)
+        return 1
     if (type_ == "CASE_RESPONSE" and data.get("response_kind") == "implement"
             and not args.no_hash_check):
         unpushed = check_implement_hashes(str(data.get("body") or ""), args.hash_repo or os.getcwd())
@@ -1268,6 +1300,9 @@ def main() -> int:
     ap.add_argument("--no-hash-check", action="store_true",
                     help="CASE_RESPONSE implement: skip the check that cited commits are on a "
                          "remote branch (for a fix that is legitimately not a pushed commit)")
+    ap.add_argument("--owner-answer", action="store_true",
+                    help="CASE_RESPONSE: this response is the project owner's answer, written down "
+                         "by this session; the case stops waiting for the owner")
     ap.add_argument("--retire", action="store_true",
                     help="YAC_MEMORY with a directory: mark EVERY record of the owner whose file "
                          "this directory lacks as deprecated (one-off cleanup). Only when this "
