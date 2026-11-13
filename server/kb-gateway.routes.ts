@@ -964,6 +964,10 @@ router.get('/read/:type', async (req, res) => {
     const n = Number(s)
     if (s !== '' && Number.isFinite(n) && String(n) === s)
       filters.push({ field: `data.${k}`, operator: 'in', value: [s, n] })
+    // A boolean field (AGENT_IDENTITY.active) is stored as a JSON boolean, which the
+    // string "true" never equals: match both, as for numbers.
+    else if (s === 'true' || s === 'false')
+      filters.push({ field: `data.${k}`, operator: 'in', value: [s, s === 'true'] })
     else
       filters.push({ field: `data.${k}`, operator: 'eq', value: String(v) })
   }
