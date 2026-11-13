@@ -3,6 +3,21 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-13 — Everything in progress, in one view (CASE-1285)
+
+- **Added (gateway):** `GET /server-api/kb/claims` lists every claim holding a case
+  across the KB (parked first, then by soonest lease end) with its case's title and
+  status, and separately the claims whose lease ran out without a release.
+  `GET /cases` gains `claimed=held|none`.
+- **Added (client 5.5.0):** `case-fetch.py claims` (`--kind`, `--holder`,
+  `--state active|parked|lapsed`, `--format json`); `list --claimed` / `--unclaimed`.
+- **Added (UI):** an "In progress" panel on the home page, hidden when nothing is
+  claimed.
+- **Changed:** the "holds" rule as SQL (`sqlHolds`, `sqlLapsed`) lives in
+  `server/lib/claims.ts` beside `holds`, shared by the gateway and the UI. The Client
+  page's endpoint table also catches up with CASE-1281 (`unanswered=`) and CASE-1041
+  (who may create a knowledge base).
+
 ## 2026-11-13 — Case lists show the thread: reopened or never answered (CASE-1281)
 
 - **Added (gateway):** `GET /server-api/kb/cases` gives each case its thread when

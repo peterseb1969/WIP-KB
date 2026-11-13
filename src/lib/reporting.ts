@@ -2,6 +2,7 @@ import { wipFetchJson } from './wipBulk'
 import { wipClient } from './wipClient'
 import { applyHistory, summariseThread, type ThreadEntry, type ThreadSummary } from '../../server/lib/case-thread'
 export type { ThreadSummary } from '../../server/lib/case-thread'
+import { sqlHolds, sqlLapsed } from '../../server/lib/claims'
 
 // Read-only SQL against the reporting-sync PostgreSQL layer. Tables are per
 // template — "<namespace>"."doc_<template_value>", one row per latest document
@@ -522,6 +523,59 @@ export async function fetchCaseClaims(
     out.set(r.case_number, list)
   }
   return out
+}
+
+// Every claim in progress across the KB, for the home page's panel: claims that
+// hold a case (parked first, then by soonest lease end) and lapsed ones (active,
+// lease ran out, never released). The rule is server/lib/claims.ts, shared with
+// the gateway's GET /claims that kbc reads. A namespace without the claim model
+// has none.
+export interface ClaimInProgress {
+  caseNumber: number
+  caseDocumentId: string | null
+  title: string | null
+  caseStatus: string | null
+  kind: string
+  holder: string
+  state: 'active' | 'parked'
+  since: string | null
+  leaseUntil: string | null
+  note: string | null
+  lapsed: boolean
+}
+export async function fetchClaimsInProgress(namespace: string): Promise<{ holding: ClaimInProgress[]; lapsed: ClaimInProgress[] }> {
+  if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
+  const empty = { holding: [], lapsed: [] }
+  const { rows: has } = await reportingQuery<{ present: boolean }>(
+    namespace,
+    `SELECT to_regclass('"${namespace}"."doc_case_claim"') IS NOT NULL AS present`,
+  )
+  if (!has[0]?.present) return empty
+  const { rows } = await reportingQuery<{
+    case_number: number; claim_kind: string; holder: string; state: string; since: string | null
+    lease_until: string | null; note: string | null; title: string | null; case_status: string | null; lapsed: boolean
+    case_document_id: string | null
+  }>(
+    namespace,
+    `SELECT c.case_number, c.claim_kind, c.holder, c.state, c.since, c.lease_until, c.note,`
+      + ` r.title, r.data_status AS case_status, r.document_id AS case_document_id, ${sqlLapsed('c.')} AS lapsed`
+      + ` FROM "${namespace}"."doc_case_claim" c`
+      + ` LEFT JOIN "${namespace}"."doc_case_record" r ON r.case_number = c.case_number AND r.${ONLY_ACTIVE}`
+      + ` WHERE c.${ONLY_ACTIVE} AND (${sqlHolds('c.')} OR ${sqlLapsed('c.')})`,
+    50000,
+  )
+  const all: ClaimInProgress[] = rows.map((r) => ({
+    caseNumber: r.case_number, caseDocumentId: r.case_document_id, title: r.title, caseStatus: r.case_status, kind: r.claim_kind,
+    holder: r.holder, state: r.state as 'active' | 'parked', since: r.since, leaseUntil: r.lease_until,
+    note: r.note, lapsed: !!r.lapsed,
+  }))
+  const t = (s: string | null) => (s ? Date.parse(s) : 0)
+  return {
+    holding: all.filter((c) => !c.lapsed).sort((a, b) =>
+      (a.state === 'parked' ? 0 : 1) - (b.state === 'parked' ? 0 : 1)
+      || (a.state === 'parked' ? t(a.since) - t(b.since) : t(a.leaseUntil) - t(b.leaseUntil))),
+    lapsed: all.filter((c) => c.lapsed).sort((a, b) => t(a.leaseUntil) - t(b.leaseUntil)),
+  }
 }
 
 // What each listed case's response thread says: counts by kind, reopened, never

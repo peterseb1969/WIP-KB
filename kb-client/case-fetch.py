@@ -171,6 +171,10 @@ def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
         params["app"] = args.app
     if getattr(args, "unanswered", False):
         params["unanswered"] = "1"
+    if getattr(args, "claimed", False):
+        params["claimed"] = "held"
+    elif getattr(args, "unclaimed", False):
+        params["claimed"] = "none"
     payload = gw_get("/cases?" + urllib.parse.urlencode(params)) or {}
     rows = []
     for it in payload.get("items") or []:
@@ -203,6 +207,37 @@ def list_cases(args: argparse.Namespace, limit: int) -> list[dict]:
             "thread": _thread_text(it),
         })
     return rows
+
+
+def _ago(iso: str | None) -> str:
+    """How long ago an ISO time was, coarsely: 40m, 5h, 3d."""
+    import datetime as _dt
+    try:
+        t = _dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return "?"
+    mins = int((_dt.datetime.now(_dt.timezone.utc) - t).total_seconds() // 60)
+    return f"{mins}m" if mins < 120 else f"{mins // 60}h" if mins < 48 * 60 else f"{mins // 1440}d"
+
+
+def _format_claims(payload: dict) -> str:
+    """Claims holding a case (parked first, then by soonest lease end), then the
+    lapsed ones: active, lease run out, never released."""
+    def row(c: dict) -> str:
+        if c.get("lapsed"):
+            when = f"lease ran out {_ago(c.get('lease_until'))} ago"
+        elif c.get("state") == "parked":
+            when = f"parked {_ago(c.get('since'))}" + (f" — {c['note']}" if c.get("note") else "")
+        else:
+            when = f"lease until {str(c.get('lease_until') or '')[:16].replace('T', ' ')}Z"
+        return (f"| CASE-{c.get('case')} | {c.get('case_status') or ''} | {c.get('kind')} | "
+                f"{c.get('holder')} | {when} | {c.get('title') or ''} |")
+    head = ["| Case | Status | Kind | Holder | State | Title |", "|---|---|---|---|---|---|"]
+    holding, lapsed = payload.get("holding") or [], payload.get("lapsed") or []
+    out = ["In progress:", *head, *(row(c) for c in holding)] if holding else ["In progress: none"]
+    if lapsed:
+        out += ["", "Lease ran out, never released:", *head, *(row(c) for c in lapsed)]
+    return "\n".join(out) + "\n"
 
 
 def _thread_text(it: dict) -> str:
@@ -613,6 +648,9 @@ def main() -> None:
     list_sp.add_argument("--target-yac", dest="target_yac",
                          help="filter by assigned YAC, comma-separated (e.g. APP-KB or APP-KB,any). "
                               "Client-side: the gateway returns target_yac but does not facet on it.")
+    claimed_g = list_sp.add_mutually_exclusive_group()
+    claimed_g.add_argument("--claimed", action="store_true", help="only cases a claim holds now")
+    claimed_g.add_argument("--unclaimed", action="store_true", help="only cases no claim holds")
     list_sp.add_argument("--unanswered", action="store_true",
                          help="only open cases never answered (no respond response) that are not reopens")
     list_sp.add_argument("--limit", type=int, default=50, help="max rows (default 50, cap 100)")
@@ -638,6 +676,13 @@ def main() -> None:
     edges_sp.add_argument("handle", help="Registry synonym (CASE-627, CASE-629#1, …) or document_id")
     edges_sp.add_argument("--namespace", help="namespace override (default: gateway corpus)")
     edges_sp.add_argument("--format", choices=["text", "json"], default="text")
+
+    claims_sp = sub.add_parser("claims", help="every claim in progress across the KB: who works on what")
+    claims_sp.add_argument("--kind", help="only this kind of work (respond, implement, fix, review)")
+    claims_sp.add_argument("--holder", help="only this holder (a session or task id)")
+    claims_sp.add_argument("--state", choices=["active", "parked", "lapsed"],
+                           help="active (lease running), parked (no lease), lapsed (lease ran out, never released)")
+    claims_sp.add_argument("--format", choices=["table", "json"], default="table")
 
     flags_sp = sub.add_parser("flags", help="flag-for-YAC queue: FLAG_RECORDs joined to their target")
     flags_sp.add_argument("--target-yac", dest="target_yac", help="only flags aimed at this YAC")
@@ -870,6 +915,19 @@ def main() -> None:
                                  if x.get("resolved", {}).get("document_id") == other), "")
                     marker = "->" if src == doc_id else "<-"
                     sys.stdout.write(f"  {et} {marker} {kind + ' ' if kind else ''}{other}\n")
+
+        elif args.mode == "claims":
+            params = {k: v for k, v in (("kind", args.kind), ("holder", args.holder),
+                                        ("state", args.state)) if v}
+            payload = gw_get("/claims" + ("?" + urllib.parse.urlencode(params) if params else ""))
+            if payload is None:
+                print("ERROR: this KB instance has no GET /claims (gateway older than this client)",
+                      file=sys.stderr)
+                sys.exit(2)
+            if args.format == "json":
+                sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+            else:
+                sys.stdout.write(_format_claims(payload))
 
         elif args.mode == "flags":
             params = {"page_size": min(max(args.limit, 1), 100), "doc_status": args.doc_status}

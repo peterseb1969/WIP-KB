@@ -28,7 +28,7 @@ import { identityValue } from './lib/identity-value.js'
 import { applyHistory, summariseThread, type ThreadEntry } from './lib/case-thread.js'
 import { resolveWipKey } from './lib/wip-key.js'
 import { MATCH_PAGE_SIZE, describeMatch, matchFilters, resolveMatch, validateMatch } from './lib/patch-match.js'
-import { holds, leaseUntil, verdict, type Claim, type ClaimRule } from './lib/claims.js'
+import { holds, leaseUntil, sqlHolds, sqlLapsed, verdict, type Claim, type ClaimRule } from './lib/claims.js'
 
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
 // The gateway's default namespace is the KB corpus (cases, decisions, …).
@@ -1147,7 +1147,7 @@ async function earlierStatuses(documentId: string, ns: string, key: string): Pro
   }
 }
 
-// GET /cases?status=&since=&unanswered=1&page=&page_size=  (since: ISO date, on updated_at)
+// GET /cases?status=&since=&unanswered=1&claimed=held|none&page=&page_size=  (since: ISO date, on updated_at)
 // Each item carries its thread when reporting can read it: responses (counts by
 // kind), reopened, reanswered, unanswered. unanswered=1 lists only open cases
 // that were never answered and are not reopens.
@@ -1192,6 +1192,20 @@ router.get('/cases', async (req, res) => {
       if (cand === null) return res.status(503).json({ error: 'cannot read case threads from reporting; try again' })
       if (!cand.length) return res.json({ total: 0, page, pages: 0, items: [] })
       filters.push({ field: 'data.case_number', operator: 'in', value: cand })
+    }
+    // claimed=held: only cases a claim holds now; claimed=none: only cases none holds.
+    const claimed = String(req.query.claimed || '')
+    if (claimed && claimed !== 'held' && claimed !== 'none') {
+      return res.status(400).json({ error: 'claimed must be held or none' })
+    }
+    if (claimed) {
+      const held = await heldCaseNumbers(ns, key)
+      if (claimed === 'held') {
+        if (!held.length) return res.json({ total: 0, page, pages: 0, items: [] })
+        filters.push({ field: 'data.case_number', operator: 'in', value: held })
+      } else if (held.length) {
+        filters.push({ field: 'data.case_number', operator: 'nin', value: held })
+      }
     }
     const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
       { template_id: 'CASE_RECORD', filters, page, page_size: pageSize })
@@ -1459,6 +1473,75 @@ async function writeClaim(data: AnyObj, ns: string, key: string): Promise<void> 
   const r = (d.results || [])[0] || {}
   if (!['created', 'updated', 'unchanged'].includes(r.status)) throw await writeError('claim', r, key)
 }
+
+// sqlHolds / sqlLapsed (server/lib/claims.ts): the "holds" rule and its lapsed
+// counterpart as SQL over the reporting view.
+const SQL_LIT = (s: string) => `'${s.replace(/'/g, "''")}'`
+
+// Does the namespace have the claim model? A corpus created before it has no
+// claim table, which is "no claims", not an error.
+async function hasClaimTable(ns: string, key: string): Promise<boolean> {
+  const d = await wipReq('POST', '/api/reporting-sync/query', key, {
+    namespace: ns, sql: `SELECT to_regclass(${SQL_LIT(`"${ns}"."doc_case_claim"`)}) IS NOT NULL AS present`,
+  })
+  return !!(d.rows || [])[0]?.present
+}
+
+// Case numbers a claim holds now: the candidates for `GET /cases?claimed=held|none`.
+async function heldCaseNumbers(ns: string, key: string): Promise<number[]> {
+  if (!(await hasClaimTable(ns, key))) return []
+  const d = await wipReq('POST', '/api/reporting-sync/query', key, {
+    namespace: ns, max_rows: REPORTING_MAX_ROWS,
+    sql: `SELECT DISTINCT case_number FROM doc_case_claim WHERE status = 'active' AND ${sqlHolds()}`,
+  })
+  return ((d.rows || []) as AnyObj[]).map((r) => Number(r.case_number)).filter(Number.isFinite)
+}
+
+// GET /claims?kind=&holder=&state=  — every claim in progress across the KB, for
+// the home page's "In progress" panel and `kbc case-fetch.py claims`: claims that
+// hold a case (parked first, then by soonest lease end) and, separately, lapsed
+// ones. Each row carries its case's title and status. state narrows to
+// active|parked|lapsed.
+router.get('/claims', async (req, res) => {
+  const key = callerKey(req, res)
+  if (!key) return
+  const ns = String(req.query.namespace || NS_DEFAULT)
+  const where: string[] = [`c.status = 'active'`]
+  if (req.query.kind) where.push(`c.claim_kind = ${SQL_LIT(String(req.query.kind))}`)
+  if (req.query.holder) where.push(`c.holder = ${SQL_LIT(String(req.query.holder))}`)
+  const st = String(req.query.state || '')
+  if (st === 'parked') where.push(`c.state = 'parked'`)
+  else if (st === 'active') where.push(`c.state = 'active' AND c.lease_until::timestamptz > now()`)
+  else if (st === 'lapsed') where.push(sqlLapsed('c.'))
+  else if (st) return res.status(400).json({ error: 'state must be active, parked or lapsed' })
+  else where.push(`(${sqlHolds('c.')} OR ${sqlLapsed('c.')})`)
+  try {
+    if (!(await hasClaimTable(ns, key))) return res.json({ namespace: ns, holding: [], lapsed: [] })
+    const d = await wipReq('POST', '/api/reporting-sync/query', key, {
+      namespace: ns, max_rows: REPORTING_MAX_ROWS,
+      sql: `SELECT c.case_number, c.claim_kind, c.holder, c.state, c.since, c.lease_until, c.note,`
+        + ` r.title, r.data_status AS case_status`
+        + ` FROM doc_case_claim c LEFT JOIN doc_case_record r ON r.case_number = c.case_number AND r.status = 'active'`
+        + ` WHERE ${where.join(' AND ')}`,
+    })
+    const now = Date.now()
+    const rows = ((d.rows || []) as AnyObj[]).map((r) => ({
+      case: Number(r.case_number), title: r.title ?? null, case_status: r.case_status ?? null,
+      kind: String(r.claim_kind), holder: String(r.holder), state: String(r.state),
+      since: r.since ?? null, lease_until: r.lease_until ?? null, note: r.note ?? null,
+      lapsed: r.state === 'active' && !(r.lease_until && Date.parse(String(r.lease_until)) > now),
+    }))
+    const holding = rows.filter((r) => !r.lapsed).sort((a, b) =>
+      (a.state === 'parked' ? 0 : 1) - (b.state === 'parked' ? 0 : 1)
+      || (a.state === 'parked'
+        ? Date.parse(String(a.since)) - Date.parse(String(b.since))
+        : Date.parse(String(a.lease_until)) - Date.parse(String(b.lease_until))))
+    const lapsed = rows.filter((r) => r.lapsed).sort((a, b) => Date.parse(String(a.lease_until)) - Date.parse(String(b.lease_until)))
+    res.json({ namespace: ns, holding, lapsed })
+  } catch (e) {
+    res.status(errStatus(e)).json({ error: (e as Error).message })
+  }
+})
 
 // POST /claims/:n/:kind  { action: acquire|renew|park|release, holder, note? }
 //   acquire — hold the case (or resume one's own parked claim). Refused with 409

@@ -53,6 +53,20 @@ export function holds(c: Claim, now: Date): boolean {
   return !!c.lease_until && Date.parse(c.lease_until) > now.getTime()
 }
 
+/**
+ * `holds` as an SQL condition over the CASE_CLAIM reporting view, for readers that
+ * list claims across the KB (the gateway's GET /claims, the home page's panel).
+ * `p` is the table alias with its dot ("c.") or "".
+ */
+export function sqlHolds(p = ''): string {
+  return `(${p}state = 'parked' OR (${p}state = 'active' AND ${p}lease_until::timestamptz > now()))`
+}
+
+/** An active claim whose lease ran out and was never released: what an agent that stopped mid-work leaves. */
+export function sqlLapsed(p = ''): string {
+  return `(${p}state = 'active' AND (${p}lease_until IS NULL OR ${p}lease_until::timestamptz <= now()))`
+}
+
 /** Earlier first: by since, then document_id, so every reader orders claims alike. */
 export function claimOrder(a: Claim, b: Claim): number {
   const t = Date.parse(a.since) - Date.parse(b.since)

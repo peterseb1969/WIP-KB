@@ -240,6 +240,13 @@ kbc kb-write.py CLAIM release <n> <kind>   # when done, failed or abandoned
   which kinds exclude each other. Without one: one holder, no exclusions.
 - Release when you are done. A posted response does not release a claim by itself.
 
+**What is in progress across the KB:** `kbc case-fetch.py claims` lists every claim
+holding a case (parked first, then by soonest lease end) and, separately, claims whose
+lease ran out without a release — usually an agent that stopped mid-work. Filter with
+`--kind`, `--holder`, `--state active|parked|lapsed`. `list --claimed` / `--unclaimed`
+narrow the case list to cases a claim holds, or none does. The KB's home page shows
+the same as an "In progress" panel.
+
 ---
 
 ## `/wip-case respond <n>`

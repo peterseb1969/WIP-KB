@@ -32,7 +32,7 @@ const FILE_ROLES: Record<string, Role> = {
   'kb-client.sh': { role: 'Runner — fetches/refreshes the bundle; run scripts via it', extra: true },
   'install.sh': { role: 'Bootstrap — `curl | sh` materializes the bundle', extra: true },
   'kb_client_core.py': { role: 'Shared core — kb.json/API-key resolution + gateway transport (gw_get/gw_post/gw_post_bytes, failover)' },
-  'case-fetch.py': { role: 'Read — case (body + response thread) / journey / list / fireside / library / edges / flags / read <TYPE> (generic typed read) / search (full-text across a knowledge base + library, --namespace to pick one; --project for one project) / topics (the topic vocabulary writes are validated against) / brief [<app>] (a project\'s context in one read; --tooling DIR saves its tooling archive), all via the gateway' },
+  'case-fetch.py': { role: 'Read — case (body + response thread) / journey / list / fireside / library / edges / flags / claims (everything in progress: who works on what) / read <TYPE> (generic typed read) / search (full-text across a knowledge base + library, --namespace to pick one; --project for one project) / topics (the topic vocabulary writes are validated against) / brief [<app>] (a project\'s context in one read; --tooling DIR saves its tooling archive), all via the gateway' },
   'kb-namespace.py': { role: 'Create a new knowledge base — a namespace seeded with the full KB model, via POST /namespaces' },
   'kb-write.py': { role: 'The write client — any doc type via POST /write/:type, and CLAIM acquire|renew|park|release <case> <kind> to claim a case for a kind of work (file/dir/json sources, edges, patch, git-stats via --git-repo, and PROJECT --tooling PATH to attach a project\'s tooling archive)' },
   'case-workflow.md': { role: 'Playbook — authoritative case how-to (rendered below)', extra: true },
@@ -99,7 +99,8 @@ const SERVING_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb-client/install', 'the bootstrap shell script (curl | sh target)'],
 ]
 const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
-  ['GET', 'kb/cases?status=&filed_by=&severity=&type=&component=&app=', 'list cases (faceted, server-side)'],
+  ['GET', 'kb/cases?status=&filed_by=&severity=&type=&component=&app=&unanswered=1&claimed=held|none', 'list cases (faceted, server-side); each carries its claims and its response thread (counts, reopened, unanswered)'],
+  ['GET', 'kb/claims?kind=&holder=&state=active|parked|lapsed', 'every claim in progress across the KB, with its case’s title and status: claims holding a case, then lapsed ones (lease ran out, never released)'],
   ['GET', 'kb/cases/:n?view=both|case|responses[&response=latest|<seq>]', 'one case: body, response thread, or both (default both)'],
   ['GET', 'kb/sessions  ·  kb/journeys/:day', 'list sessions / a journey day'],
   ['GET', 'kb/firesides  ·  kb/firesides/:id', 'list firesides / one fireside body (:id = a FIRESIDE-<n> synonym, a bare <n>, or a document_id)'],
@@ -116,7 +117,7 @@ const GATEWAY_ENDPOINTS: Array<[string, string, string]> = [
   ['GET', 'kb/projects/:app/brief?namespace=', 'a project\'s context in one read: PROJECT profile, open cases, newest decisions/lessons/firesides, recent sessions, memories, mirrored docs (handles + titles); :app = any alias'],
   ['GET', 'kb/projects/:app/tooling?namespace=', 'the project\'s tooling archive, streamed as stored (never unpacked or run)'],
   ['POST', 'kb/projects/:app/tooling?namespace=', 'attach or replace the project\'s tooling archive: body = the archive, X-Filename = its name; uploaded with your key and linked to the profile (the replaced archive stays in WIP, unreferenced)'],
-  ['POST', 'kb/namespaces', 'create a new knowledge base — a namespace seeded with the full KB model; 409 if it exists (never re-seeds)'],
+  ['POST', 'kb/namespaces', 'create a new knowledge base — a namespace seeded with the full KB model, by the app’s own key; needs admin on the main knowledge base; 409 if it exists (never re-seeds) or the operator has not reserved it'],
 ]
 
 function Copyable({ text, label }: { text: string; label?: string }) {

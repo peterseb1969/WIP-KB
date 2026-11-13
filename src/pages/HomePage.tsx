@@ -5,7 +5,8 @@ import { fetchSummary, type HeaderDoc, type SummaryGroup, type KbSummary } from 
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
 import { CaseStats } from '../components/CaseStats'
-import { NAMESPACES } from '../lib/namespaces'
+import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
+import { InProgressPanel } from '../components/InProgressPanel'
 import { formatWipDate, formatWipDateTime } from '../lib/datetime'
 
 // Structural / config doc types — not KB content, hidden from the start page.
@@ -15,8 +16,9 @@ import { formatWipDate, formatWipDateTime } from '../lib/datetime'
 // screen space, so it's hidden here too (CASE-533).
 // The bootstrap record appears under both values: namespaces bootstrapped
 // before the namespace-prefixing change carry the unprefixed
-// BOOTSTRAP_RECORD, fresh bootstraps mint KB_BOOTSTRAP_RECORD.
-const HIDDEN_TYPES = new Set(['BOOTSTRAP_RECORD', 'KB_BOOTSTRAP_RECORD', 'WRITE_POLICY', 'CASE_RESPONSE'])
+// BOOTSTRAP_RECORD, fresh bootstraps mint KB_BOOTSTRAP_RECORD. Claims are shown
+// by the In progress panel, and claim rules are config like write policies.
+const HIDDEN_TYPES = new Set(['BOOTSTRAP_RECORD', 'KB_BOOTSTRAP_RECORD', 'WRITE_POLICY', 'CASE_RESPONSE', 'CASE_CLAIM', 'CLAIM_RULE'])
 
 // The start page renders header fields only (title/case/status/dates), so a
 // document here is the reporting-sourced HeaderDoc — no body is ever fetched.
@@ -313,6 +315,8 @@ export default function HomePage() {
         </p>
         <CaseStats open={caseStats.open} responded={caseStats.responded} />
       </div>
+
+      <InProgressPanel namespace={CORPUS_NS} />
 
       <div className="space-y-3">
         {groups.map((g) => (
