@@ -715,9 +715,25 @@ async function earlierCaseStatuses(namespace: string, documentId: string): Promi
 // handle (CASE-<n>), so both forms are matched and folded back to the ID.
 export type OutstandingFlag = 'pending' | 'dispatched'
 const CASE_HANDLE_RE = /^CASE-\d+$/
-export async function fetchOutstandingRespondFlags(
+export function fetchOutstandingRespondFlags(
   namespace: string,
   docs: Array<{ documentId: string; caseNumber?: number | null }>,
+): Promise<Map<string, OutstandingFlag>> {
+  return fetchOutstandingFlags(namespace, docs, 'respond')
+}
+
+// The same for another kind of work. A flag waits until the case has a response of
+// the kind that answers it: any response for a respond flag; an implement or a
+// close for an implement flag (a comment or a respond does not implement anything).
+export type FlagKind = 'respond' | 'implement'
+const CLEARED_BY: Record<FlagKind, string> = {
+  respond: '',
+  implement: ` AND r.response_kind IN ('implement', 'close')`,
+}
+export async function fetchOutstandingFlags(
+  namespace: string,
+  docs: Array<{ documentId: string; caseNumber?: number | null }>,
+  kind: FlagKind,
 ): Promise<Map<string, OutstandingFlag>> {
   if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
   const byKey = new Map<string, string>()
@@ -737,10 +753,10 @@ export async function fetchOutstandingRespondFlags(
     `SELECT f.flagged_document, f.doc_status FROM ${ns}."doc_flag_record" f`
       + ` LEFT JOIN ${ns}."doc_case_record" c ON c.${ONLY_ACTIVE}`
       + ` AND f.flagged_document IN (c.document_id, 'CASE-' || c.case_number)`
-      + ` WHERE f.${ONLY_ACTIVE} AND f.flag_type = 'respond' AND f.flagged_document IN (${list})`
+      + ` WHERE f.${ONLY_ACTIVE} AND f.flag_type = '${kind}' AND f.flagged_document IN (${list})`
       + ` AND (f.doc_status = 'published' OR (c.case_number IS NOT NULL AND NOT EXISTS (`
       + `SELECT 1 FROM ${ns}."doc_case_response" r WHERE r.${ONLY_ACTIVE}`
-      + ` AND r.case_number = c.case_number AND r.created_at > f.updated_at)))`,
+      + ` AND r.case_number = c.case_number AND r.created_at > f.updated_at${CLEARED_BY[kind]})))`,
   )
   for (const r of rows) {
     const id = byKey.get(r.flagged_document)

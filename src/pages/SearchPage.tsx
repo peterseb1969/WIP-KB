@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
-import { fetchCaseClaims, fetchCaseThreads, fetchCorpusHeaders, fetchOutstandingRespondFlags, type CaseClaimView, type HeaderDoc, type OutstandingFlag, type ThreadSummary } from '../lib/reporting'
+import { fetchCaseClaims, fetchCaseThreads, fetchCorpusHeaders, fetchOutstandingFlags, fetchOutstandingRespondFlags, type CaseClaimView, type HeaderDoc, type OutstandingFlag, type ThreadSummary } from '../lib/reporting'
 import { ClaimChips, respondClaimReason } from '../components/ClaimChips'
 import { ThreadChip } from '../components/ThreadChip'
 import { fetchTopicTree, type TopicNode, type TopicTree } from '../lib/topics'
@@ -11,7 +11,7 @@ import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
 import { CaseStats } from '../components/CaseStats'
-import { QuickFlagButton } from '../components/FlagModal'
+import { ImplementFlagChip, QuickFlagButton } from '../components/FlagModal'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 import { parseWipDate, formatWipDateTime } from '../lib/datetime'
 
@@ -815,6 +815,12 @@ export default function SearchPage() {
     enabled: flaggableCases.length > 0,
     staleTime: 15_000,
   })
+  const implementFlagsQ = useQuery<Map<string, OutstandingFlag>>({
+    queryKey: ['outstanding-implement-flags', CORPUS_NS, flaggableCases.map((c) => c.documentId).join(',')],
+    queryFn: () => fetchOutstandingFlags(CORPUS_NS, flaggableCases, 'implement'),
+    enabled: flaggableCases.length > 0,
+    staleTime: 15_000,
+  })
   // Who is working on each listed case (claims that hold it), for the row chips.
   const claimsQ = useQuery<Map<number, CaseClaimView[]>>({
     queryKey: ['case-claims', CORPUS_NS, flaggableCases.map((c) => c.caseNumber).join(',')],
@@ -1218,7 +1224,8 @@ export default function SearchPage() {
                   </div>
                 </Link>
                 {doc.template_value === 'CASE_RECORD' && doc.namespace === CORPUS_NS && (
-                  <div className="py-3 pr-4">
+                  <div className="flex items-start gap-1 py-3 pr-4">
+                    <ImplementFlagChip compact state={implementFlagsQ.data?.get(doc.document_id)} />
                     <QuickFlagButton
                       compact
                       sourceDocId={doc.document_id}

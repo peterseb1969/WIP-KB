@@ -121,7 +121,7 @@ From spec §3.3:
 
 The app is read-mostly. The UI writes only what the server guards admit, each attributed server-side to the signed-in user (`server/ui-author.ts`), and nothing else is possible from the browser:
 - **flag-for-YAC** — a `FLAG_RECORD` plus one `FLAGGED_FROM` edge (`server/wip-proxy-guard.ts`);
-- **close / reopen a case** with a required reason (CASE-484), **answer a case** — a `comment` response, by default followed by the case's respond flag (CASE-1290) — the **topic picker** and the **relationship picker** (`server/kb-ui-guard.ts`).
+- **close / reopen a case** with a required reason (CASE-484), **answer a case** — a `comment` response, by default followed by the case's implement flag, or its respond flag, or none, as the owner chooses (CASE-1290, CASE-1315) — the **topic picker** and the **relationship picker** (`server/kb-ui-guard.ts`).
 
 Everything else (creating or editing documents, `doc_status`, responses other than close/comment) happens through YACs and `kbc` — never from the UI. A new UI write is a decision for Peter, then a line in the guard; the guard is the enforcement, this list only describes it.
 

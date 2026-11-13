@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { wipKeys } from '@wip/react'
 import { writeCaseResponse } from '../lib/kbGateway'
@@ -11,12 +11,20 @@ import { CORPUS_NS } from '../lib/namespaces'
  * (the server stamps the author; see server/ui-author.ts), so the case stops
  * waiting for an answer.
  *
- * "Send back" (on by default) then raises the case's respond flag for its target,
- * so the answer goes back into the work queue: a flag's identity is its kind plus
- * the case, so this re-arms the existing respond flag rather than adding one. The
- * answer is written first; a failed flag never loses it. Choosing the kind of
- * work and the worker is CASE-1291's.
+ * "Then" says what the answer sends into the work queue, as a flag for the case's
+ * owner. Implement, the default: an answer usually settles the questions, and a
+ * second response would only restate the first with the decisions plugged in.
+ * Respond again: for an answer that opens new ground (say, the bigger option, with
+ * new sites to analyse). Nothing: the answer only. A flag's identity is its kind
+ * plus the case, so each choice re-arms that kind's flag rather than adding one.
+ * The answer is written first; a failed flag never loses it.
  */
+type Then = 'implement' | 'respond' | 'nothing'
+const THEN_LABEL: Record<Then, string> = {
+  implement: 'Implement',
+  respond: 'Respond again',
+  nothing: 'Nothing',
+}
 export function CaseAnswer({
   docId,
   caseNumber,
@@ -33,8 +41,12 @@ export function CaseAnswer({
 }) {
   const qc = useQueryClient()
   const [open, setOpen] = useState(waiting)
+  // Questions that start waiting while the page is open open the box. The box is
+  // not remounted when waiting ends (an answer just posted ends it), so the
+  // confirmation of what was posted and flagged stays on screen.
+  useEffect(() => { if (waiting) setOpen(true) }, [waiting])
   const [text, setText] = useState('')
-  const [sendBack, setSendBack] = useState(true)
+  const [then, setThen] = useState<Then>('implement')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
@@ -47,18 +59,21 @@ export function CaseAnswer({
     try {
       const r = await writeCaseResponse(caseNumber, 'comment', text.trim())
       let msg = `Posted as ${r.synonym ?? `CASE-${caseNumber}#${r.number ?? '?'}`}.`
-      if (sendBack) {
+      if (then !== 'nothing') {
         try {
           const head = caseTitle.slice(0, 60)
+          const where = r.synonym ?? `CASE-${caseNumber}`
           await createFlagWithEdge({
             namespace: CORPUS_NS,
             sourceDocId: docId,
-            flagType: 'respond',
+            flagType: then,
             targetYac: target,
-            title: `Flag → ${target}: answered — ${head}${caseTitle.length > 60 ? '…' : ''}`,
-            body: `The owner answered in ${r.synonym ?? `CASE-${caseNumber}`}; continue from the thread.`,
+            title: `Flag → ${target}: ${then} — ${head}${caseTitle.length > 60 ? '…' : ''}`,
+            body: then === 'implement'
+              ? `The owner answered in ${where}; implement from the thread.`
+              : `The owner answered in ${where}; respond again from the thread.`,
           })
-          msg += ` Sent back to ${target}.`
+          msg += ` Flagged ${then} for ${target}.`
         } catch (e) {
           msg += ` Sending it back failed (${(e as Error).message}); flag the case by hand.`
         }
@@ -69,6 +84,7 @@ export function CaseAnswer({
       qc.invalidateQueries({ queryKey: ['case-threads'] })
       qc.invalidateQueries({ queryKey: ['awaiting-owner'] })
       qc.invalidateQueries({ queryKey: ['outstanding-respond-flags'] })
+      qc.invalidateQueries({ queryKey: ['outstanding-implement-flags'] })
       setText('')
       setOpen(false)
       setDone(msg)
@@ -107,10 +123,16 @@ export function CaseAnswer({
         placeholder={waiting ? '1. …\n2. …' : 'Your answer'}
         className="w-full rounded border border-gray-300 bg-surface px-2 py-1 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
       />
-      <label className="flex items-center gap-2 text-xs text-text">
-        <input type="checkbox" checked={sendBack} onChange={(e) => setSendBack(e.target.checked)} />
-        Send back to {target} (raises the case's respond flag)
-      </label>
+      <fieldset className="flex flex-wrap items-center gap-3 text-xs text-text">
+        <legend className="sr-only">Then</legend>
+        <span>Then, for {target}:</span>
+        {(Object.keys(THEN_LABEL) as Then[]).map((t) => (
+          <label key={t} className="flex items-center gap-1">
+            <input type="radio" name={`then-${caseNumber}`} value={t} checked={then === t} onChange={() => setThen(t)} />
+            {THEN_LABEL[t]}
+          </label>
+        ))}
+      </fieldset>
       {error && <p className="text-xs text-danger">{error}</p>}
       <div className="flex items-center gap-2">
         <button
@@ -119,7 +141,7 @@ export function CaseAnswer({
           disabled={busy || !text.trim()}
           className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-white hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy ? 'Posting…' : sendBack ? 'Post and send back' : 'Post answer'}
+          {busy ? 'Posting…' : then === 'nothing' ? 'Post answer' : `Post and flag ${then}`}
         </button>
         <button
           type="button"

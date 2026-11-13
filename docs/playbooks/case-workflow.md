@@ -328,8 +328,12 @@ evidence, options and cost — instead of recommending it>
   --questions`. It stops waiting at the first later response that is the owner's
   answer, or an `implement` or `close` (the decisions were taken):
   - **In the browser**, the owner answers with the case page's Answer box: a comment
-    under their name, and by default the case's respond flag is raised again so the
-    work continues from the answer.
+    under their name, then a flag for the case's owner. By default it is an
+    **implement** flag, since an answer usually settles the questions. "Respond again"
+    raises the respond flag instead, for an answer that opens new ground; "Nothing"
+    raises no flag. A pending implement flag shows as "Flagged: implement" on the case
+    list and the case page. An implementer picking it up reads the answer in the
+    thread and implements from it, with no second response first.
   - **Anywhere else** (the owner typing in a terminal, or deciding in a chat with an
     agent), the response that records the answer carries `--owner-answer`:
     `kbc kb-write.py CASE_RESPONSE answer.md --edge RESPONDS_TO:CASE_RECORD:<n> --owner-answer`.

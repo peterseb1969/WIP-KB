@@ -3,6 +3,18 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-13 — An answered case goes to implementation (CASE-1315)
+
+- **Changed (UI):** the Answer box asks what happens next: implement (the
+  default), respond again, or nothing. Before, it always raised the respond flag,
+  so every answered case came back as another respond task.
+- **Added (UI):** a pending implement flag shows as "Flagged: implement" beside the
+  flag button on the case page and the case list. `fetchOutstandingFlags` clears
+  an implement flag at a later implement or close.
+- **Fixed (UI):** the confirmation after answering a waiting case no longer
+  disappears when the case stops waiting.
+- **Tests:** e2e answerbox.spec.ts (the default), flagdialog.spec.ts (the worker choice).
+
 ## 2026-11-13 — A flag says kind, owner and worker (CASE-1291)
 
 - **Added (data model):** `FLAG_RECORD` gains `kind`, the kind of work as a `CLAIM_KIND`

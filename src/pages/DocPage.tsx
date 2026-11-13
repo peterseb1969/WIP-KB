@@ -6,7 +6,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkFrontmatter from 'remark-frontmatter'
 import { ArrowLeft } from 'lucide-react'
-import { FlagModal, QuickFlagButton } from '../components/FlagModal'
+import { FlagModal, ImplementFlagChip, QuickFlagButton } from '../components/FlagModal'
 import { RelationshipGraph } from '../components/RelationshipGraph'
 import { RelationshipPicker } from '../components/RelationshipPicker'
 import { CaseActions } from '../components/CaseActions'
@@ -14,7 +14,7 @@ import { DocIdentityStrip } from '../components/DocIdentityStrip'
 import { TopicPicker } from '../components/TopicPicker'
 import { CaseThread, type ResponseDoc, type ResponseLink } from '../components/CaseThread'
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
-import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees, fetchOutstandingRespondFlags, fetchCaseClaims, fetchCaseThreads, type CaseClaimView, type OutstandingFlag, type ThreadSummary } from '../lib/reporting'
+import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees, fetchOutstandingRespondFlags, fetchOutstandingFlags, fetchCaseClaims, fetchCaseThreads, type CaseClaimView, type OutstandingFlag, type ThreadSummary } from '../lib/reporting'
 import { CaseAnswer } from '../components/CaseAnswer'
 import { ClaimChips, respondClaimReason } from '../components/ClaimChips'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
@@ -255,6 +255,13 @@ export default function DocPage() {
     queryKey: ['outstanding-respond-flags', CORPUS_NS, id, docCaseNumber],
     queryFn: () => fetchOutstandingRespondFlags(CORPUS_NS, [{ documentId: id!, caseNumber: docCaseNumber }]),
     enabled: !!id && doc?.namespace === CORPUS_NS,
+    staleTime: 15_000,
+  })
+  // A pending implement flag on this case, shown beside the flag button.
+  const { data: implementFlags } = useQuery<Map<string, OutstandingFlag>>({
+    queryKey: ['outstanding-implement-flags', CORPUS_NS, id, docCaseNumber],
+    queryFn: () => fetchOutstandingFlags(CORPUS_NS, [{ documentId: id!, caseNumber: docCaseNumber }], 'implement'),
+    enabled: !!id && doc?.namespace === CORPUS_NS && docCaseNumber != null,
     staleTime: 15_000,
   })
   // Who is working on this case (claims that hold it).
@@ -668,6 +675,7 @@ export default function DocPage() {
               outstanding={outstandingFlags ? outstandingFlags.get(id) ?? null : undefined}
               inactiveReason={respondClaimReason(claimsHere)}
             />
+            <ImplementFlagChip state={implementFlags?.get(id)} />
             <RelationshipPicker sourceDocId={id} />
             <ClaimChips claims={claimsHere} />
             {isCase && caseNumber !== null && caseStatus && (
@@ -721,7 +729,7 @@ export default function DocPage() {
         {responseDocs && responseDocs.length > 0 && <CaseThread responses={responseDocs} links={responseLinks} />}
         {isCase && caseNumber !== null && doc.namespace === CORPUS_NS && (
           <CaseAnswer
-            key={`${id}:${!!threadHere?.awaitingOwner}`}
+            key={id}
             docId={id}
             caseNumber={caseNumber}
             caseTitle={docLabel(data, id)}

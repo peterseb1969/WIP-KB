@@ -191,6 +191,26 @@ export function QuickFlagButton({
 }
 
 /**
+ * A case's pending implement flag, beside its flag button: written and waiting to
+ * be picked up, or picked up and waiting for the implement (or close) response.
+ * Nothing when there is none. The one-click button stays respond-only.
+ */
+export function ImplementFlagChip({ state, compact = false }: { state: OutstandingFlag | null | undefined; compact?: boolean }) {
+  if (!state) return null
+  const title = state === 'pending'
+    ? 'Flagged for implementation; waiting to be picked up'
+    : 'Flagged for implementation and picked up; waiting for the implement response'
+  return (
+    <span
+      title={title}
+      className={`shrink-0 rounded-md border border-gray-200 bg-gray-100 font-medium text-text-muted ${compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1 text-xs'}`}
+    >
+      {compact ? 'Implement' : 'Flagged: implement'}
+    </span>
+  )
+}
+
+/**
  * The flag-for-YAC modal — the one write the UI performs. Creates a FLAG_RECORD
  * with a FLAGGED_FROM edge to the source doc.
  * @param sourceDocId/sourceDocTitle - the doc being flagged. @param onClose - dismiss callback.
