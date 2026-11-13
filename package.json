@@ -10,7 +10,7 @@
     "build": "vite build",
     "start": "tsx server/index.ts",
     "test": "python3 kb-client/test_parse_frontmatter.py && python3 kb-client/test_verb_parity.py && python3 kb-client/test_implement_hashes.py && python3 kb-client/test_instance_pairing.py && python3 kb-client/test_attribution.py && python3 kb-client/test_patch_match.py && python3 kb-client/test_write_404.py && python3 kb-client/test_namespace_routing.py && python3 kb-client/test_redirect.py && python3 kb-client/test_case_handle.py && python3 kb-client/test_response_files.py && python3 kb-client/test_namespace_exit.py && npm run test:gateway",
-    "test:gateway": "node --test server/lib/patch-match.test.ts server/lib/agent-retry.test.ts server/lib/identity-value.test.ts server/lib/claims.test.ts server/lib/case-thread.test.ts server/lib/flag-kind.test.ts",
+    "test:gateway": "node --test server/lib/patch-match.test.ts server/lib/agent-retry.test.ts server/lib/identity-value.test.ts server/lib/claims.test.ts server/lib/case-thread.test.ts server/lib/flag-kind.test.ts && tsx --test server/lib/bootstrap-status.test.ts",
     "test:e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "dependencies": {

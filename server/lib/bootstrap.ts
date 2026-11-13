@@ -177,7 +177,10 @@ function assertBulkSuccess(response: unknown, context: string): void {
   }
 }
 
-export type BootstrapStatus = 'unknown' | 'wip_unreachable' | 'needs_bootstrap' | 'ready'
+// wip_key_refused: WIP answered, and refused the app's API key (401/403) — a key
+// not yet imported after an install, rotated, or revoked. Not an outage, so the
+// page says which it is instead of "unreachable".
+export type BootstrapStatus = 'unknown' | 'wip_unreachable' | 'wip_key_refused' | 'needs_bootstrap' | 'ready'
 
 export interface BootstrapProgress {
   step: string
@@ -195,8 +198,9 @@ export async function checkStatus(): Promise<BootstrapStatus> {
   let namespaces: Array<{ prefix: string }>
   try {
     namespaces = (await wipGet('/api/registry/namespaces')) as Array<{ prefix: string }>
-  } catch {
-    return 'wip_unreachable'
+  } catch (e) {
+    const status = (e as { status?: number }).status
+    return status === 401 || status === 403 ? 'wip_key_refused' : 'wip_unreachable'
   }
 
   const have = new Set(namespaces.map((ns) => ns.prefix))

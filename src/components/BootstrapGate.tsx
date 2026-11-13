@@ -6,6 +6,7 @@
  *   - On mount, hits /server-api/bootstrap/status.
  *   - 'ready'           → render {children}
  *   - 'wip_unreachable' → "WIP is unreachable" + retry
+ *   - 'wip_key_refused' → "WIP refused the app's API key" + retry (WIP answered 401/403)
  *   - 'needs_bootstrap' → bootstrap offer with Bootstrap + Check-Again
  *   - 'bootstrapping'   → live SSE progress
  *   - 'error'           → error message + retry
@@ -32,7 +33,7 @@ const APP_TITLE = 'KB'
 // of its own origin), so it is concatenated without a leading slash.
 const SERVER_API = `${import.meta.env.BASE_URL}server-api`
 
-type AppStatus = 'checking' | 'wip_unreachable' | 'needs_bootstrap' | 'bootstrapping' | 'ready' | 'error'
+type AppStatus = 'checking' | 'wip_unreachable' | 'wip_key_refused' | 'needs_bootstrap' | 'bootstrapping' | 'ready' | 'error'
 
 interface BootstrapProgress {
   step: string
@@ -133,6 +134,29 @@ export function BootstrapGate({ children }: { children: React.ReactNode }) {
                 <p className="font-medium text-red-800">WIP is unreachable</p>
                 <p className="mt-1 text-sm text-red-600">
                   Cannot connect to the WIP backend. Make sure WIP is running and accessible.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={checkStatus}
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-gray-100 px-4 py-2 text-sm font-medium hover:bg-gray-200"
+            >
+              <RefreshCw className="h-4 w-4" /> Retry
+            </button>
+          </div>
+        )}
+
+        {status === 'wip_key_refused' && (
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4">
+              <ServerCrash className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+              <div>
+                <p className="font-medium text-red-800">WIP refused the app's API key</p>
+                <p className="mt-1 text-sm text-red-600">
+                  WIP is running, but it does not accept the key this app was deployed with. Right after
+                  an install or a key rotation the key can take a little while to reach every service:
+                  retry in a minute. If it persists, the key was revoked or the app was removed from the
+                  install; redeploying the app gives it a valid key.
                 </p>
               </div>
             </div>

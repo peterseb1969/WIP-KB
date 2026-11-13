@@ -28,7 +28,9 @@ function headers(key?: string): Record<string, string> {
 
 export async function wipGet(path: string, key?: string): Promise<unknown> {
   const res = await fetch(`${WIP_BASE_URL}${path}`, { headers: headers(key) })
-  if (!res.ok) throw new Error(`WIP GET ${path}: ${res.status} ${res.statusText}`)
+  // The status travels with the error, so a caller can tell a refused key (401/403)
+  // from an outage.
+  if (!res.ok) throw Object.assign(new Error(`WIP GET ${path}: ${res.status} ${res.statusText}`), { status: res.status })
   return res.json()
 }
 
