@@ -1276,7 +1276,7 @@ router.get('/cases', async (req, res) => {
   }
 })
 
-// GET /flags?target_yac=&doc_status=&target_type=&page=&page_size=
+// GET /flags?target_yac=&kind=&worker=&doc_status=&target_type=&page=&page_size=
 // The flag-for-YAC read surface for the deterministic dispatcher: FLAG_RECORD
 // projections joined to their flagged target, so a poller gets actionable rows
 // (case_number included when the target is a case) in one call.
@@ -1287,6 +1287,11 @@ router.get('/cases', async (req, res) => {
 // doc_status=all disables the status filter. target_type filters on the
 // RESOLVED target's template value post-query, so `total` reflects the status/
 // yac filters only — fine at flag volumes, revisit if flags ever number 100s.
+// A flag says three things (CASE-1291): the kind of work (flag_type; `kind` is the
+// same value as a CLAIM_KIND term, absent on flags from before it), the owner
+// (target_yac), and optionally a worker (an AGENT_IDENTITY, served as its
+// agent_value). kind= filters on flag_type, so it finds older flags too; worker=
+// filters on the served name, after the query, like target_type.
 router.get('/flags', async (req, res) => {
   const key = callerKey(req, res)
   if (!key) return
@@ -1297,10 +1302,25 @@ router.get('/flags', async (req, res) => {
   if (status !== 'all') filters.push({ field: 'data.doc_status', operator: 'eq', value: status })
   if (req.query.target_yac)
     filters.push({ field: 'data.target_yac', operator: 'eq', value: String(req.query.target_yac) })
+  if (req.query.kind)
+    filters.push({ field: 'data.flag_type', operator: 'eq', value: String(req.query.kind) })
   try {
     const d = await wipReq('POST', `/api/document-store/documents/query?namespace=${ns}`, key,
       { template_id: 'FLAG_RECORD', filters, page, page_size: pageSize })
     const items: AnyObj[] = []
+    const workers = new Map<string, string>()
+    const workerName = async (ref: unknown): Promise<string | null> => {
+      if (typeof ref !== 'string' || !ref) return null
+      if (!workers.has(ref)) {
+        let name = ref
+        try {
+          const w = await wipReq('GET', `/api/document-store/documents/${encodeURIComponent(ref)}?namespace=${ns}`, key)
+          name = String(w.data?.agent_value || ref)
+        } catch { /* not a document id: already the name as written */ }
+        workers.set(ref, name)
+      }
+      return workers.get(ref)!
+    }
     for (const it of (d.items || []) as AnyObj[]) {
       const f = it.data || {}
       let target: AnyObj = { document_id: f.flagged_document }
@@ -1314,8 +1334,11 @@ router.get('/flags', async (req, res) => {
         }
       } catch { /* target unresolvable — surface the raw id so the row is still actionable */ }
       if (req.query.target_type && target.template_value !== String(req.query.target_type)) continue
+      const worker = await workerName(f.worker)
+      if (req.query.worker && worker !== String(req.query.worker)) continue
       items.push({
-        flag_id: it.document_id, flag_type: f.flag_type, target_yac: f.target_yac,
+        flag_id: it.document_id, flag_type: f.flag_type, kind: f.kind ?? f.flag_type ?? null,
+        target_yac: f.target_yac, worker,
         doc_status: f.doc_status, title: f.title, authored_by: f.authored_by,
         created_at: it.created_at, updated_at: it.updated_at, target,
       })

@@ -34,6 +34,11 @@ const NS_DEFAULT = process.env.WIP_NAMESPACE || 'kb'
 
 export const EDITABLE_VOCABULARIES = ['KB_APP', 'SESSION_ROLE', 'KB_TOPIC'] as const
 
+// A term added to the first is added to the second too. Every session role is an
+// owner (KB_TARGET_YAC, the target of cases and flags); when only the role could be
+// added here, the owner list fell behind it (CASE-1291 found seven roles missing).
+const COMPANION_VOCABULARY: Record<string, string> = { SESSION_ROLE: 'KB_TARGET_YAC' }
+
 // The vocabularies that are taxonomies, with the relation types a term may use to
 // name its parent (child → parent, as in the seed file's ontology.relationships).
 const HIERARCHY_RELATIONS: Record<string, readonly string[]> = { KB_TOPIC: ['part_of', 'is_a'] }
@@ -344,7 +349,10 @@ export default function vocabRoutes(wipKey: string): Router {
       }
       const tid = await terminologyId(terminology, ns)
       const r = await wip('POST', `/api/def-store/terminologies/${tid}/terms?namespace=${encodeURIComponent(ns)}`, [item])
-      const result = firstResult(r)
+      const first = (r.results ?? [])[0] ?? {}
+      // Adding a role that exists again completes its owner when that step failed before.
+      const retry = !!COMPANION_VOCABULARY[terminology] && first.error_code === 'already_exists'
+      const result = retry ? { status: 'exists' } : firstResult(r)
       let created = (await liveTerms(terminology, ns)).terms.find((t) => t.value === value) ?? null
       if (parent && created) {
         try {
@@ -355,7 +363,20 @@ export default function vocabRoutes(wipKey: string): Router {
         }
         created = (await liveTerms(terminology, ns)).terms.find((t) => t.value === value) ?? created
       }
-      res.status(201).json({ namespace: ns, terminology, status: result.status ?? 'created', term: created })
+      let also: AnyObj | undefined
+      const companion = COMPANION_VOCABULARY[terminology]
+      if (companion) {
+        // An owner that already exists is fine: the two lists agree on it.
+        const ctid = await terminologyId(companion, ns)
+        const cr = await wip('POST', `/api/def-store/terminologies/${ctid}/terms?namespace=${encodeURIComponent(ns)}`, [item])
+        const c = (cr.results ?? [])[0] ?? {}
+        if (c.status === 'error' && c.error_code !== 'already_exists') {
+          throw new HttpError(502, `${value} was added to ${terminology} but not to ${companion} ` +
+            `(${c.error ?? 'rejected'}). Add ${value} again to retry.`)
+        }
+        also = { terminology: companion, status: c.status === 'error' ? 'exists' : (c.status ?? 'created') }
+      }
+      res.status(201).json({ namespace: ns, terminology, status: result.status ?? 'created', term: created, ...(also ? { also } : {}) })
     } catch (e) {
       fail(res, e)
     }

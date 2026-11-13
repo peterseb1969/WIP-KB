@@ -1,7 +1,7 @@
 {
   "value": "FLAG_RECORD",
   "label": "Flag Record",
-  "description": "The flag-for-YAC UI write surface (DESIGN.md §5.8). v3 redesign (CASE-481): identity is the composite natural key [flag_type, flagged_document] — 'Ready-for-discussion on CASE-478' is unique, and re-flagging the same type on the same doc is an idempotent version, not a duplicate. flag_type is the intent; flagged_document is the doc being flagged (the FLAGGED_FROM edge derives from it). doc_status defaults to 'published' (flags are dispatched events; the create path must set it — the v2 'doc_status required' failure is fixed by the gateway flag verb supplying it).",
+  "description": "The flag-for-YAC UI write surface (DESIGN.md §5.8). v3 redesign (CASE-481): identity is the composite natural key [flag_type, flagged_document] — 'Ready-for-discussion on CASE-478' is unique, and re-flagging the same type on the same doc is an idempotent version, not a duplicate. flag_type is the intent; flagged_document is the doc being flagged (the FLAGGED_FROM edge derives from it). doc_status defaults to 'published' (flags are dispatched events; the create path must set it — the v2 'doc_status required' failure is fixed by the gateway flag verb supplying it). Three axes (CASE-1291): flag_type is the kind of work, and kind carries the same value as a CLAIM_KIND term so it is validated (flag_type is an identity string, whose type cannot change; the proxy guard sets kind from it); target_yac is the owner, whose code it is; worker optionally names the AGENT_IDENTITY that should do it — without one, the dispatcher picks an active worker that performs the kind for the owner.",
   "usage": "entity",
   "identity_fields": ["flag_type", "flagged_document"],
   "fields": [
@@ -13,6 +13,8 @@
     { "name": "doc_status",  "label": "Doc Status",  "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_DOC_STATUS", "default_value": "published" },
     { "name": "tags",        "label": "Tags",        "type": "array",   "array_item_type": "string" },
     { "name": "root",        "label": "Root",        "type": "boolean", "default_value": false },
-    { "name": "target_yac",  "label": "Target YAC",  "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_TARGET_YAC" }
+    { "name": "target_yac",  "label": "Target YAC",  "type": "term",    "mandatory": true, "reference_type": "term", "terminology_ref": "KB_TARGET_YAC" },
+    { "name": "kind",        "label": "Kind of Work", "type": "term",   "mandatory": false, "reference_type": "term", "terminology_ref": "CLAIM_KIND" },
+    { "name": "worker",      "label": "Worker",      "type": "reference", "mandatory": false, "reference_type": "document", "target_templates": ["AGENT_IDENTITY"] }
   ]
 }

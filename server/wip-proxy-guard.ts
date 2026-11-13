@@ -24,6 +24,7 @@
  */
 import express, { type Request, type Response, type NextFunction, type RequestHandler } from 'express'
 import { uiAuthor } from './ui-author.js'
+import { FLAG_KIND_FIELD, setFlagKind } from './lib/flag-kind.js'
 
 const WIP_BASE = (process.env.WIP_BASE_URL || 'https://wip-kb.local').replace(/\/$/, '')
 
@@ -45,9 +46,11 @@ function refuse(res: Response, status: number, error: string): void {
 }
 
 export function wipProxyGuard(wipKey: string): RequestHandler {
-  // Template id → value, for FLAG_RECORD and FLAGGED_FROM in one namespace.
-  async function flagTemplateIds(ns: string): Promise<Map<string, string>> {
+  // Template id → value, for FLAG_RECORD and FLAGGED_FROM in one namespace, plus
+  // the latest FLAG_RECORD version when it declares `kind` (null when it does not).
+  async function flagTemplateIds(ns: string): Promise<{ ids: Map<string, string>; kindVersion: number | null }> {
     const ids = new Map<string, string>()
+    let kindVersion: number | null = null
     await Promise.all(
       FLAG_TEMPLATES.map(async (value) => {
         const r = await fetch(
@@ -57,10 +60,14 @@ export function wipProxyGuard(wipKey: string): RequestHandler {
         if (r.ok) {
           const t = await r.json()
           if (t?.template_id) ids.set(t.template_id, value)
+          if (value === 'FLAG_RECORD' && Array.isArray(t?.fields)
+              && t.fields.some((f: { name?: string }) => f?.name === FLAG_KIND_FIELD)) {
+            kindVersion = Number(t.version)
+          }
         }
       }),
     )
-    return ids
+    return { ids, kindVersion }
   }
 
   // Forward an already-read document create, relaying WIP's answer as it came.
@@ -93,7 +100,7 @@ export function wipProxyGuard(wipKey: string): RequestHandler {
       if (!Array.isArray(items) || items.length === 0) {
         return refuse(res, 400, 'document create body must be a non-empty array')
       }
-      const byNs = new Map<string, Map<string, string>>()
+      const byNs = new Map<string, Awaited<ReturnType<typeof flagTemplateIds>>>()
       for (const it of items as Array<Record<string, unknown>>) {
         const ns = typeof it?.namespace === 'string' ? it.namespace : ''
         const tid = typeof it?.template_id === 'string' ? it.template_id : ''
@@ -101,7 +108,8 @@ export function wipProxyGuard(wipKey: string): RequestHandler {
           return refuse(res, 403, 'a document created from the browser must name its namespace and template_id')
         }
         if (!byNs.has(ns)) byNs.set(ns, await flagTemplateIds(ns))
-        const value = byNs.get(ns)!.get(tid)
+        const { ids, kindVersion } = byNs.get(ns)!
+        const value = ids.get(tid)
         if (!value) {
           return refuse(
             res,
@@ -110,7 +118,9 @@ export function wipProxyGuard(wipKey: string): RequestHandler {
           )
         }
         if (value === 'FLAG_RECORD' && it.data && typeof it.data === 'object') {
-          ;(it.data as Record<string, unknown>).authored_by = uiAuthor(req)
+          const data = it.data as Record<string, unknown>
+          data.authored_by = uiAuthor(req)
+          setFlagKind(data, it.template_version, kindVersion)
         }
       }
       return forwardCreate(req, res, JSON.stringify(items))

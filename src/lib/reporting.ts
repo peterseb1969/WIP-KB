@@ -818,3 +818,39 @@ export async function fetchEdgesTouching(namespace: string, ids: string[]): Prom
   )
   return rows.map((r) => ({ edgeType: r.edge_type, sourceId: r.source_ref, targetId: r.target_ref }))
 }
+
+/** A purpose-built worker an owner can hand a flag to (an AGENT_IDENTITY). */
+export interface Worker {
+  name: string
+  title: string
+  performs: string[]
+  serves: string[]
+}
+
+/**
+ * Active workers that perform `kind` for `owner` (CASE-1291), for the flag dialog's
+ * worker choice. Read from the stored data, so a namespace whose AGENT_IDENTITY has
+ * no performs/serves fields yet, or no table at all, lists none.
+ */
+export async function listWorkers(namespace: string, kind: string, owner: string): Promise<Worker[]> {
+  if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
+  const { rows: has } = await reportingQuery<{ present: boolean }>(
+    namespace,
+    `SELECT to_regclass('"${namespace}"."doc_agent_identity"') IS NOT NULL AS present`,
+  )
+  if (!has[0]?.present) return []
+  const { rows } = await reportingQuery<{ name: string; title: string | null; performs: unknown; serves: unknown }>(
+    namespace,
+    `SELECT data_json->>'agent_value' AS name, data_json->>'title' AS title,`
+      + ` data_json->'performs' AS performs, data_json->'serves' AS serves`
+      + ` FROM "${namespace}"."doc_agent_identity"`
+      + ` WHERE ${ONLY_ACTIVE} AND data_json->>'active' = 'true' ORDER BY 1`,
+  )
+  const list = (v: unknown): string[] => {
+    const a = typeof v === 'string' ? (() => { try { return JSON.parse(v) } catch { return [] } })() : v
+    return Array.isArray(a) ? a.map(String) : []
+  }
+  return rows
+    .map((r) => ({ name: r.name, title: r.title || r.name, performs: list(r.performs), serves: list(r.serves) }))
+    .filter((w) => w.name && w.performs.includes(kind) && (w.serves.includes(owner) || w.serves.includes('any')))
+}

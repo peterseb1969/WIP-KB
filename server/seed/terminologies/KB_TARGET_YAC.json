@@ -1,7 +1,7 @@
 {
   "value": "KB_TARGET_YAC",
   "label": "KB Flag Target YAC",
-  "description": "Targets for the flag-for-YAC modal (per DESIGN.md §3.2). USER1 is the human owner — multi-user-future-proof per Q15. AGENT_IDENTITY records seeded post-bootstrap by APP-KB-YAC follow this same value scheme.",
+  "description": "Owners: whose code a case or a flag concerns (CASE_RECORD and FLAG_RECORD target_yac). Every SESSION_ROLE is an owner here, plus USER1 (the human owner, multi-user-future-proof per Q15) and any. Purpose-built workers (RESPOND-YAC, …) are not owners: they are AGENT_IDENTITY records (CASE-1291).",
   "mutable": true,
   "terms": [
     { "value": "USER1",   "label": "Peter",                      "sort_order": 10, "description": "The human owner of this WIP-KB instance. Display label is 'Peter' but data layer is multi-user-future-proof." },
@@ -9,9 +9,14 @@
     { "value": "APP-RC",  "label": "APP-RC",                     "sort_order": 30, "description": "React Console YAC." },
     { "value": "APP-CT",  "label": "APP-CT",                     "sort_order": 40, "description": "Clinical Trials app YAC." },
     { "value": "APP-KB",  "label": "APP-KB-YAC",                 "sort_order": 50, "description": "KB app YAC (this app's authoring agent)." },
-    { "value": "BUG-YAC", "label": "BUG-YAC",                    "sort_order": 60, "description": "Bug-hunting YAC." },
     { "value": "FRanC",   "label": "FRanC",                      "sort_order": 70, "description": "Field Reporter — captures sessions, synthesizes, owns design papers." },
     { "value": "WEB-YAC", "label": "WEB-YAC",                    "sort_order": 75 },
+    { "value": "APP-AA",  "label": "APP-AA",                     "sort_order": 51, "description": "AuthorAssist app YAC." },
+    { "value": "APP-DND", "label": "APP-DND",                    "sort_order": 52, "description": "DnD compendium app YAC." },
+    { "value": "APP-VAL", "label": "APP-VAL",                    "sort_order": 53, "description": "Spreadsheet validation helper app YAC." },
+    { "value": "APP-COO", "label": "APP-COO",                    "sort_order": 54, "description": "Cooking app YAC." },
+    { "value": "APP-SONG", "label": "APP-SONG",                  "sort_order": 55, "description": "Song teaching app YAC." },
+    { "value": "APP-PBSCT", "label": "APP-PBSCT",                "sort_order": 56, "description": "pbs-clintrial app YAC." },
     { "value": "any",     "label": "Any (no specific target)",   "sort_order": 80, "description": "Open flag — any agent can pick it up." }
   ]
 }

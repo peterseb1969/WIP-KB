@@ -1,7 +1,7 @@
 {
   "value": "AGENT_IDENTITY",
   "label": "Agent Identity",
-  "description": "YAC / human-owner persona record (DESIGN.md §5.7). usage:reference (LOV). Bootstrap-seeds 8 records (USER1 + 7 YACs) — seeding is APP-KB-YAC's responsibility post-bootstrap, not BootstrapGate's.",
+  "description": "A purpose-built worker agent (CASE-1291): agent_value is its name as it signs sessions (RESPOND-YAC); performs lists the kinds of work it does (CLAIM_KIND), serves the owners whose cases it works on (KB_TARGET_YAC), active whether a dispatcher may pick it, runs how it is started. Owners are KB_TARGET_YAC terms, not records here. usage:reference (LOV).",
   "usage": "reference",
   "identity_fields": ["agent_value"],
   "fields": [
@@ -11,6 +11,10 @@
     { "name": "tags",         "label": "Tags",         "type": "array",   "array_item_type": "string" },
     { "name": "root",         "label": "Root",         "type": "boolean", "default_value": false },
     { "name": "agent_value",  "label": "Agent Value",  "type": "string",  "mandatory": true },
-    { "name": "description",  "label": "Description",  "type": "string",  "full_text_indexed": true }
+    { "name": "description",  "label": "Description",  "type": "string",  "full_text_indexed": true },
+    { "name": "performs",     "label": "Performs",     "type": "array",   "array_item_type": "term", "array_terminology_ref": "CLAIM_KIND" },
+    { "name": "serves",       "label": "Serves",       "type": "array",   "array_item_type": "term", "array_terminology_ref": "KB_TARGET_YAC" },
+    { "name": "active",       "label": "Active",       "type": "boolean" },
+    { "name": "runs",         "label": "How It Runs",  "type": "string" }
   ]
 }

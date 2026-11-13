@@ -3,6 +3,22 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-13 — A flag says kind, owner and worker (CASE-1291)
+
+- **Added (data model):** `FLAG_RECORD` gains `kind`, the kind of work as a `CLAIM_KIND`
+  term (the same value as `flag_type`, which as an identity string cannot change type),
+  and an optional `worker`, a reference to an `AGENT_IDENTITY`. `AGENT_IDENTITY` becomes
+  the worker record: `performs` (CLAIM_KIND), `serves` (owners), `active`, `runs`.
+  `tools/migrate-agent-model.py` brings an existing namespace along (dry run by
+  default, `APPLY=1`, idempotent).
+- **Changed (vocabularies):** every session role is an owner. `KB_TARGET_YAC` gains
+  APP-AA, APP-COO, APP-DND, APP-PBSCT, APP-SONG and APP-VAL; BUG-YAC and DOC-YAC are
+  deprecated. Adding a session role in the vocabulary settings adds the owner too.
+- **Added (gateway, client):** `GET /flags` returns `kind` and `worker` and filters
+  on both; `kbc case-fetch.py flags --kind/--worker`.
+- **Added (UI):** the flag dialog offers a worker when one performs the kind for the
+  owner; the server guard sets `kind` on every flag the browser creates.
+
 ## 2026-11-13 — An owner's answer counts wherever it is written (CASE-1313)
 
 - **Added (data model):** `CASE_RESPONSE` gains an optional boolean `owner_answer`:

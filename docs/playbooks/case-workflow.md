@@ -589,6 +589,28 @@ same doc in the UI upserts that identity back to `published`, which re-arms
 the trigger after a failed run. `--doc-status dispatched` / `all` list
 consumed / every flag.
 
+**What a flag says: kind, owner, worker.**
+- **The kind of work** is `flag_type`: respond, implement, fix or review, the same kinds claims use (`CLAIM_KIND`). On flags written since the field exists, `kind` holds the same value as a vocabulary term, so a kind outside the list is refused.
+- **The owner** is `target_yac`: whose code it is. Owners are the `KB_TARGET_YAC` terms, and every session role is one.
+- **The worker** is optional: `worker` names a purpose-built agent (an `AGENT_IDENTITY`, e.g. `RESPOND-YAC`). Without one, the dispatcher picks an active worker that performs the kind and serves the owner.
+
+```bash
+kbc case-fetch.py flags --kind respond --target-yac BE-YAC     # Kind | Owner | Worker columns
+kbc case-fetch.py flags --worker RESPOND-YAC
+kbc case-fetch.py read AGENT_IDENTITY --format json            # the workers (active, performs, serves)
+```
+
+**Workers are records,** one `AGENT_IDENTITY` per worker, keyed on `agent_value`, its name as it signs sessions. Adding, retiring (`active: false`) or extending one is one write:
+
+```bash
+kbc kb-write.py AGENT_IDENTITY worker.md
+# worker.md frontmatter: agent_value: RESPOND-YAC / title: RESPOND-YAC / authored_by: <session id>
+#   doc_status: published / performs: [respond] / serves: [BE-YAC] / active: true / runs: <how it is started>
+#   description: <what the worker does>   (frontmatter only: the template has no body field)
+```
+
+A worker is not an owner: it gets no `KB_TARGET_YAC` or `SESSION_ROLE` term.
+
 ---
 
 ## Projects and knowledge bases (DECISION-1)

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { wipFetchJson, assertBulkSuccess } from '../lib/wipBulk'
 import { FLAG_INTENTS, DEFAULT_FLAG_INTENT, type FlagIntent } from '../lib/promptTemplates'
 import { CORPUS_NS } from '../lib/namespaces'
-import type { OutstandingFlag } from '../lib/reporting'
+import { listWorkers, type OutstandingFlag, type Worker } from '../lib/reporting'
 import { WEB_UI_AUTHOR } from '../lib/kbGateway'
 
 interface Props {
@@ -47,8 +47,10 @@ export async function createFlagWithEdge(opts: {
   targetYac: string
   title: string
   body: string
+  /** An AGENT_IDENTITY's agent_value; omitted, the dispatcher picks the worker. */
+  worker?: string
 }): Promise<string> {
-  const { namespace, sourceDocId, flagType, targetYac, title, body } = opts
+  const { namespace, sourceDocId, flagType, targetYac, title, body, worker } = opts
   const flagTmpl = await wipFetchJson<TemplateInfo>(
     `/api/template-store/templates/by-value/FLAG_RECORD?namespace=${namespace}`,
   )
@@ -71,6 +73,8 @@ export async function createFlagWithEdge(opts: {
           authored_by: WEB_UI_AUTHOR,
           doc_status: 'published',
           target_yac: targetYac,
+          // kind is set server-side from flag_type (server/lib/flag-kind.ts).
+          ...(worker ? { worker } : {}),
         },
       },
     ]),
@@ -201,6 +205,7 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
   const qc = useQueryClient()
   const [targetYac, setTargetYac] = useState('')
   const [flagType, setFlagType] = useState<FlagIntent['id']>(DEFAULT_FLAG_INTENT.id)
+  const [worker, setWorker] = useState('')
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -224,6 +229,16 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
     staleTime: 5 * 60_000,
   })
 
+  // Workers that do this kind of work for this owner. None listed, no choice shown:
+  // the dispatcher picks one.
+  const { data: workers } = useQuery<Worker[]>({
+    queryKey: ['workers', NAMESPACE, flagType, targetYac],
+    queryFn: () => listWorkers(NAMESPACE, flagType, targetYac),
+    enabled: !!targetYac,
+    staleTime: 5 * 60_000,
+  })
+  const chosenWorker = workers?.some((w) => w.name === worker) ? worker : ''
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!targetYac) return setError('Pick a target YAC.')
@@ -241,6 +256,7 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
         targetYac,
         title: flagTitle,
         body: reason.trim(),
+        worker: chosenWorker || undefined,
       })
 
       qc.invalidateQueries({ queryKey: ['relationships', sourceDocId] })
@@ -310,6 +326,24 @@ export function FlagModal({ sourceDocId, sourceDocTitle, onClose }: Props) {
                 ))}
               </select>
             </label>
+
+            {workers && workers.length > 0 && (
+              <label className="mb-3 block">
+                <span className="mb-1 block text-sm font-medium text-text">Worker</span>
+                <select
+                  value={chosenWorker}
+                  onChange={(e) => setWorker(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                >
+                  <option value="">Let the dispatcher choose</option>
+                  {workers.map((w) => (
+                    <option key={w.name} value={w.name}>
+                      {w.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             <label className="mb-3 block">
               <span className="mb-1 block text-sm font-medium text-text">
