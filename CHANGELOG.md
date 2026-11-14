@@ -3,6 +3,19 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-15 — Withdraw a flag
+
+- **Added (UI write):** each live flag on a doc page's Flags line has a
+  "withdraw" control (two clicks: withdraw, then yes). It sets the flag's
+  `doc_status` to `archived` through the gateway. `kb-ui-guard` admits exactly
+  that patch on `FLAG_RECORD`, located by `document_id`. Withdrawn flags show
+  struck through as "withdrawn", after the others.
+- **Fixed (UI):** only `dispatched` counts as picked up. Before, any flag that was
+  not `published` (an archived one, too) still counted as outstanding on a case
+  with no answering response.
+- **Docs:** the playbook describes withdrawing a flag, including from a terminal.
+- **Tests:** server/kb-ui-guard.test.ts (5); e2e flagline.spec.ts (read-only).
+
 ## 2026-11-14 — "Ready to implement" filter
 
 - **Added (UI):** a "ready to implement" stat beside open / responded on the home

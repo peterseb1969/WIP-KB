@@ -13,7 +13,10 @@
  *   - POST /write/CASE_RECORD patching only `status` to open or closed, located by
  *     case_number (the other half of close / reopen);
  *   - POST /write/<type> patching only `topics`, located by document_id (the topic
- *     picker).
+ *     picker);
+ *   - POST /write/FLAG_RECORD patching only `doc_status` to `archived`, located by
+ *     document_id (withdrawing a flag). An archived flag is never dispatched and no
+ *     longer counts as asked for; re-flagging the same doc re-arms it (published).
  * Anything else answers 405 before it reaches the gateway. The CLI's own mount
  * (/server-api/kb, with the caller's key) is unaffected.
  *
@@ -25,6 +28,8 @@ import { uiAuthor } from './ui-author.js'
 const UI_EDGE_TYPES = new Set(['REFERENCES', 'RELATES_TO', 'SUPERSEDES'])
 const UI_RESPONSE_KINDS = new Set(['close', 'comment'])
 const UI_CASE_STATUSES = new Set(['open', 'closed'])
+// The flag lifecycle value that means "withdrawn" (a KB_DOC_STATUS term).
+export const FLAG_WITHDRAWN = 'archived'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObj = Record<string, any>
@@ -39,7 +44,7 @@ function onlyKeys(o: AnyObj, keys: string[]): boolean {
 }
 
 // Returns why the request is refused, or null when the UI is allowed to make it.
-function refusal(req: Request): string | null {
+export function refusal(req: Pick<Request, 'method' | 'path' | 'body'>): string | null {
   if (req.method === 'GET' || req.method === 'HEAD') return null
   if (req.method !== 'POST') return `${req.method} is not used by the KB UI`
   const path = req.path.replace(/\/+$/, '')
@@ -68,6 +73,10 @@ function refusal(req: Request): string | null {
     if (type === 'CASE_RECORD' && onlyKeys(b.patch, ['status'])) {
       if (!UI_CASE_STATUSES.has(String(b.patch.status))) return `the KB UI only sets a case to open or closed`
       return onlyKeys(b.match, ['case_number']) ? null : 'a case status patch is located by case_number'
+    }
+    if (type === 'FLAG_RECORD' && onlyKeys(b.patch, ['doc_status'])) {
+      if (b.patch.doc_status !== FLAG_WITHDRAWN) return `the KB UI only withdraws a flag (doc_status ${FLAG_WITHDRAWN})`
+      return onlyKeys(b.match, ['document_id']) ? null : 'a flag is withdrawn by its document_id'
     }
     return `the KB UI does not patch ${Object.keys(b.patch).join(', ')} on ${type}`
   }

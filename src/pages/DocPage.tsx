@@ -7,6 +7,9 @@ import remarkGfm from 'remark-gfm'
 import remarkFrontmatter from 'remark-frontmatter'
 import { ArrowLeft } from 'lucide-react'
 import { FlagModal, QuickFlagButton } from '../components/FlagModal'
+import { FlagChip, flagState, type FlagState } from '../components/FlagChip'
+
+const FLAG_ORDER: Record<FlagState, number> = { pending: 0, dispatched: 1, withdrawn: 2 }
 import { RelationshipGraph } from '../components/RelationshipGraph'
 import { RelationshipPicker } from '../components/RelationshipPicker'
 import { CaseActions } from '../components/CaseActions'
@@ -629,32 +632,24 @@ export default function DocPage() {
               Flags
             </span>
             {[...flagEdges]
+              // Pending first, then dispatched, then withdrawn.
               .sort((a, b) =>
-                (a.peer?.data?.doc_status === 'dispatched' ? 1 : 0) -
-                (b.peer?.data?.doc_status === 'dispatched' ? 1 : 0),
+                FLAG_ORDER[flagState(a.peer?.data?.doc_status)] - FLAG_ORDER[flagState(b.peer?.data?.doc_status)],
               )
               .map((r) => {
                 const flag = r.peer
                 if (!flag) return null
-                const pending = flag.data?.doc_status !== 'dispatched'
-                const targetYac = flag.data?.target_yac ?? flagTargets?.[flag.document_id]
                 return (
-                  <Link
+                  <FlagChip
                     key={r.document_id}
-                    to={`/doc/${flag.document_id}`}
-                    title={flag.data?.title || flag.document_id}
-                    className={
-                      pending
-                        ? 'rounded-full border border-accent/30 bg-accent/10 px-2.5 py-0.5 font-medium text-accent hover:bg-accent/20'
-                        : 'rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-text-muted opacity-70 hover:opacity-100'
-                    }
-                  >
-                    {flag.data?.flag_type || 'flag'}
-                    {targetYac ? ` → ${targetYac}` : ''}
-                    <span className={pending ? '' : 'font-normal'}>
-                      {pending ? ' · pending' : ' · dispatched'}
-                    </span>
-                  </Link>
+                    docId={id}
+                    flagId={flag.document_id}
+                    flagType={flag.data?.flag_type}
+                    title={flag.data?.title}
+                    targetYac={flag.data?.target_yac ?? flagTargets?.[flag.document_id]}
+                    docStatus={flag.data?.doc_status}
+                    canWithdraw={canFlag}
+                  />
                 )
               })}
           </div>

@@ -129,6 +129,18 @@ export function patchCaseStatus(
   })
 }
 
+/**
+ * Withdraw a flag: set its doc_status to `archived` via `/write/FLAG_RECORD`
+ * (patch mode, matched on document_id). The dispatcher never picks up an archived
+ * flag, and it no longer counts as asked for. Re-flagging the same doc re-arms it.
+ */
+export function withdrawFlag(flagDocumentId: string): Promise<{ document_id: string; result: string }> {
+  return gwPost('/write/FLAG_RECORD', {
+    patch: { doc_status: 'archived' },
+    match: { document_id: flagDocumentId },
+  })
+}
+
 /** A failed gateway read; `status` lets a caller tell "not there" from "broken". */
 export class GatewayError extends Error {
   constructor(message: string, readonly status: number) {

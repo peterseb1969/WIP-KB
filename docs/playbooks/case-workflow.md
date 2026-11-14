@@ -644,6 +644,18 @@ same doc in the UI upserts that identity back to `published`, which re-arms
 the trigger after a failed run. `--doc-status dispatched` / `all` list
 consumed / every flag.
 
+**Withdrawing a flag** sets `doc_status: archived`. The poller never picks it up,
+and the KB stops counting it as asked for: the flag button is live again, and an
+implement flag leaves "ready to implement". The owner withdraws a flag from the
+case page's Flags line ("withdraw", then "yes"). From a terminal:
+
+```bash
+kbc kb-write.py FLAG_RECORD --patch doc_status=archived --match document_id=<flag_id>
+```
+
+Only `dispatched` means picked up. Re-flagging the doc re-arms a withdrawn flag to
+`published`, like any other.
+
 **What a flag says: kind, owner, worker.**
 - **The kind of work** is `flag_type`: respond, implement, fix or review, the same kinds claims use (`CLAIM_KIND`). On flags written since the field exists, `kind` holds the same value as a vocabulary term, so a kind outside the list is refused.
 - **The owner** is `target_yac`: whose code it is. Owners are the `KB_TARGET_YAC` terms, and every session role is one.

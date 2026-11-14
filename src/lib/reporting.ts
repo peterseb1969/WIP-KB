@@ -709,7 +709,9 @@ async function earlierCaseStatuses(namespace: string, documentId: string): Promi
 //                  re-arm is dispatched again and can produce another response.
 // A response created after the flag clears it: the flag did its job, and flagging
 // again means asking for another response. For a document that is not a case
-// there are no responses to wait for, so only 'pending' applies.
+// there are no responses to wait for, so only 'pending' applies. A withdrawn flag
+// (doc_status 'archived', or 'deprecated') is never outstanding: only 'dispatched'
+// means picked up.
 // One query for a whole result page. A flag names its document in
 // flagged_document, a plain string: usually the document ID, occasionally a case
 // handle (CASE-<n>), so both forms are matched and folded back to the ID.
@@ -798,7 +800,7 @@ function outstandingFlagsSql(namespace: string, kind: FlagKind, narrow: string):
     + ` LEFT JOIN ${ns}."doc_case_record" c ON c.${ONLY_ACTIVE}`
     + ` AND f.flagged_document IN (c.document_id, 'CASE-' || c.case_number)`
     + ` WHERE f.${ONLY_ACTIVE} AND f.flag_type = '${kind}'${narrow}${CASE_STILL_NEEDS[kind]}`
-    + ` AND (f.doc_status = 'published' OR (c.case_number IS NOT NULL AND NOT EXISTS (`
+    + ` AND (f.doc_status = 'published' OR (f.doc_status = 'dispatched' AND c.case_number IS NOT NULL AND NOT EXISTS (`
     + `SELECT 1 FROM ${ns}."doc_case_response" r WHERE r.${ONLY_ACTIVE}`
     + ` AND r.case_number = c.case_number AND r.created_at > f.updated_at${CLEARED_BY[kind]})))`
 }
