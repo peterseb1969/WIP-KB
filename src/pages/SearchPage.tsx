@@ -4,14 +4,14 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
 import { fetchCaseClaims, fetchCaseThreads, fetchCorpusHeaders, fetchOutstandingFlags, fetchOutstandingRespondFlags, type CaseClaimView, type HeaderDoc, type OutstandingFlag, type ThreadSummary } from '../lib/reporting'
-import { ClaimChips, respondClaimReason } from '../components/ClaimChips'
+import { ClaimChips, flagClaimReason } from '../components/ClaimChips'
 import { ThreadChip } from '../components/ThreadChip'
 import { fetchTopicTree, type TopicNode, type TopicTree } from '../lib/topics'
 import { sanitiseFtsSnippet } from '../lib/sanitiseSnippet'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
 import { CaseStats } from '../components/CaseStats'
-import { ImplementFlagChip, QuickFlagButton } from '../components/FlagModal'
+import { QuickFlagButton } from '../components/FlagModal'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 import { parseWipDate, formatWipDateTime } from '../lib/datetime'
 
@@ -151,6 +151,16 @@ function listFlagInactiveReason(status: string | undefined): string | undefined 
   if (status === 'open') return undefined
   if (status === 'responded') return 'Already responded. To ask for another response, flag it on its page.'
   return `This case is ${status ?? 'not open'}; only open cases are flagged from the list. Its page can still flag it.`
+}
+
+// The list offers a one-click implement flag only on a RESPONDED case: its response
+// carries the proposed fix the implementer works from. An open case has nothing to
+// implement from yet, and an implemented or closed one is done; its page can still
+// flag either deliberately.
+function listImplementInactiveReason(status: string | undefined): string | undefined {
+  if (status === 'responded') return undefined
+  if (status === 'open') return 'Not responded yet: there is no proposed fix to implement. Its page can still flag it.'
+  return `This case is ${status ?? 'not responded'}; only responded cases are flagged for implementation from the list. Its page can still flag it.`
 }
 
 interface FtsHit {
@@ -1225,14 +1235,22 @@ export default function SearchPage() {
                 </Link>
                 {doc.template_value === 'CASE_RECORD' && doc.namespace === CORPUS_NS && (
                   <div className="flex items-start gap-1 py-3 pr-4">
-                    <ImplementFlagChip compact state={implementFlagsQ.data?.get(doc.document_id)} />
+                    <QuickFlagButton
+                      compact
+                      kind="implement"
+                      sourceDocId={doc.document_id}
+                      sourceDocTitle={docLabel(doc.data, doc.document_id)}
+                      outstanding={implementFlagsQ.data ? implementFlagsQ.data.get(doc.document_id) ?? null : undefined}
+                      inactiveReason={listImplementInactiveReason(workflowStatus(doc))
+                        ?? flagClaimReason(doc.data.case_number != null ? claimsQ.data?.get(doc.data.case_number) : undefined, 'implement')}
+                    />
                     <QuickFlagButton
                       compact
                       sourceDocId={doc.document_id}
                       sourceDocTitle={docLabel(doc.data, doc.document_id)}
                       outstanding={outstandingFlagsQ.data ? outstandingFlagsQ.data.get(doc.document_id) ?? null : undefined}
                       inactiveReason={listFlagInactiveReason(workflowStatus(doc))
-                        ?? respondClaimReason(doc.data.case_number != null ? claimsQ.data?.get(doc.data.case_number) : undefined)}
+                        ?? flagClaimReason(doc.data.case_number != null ? claimsQ.data?.get(doc.data.case_number) : undefined, 'respond')}
                     />
                   </div>
                 )}

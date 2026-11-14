@@ -24,8 +24,11 @@ export function ClaimChips({ claims }: { claims: CaseClaimView[] | undefined }) 
   )
 }
 
-/** The reason the respond flag is not offered while a respond claim holds the case. */
-export function respondClaimReason(claims: CaseClaimView[] | undefined): string | undefined {
-  const c = claims?.find((x) => x.kind === 'respond')
-  return c ? `${c.holder} is working on a response (claimed for respond)` : undefined
+/** The reason a one-click flag of a kind is not offered while a claim of that kind holds the case. */
+export function flagClaimReason(claims: CaseClaimView[] | undefined, kind: 'respond' | 'implement'): string | undefined {
+  const c = claims?.find((x) => x.kind === kind)
+  if (!c) return undefined
+  return kind === 'respond'
+    ? `${c.holder} is working on a response (claimed for respond)`
+    : `${c.holder} is implementing it (claimed for implement)`
 }

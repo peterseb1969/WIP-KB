@@ -101,34 +101,59 @@ export async function createFlagWithEdge(opts: {
   return flagId
 }
 
+/** What each one-click flag says, by kind. Both always go to BE-YAC. */
+const QUICK_FLAG = {
+  respond: {
+    idle: 'Flag: respond → BE-YAC', idleCompact: 'Flag',
+    flagged: 'Flagged: awaiting response', flaggedCompact: 'Flagged',
+    tip: 'Flag for a response from BE-YAC',
+    pending: 'Flagged for a response from BE-YAC; waiting to be picked up',
+    dispatched: 'Flagged and picked up; waiting for the response. You can flag again once it has arrived.',
+    body: 'One-click respond flag.',
+    invalidate: 'outstanding-respond-flags',
+  },
+  implement: {
+    idle: 'Flag: implement → BE-YAC', idleCompact: 'Implement',
+    flagged: 'Flagged: implement', flaggedCompact: 'Implement',
+    tip: 'Flag for implementation by BE-YAC',
+    pending: 'Flagged for implementation by BE-YAC; waiting to be picked up',
+    dispatched: 'Flagged for implementation and picked up; waiting for the implement response',
+    body: 'One-click implement flag.',
+    invalidate: 'outstanding-implement-flags',
+  },
+} as const
+
 /**
- * One-click flag for the common case: respond → BE-YAC, no note. Deliberately
- * minimal while dispatch experience accrues — more targets/intents (and a
- * pass-through instruction) come later; the dialog stays for anything custom.
- * Idempotent by flag identity: clicking again re-arms the same flag, and a
- * re-armed flag is dispatched again — so every click can produce a response.
+ * One-click flag for the common cases: respond → BE-YAC or implement → BE-YAC, no
+ * note. The dialog stays for any other owner, a worker or a note.
+ * Idempotent by flag identity [flag_type, flagged_document]: clicking again re-arms
+ * the same flag, and a re-armed flag is dispatched again.
  *
- * Disabled (greyed out) when clicking would ask for a response already asked for:
- * - the doc has an outstanding respond flag: pending dispatch, or dispatched with
- *   no response since (fetchOutstandingRespondFlags);
+ * Disabled (greyed out) when clicking would ask for work already asked for; the
+ * greyed button is then the doc's marker for that flag:
+ * - the doc has an outstanding flag of this kind: pending dispatch, or dispatched
+ *   with no answering response since (fetchOutstandingFlags; an implement flag is
+ *   answered by an implement or close response);
  * - this button has just written one (reporting may not show it yet);
- * - the caller passes inactiveReason: the case list does for every case that is
- *   not open, so clicking down a list only ever queues unanswered cases. Asking
- *   for another response on an answered case is a deliberate act, made on the
- *   doc page, which passes no reason.
+ * - the caller passes inactiveReason: the case list does for cases a kind is not
+ *   offered on from a list, and both pages do while a claim of the kind holds the
+ *   case.
  *
+ * @param kind - the kind of work asked for (default respond).
  * @param sourceDocId/sourceDocTitle - the doc being flagged.
- * @param outstanding - the doc's outstanding respond flag, if any (undefined: not known yet).
+ * @param outstanding - the doc's outstanding flag of this kind, if any (undefined: not known yet).
  * @param inactiveReason - why the caller does not offer a flag here (tooltip), if it does not.
  * @param compact - the smaller form used on list rows.
  */
 export function QuickFlagButton({
+  kind = 'respond',
   sourceDocId,
   sourceDocTitle,
   outstanding,
   inactiveReason,
   compact = false,
 }: {
+  kind?: 'respond' | 'implement'
   sourceDocId: string
   sourceDocTitle: string
   outstanding?: OutstandingFlag | null
@@ -136,6 +161,7 @@ export function QuickFlagButton({
   compact?: boolean
 }) {
   const NAMESPACE = CORPUS_NS
+  const text = QUICK_FLAG[kind]
   const qc = useQueryClient()
   const [state, setState] = useState<'idle' | 'busy' | 'flagged' | 'error'>('idle')
 
@@ -146,14 +172,14 @@ export function QuickFlagButton({
       await createFlagWithEdge({
         namespace: NAMESPACE,
         sourceDocId,
-        flagType: 'respond',
+        flagType: kind,
         targetYac: 'BE-YAC',
-        title: `Flag → BE-YAC: ${head}${sourceDocTitle.length > 60 ? '…' : ''}`,
-        body: 'One-click respond flag.',
+        title: `Flag → BE-YAC: ${kind === 'respond' ? '' : `${kind} — `}${head}${sourceDocTitle.length > 60 ? '…' : ''}`,
+        body: text.body,
       })
       qc.invalidateQueries({ queryKey: ['relationships', sourceDocId] })
-      // Every outstanding-flag lookup (doc page, case list) re-reads.
-      qc.invalidateQueries({ queryKey: ['outstanding-respond-flags'] })
+      // Every outstanding-flag lookup of this kind (doc page, case list) re-reads.
+      qc.invalidateQueries({ queryKey: [text.invalidate] })
       // Stays 'flagged' (disabled) from here on: the flag is outstanding now, even
       // before reporting has synced it, and a second click would dispatch it twice.
       setState('flagged')
@@ -165,8 +191,8 @@ export function QuickFlagButton({
 
   const known = state === 'flagged' ? 'pending' : outstanding ?? null
   const blocked = state === 'busy' ? null
-    : known === 'pending' ? 'Flagged for a response from BE-YAC; waiting to be picked up'
-    : known === 'dispatched' ? 'Flagged and picked up; waiting for the response. You can flag again once it has arrived.'
+    : known === 'pending' ? text.pending
+    : known === 'dispatched' ? text.dispatched
     : inactiveReason ?? null
   const size = compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1 text-xs'
   const look = blocked
@@ -174,39 +200,19 @@ export function QuickFlagButton({
     : 'border-accent/20 bg-accent/5 text-accent hover:bg-accent/10 disabled:cursor-wait disabled:opacity-60'
   const label = state === 'busy' ? 'Flagging…'
     : state === 'error' ? 'Flag failed — retry'
-    : known ? (compact ? 'Flagged' : 'Flagged: awaiting response')
-    : (compact ? 'Flag' : 'Flag: respond → BE-YAC')
+    : known ? (compact ? text.flaggedCompact : text.flagged)
+    : (compact ? text.idleCompact : text.idle)
 
   return (
     <button
       type="button"
       onClick={handleClick}
       disabled={state === 'busy' || blocked !== null}
-      title={blocked ?? 'Flag for a response from BE-YAC'}
+      title={blocked ?? text.tip}
       className={`shrink-0 rounded-md border font-medium focus:outline-none focus:ring-2 focus:ring-accent/40 ${size} ${look}`}
     >
       {label}
     </button>
-  )
-}
-
-/**
- * A case's pending implement flag, beside its flag button: written and waiting to
- * be picked up, or picked up and waiting for the implement (or close) response.
- * Nothing when there is none. The one-click button stays respond-only.
- */
-export function ImplementFlagChip({ state, compact = false }: { state: OutstandingFlag | null | undefined; compact?: boolean }) {
-  if (!state) return null
-  const title = state === 'pending'
-    ? 'Flagged for implementation; waiting to be picked up'
-    : 'Flagged for implementation and picked up; waiting for the implement response'
-  return (
-    <span
-      title={title}
-      className={`shrink-0 rounded-md border border-gray-200 bg-gray-100 font-medium text-text-muted ${compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1 text-xs'}`}
-    >
-      {compact ? 'Implement' : 'Flagged: implement'}
-    </span>
   )
 }
 

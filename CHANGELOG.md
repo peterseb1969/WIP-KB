@@ -3,6 +3,17 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-14 — One-click implement flag
+
+- **Added (UI):** "Flag: implement → BE-YAC" beside the respond button on a case
+  page, and "Implement" on each case-list row. On the list it is live only on a
+  responded case; a case page can flag any case. It replaces the "Flagged:
+  implement" chip: while an implement flag is pending, the button itself is greyed
+  out, and on a case page it reads "Flagged: implement". It is also greyed while
+  an implement claim holds the case.
+- **Tests:** e2e caselist.spec.ts (the button on every row, greyed on an open case
+  and on a case with a pending implement flag).
+
 ## 2026-11-13 — An answered case goes to implementation (CASE-1315)
 
 - **Changed (UI):** the Answer box asks what happens next: implement (the

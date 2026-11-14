@@ -6,7 +6,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkFrontmatter from 'remark-frontmatter'
 import { ArrowLeft } from 'lucide-react'
-import { FlagModal, ImplementFlagChip, QuickFlagButton } from '../components/FlagModal'
+import { FlagModal, QuickFlagButton } from '../components/FlagModal'
 import { RelationshipGraph } from '../components/RelationshipGraph'
 import { RelationshipPicker } from '../components/RelationshipPicker'
 import { CaseActions } from '../components/CaseActions'
@@ -16,7 +16,7 @@ import { CaseThread, type ResponseDoc, type ResponseLink } from '../components/C
 import { parseCaseTitle, docLabel } from '../lib/casePrefix'
 import { fetchDocTitlesByIds, fetchEdgesTouching, fetchFlagTargets, fetchPeerDegrees, fetchOutstandingRespondFlags, fetchOutstandingFlags, fetchCaseClaims, fetchCaseThreads, type CaseClaimView, type OutstandingFlag, type ThreadSummary } from '../lib/reporting'
 import { CaseAnswer } from '../components/CaseAnswer'
-import { ClaimChips, respondClaimReason } from '../components/ClaimChips'
+import { ClaimChips, flagClaimReason } from '../components/ClaimChips'
 import { CORPUS_NS, NAMESPACES } from '../lib/namespaces'
 import { formatWipDateTime } from '../lib/datetime'
 
@@ -257,7 +257,7 @@ export default function DocPage() {
     enabled: !!id && doc?.namespace === CORPUS_NS,
     staleTime: 15_000,
   })
-  // A pending implement flag on this case, shown beside the flag button.
+  // This case's outstanding implement flag: the one-click implement button greys out while it does.
   const { data: implementFlags } = useQuery<Map<string, OutstandingFlag>>({
     queryKey: ['outstanding-implement-flags', CORPUS_NS, id, docCaseNumber],
     queryFn: () => fetchOutstandingFlags(CORPUS_NS, [{ documentId: id!, caseNumber: docCaseNumber }], 'implement'),
@@ -673,9 +673,17 @@ export default function DocPage() {
               sourceDocId={id}
               sourceDocTitle={docLabel(data, id)}
               outstanding={outstandingFlags ? outstandingFlags.get(id) ?? null : undefined}
-              inactiveReason={respondClaimReason(claimsHere)}
+              inactiveReason={flagClaimReason(claimsHere, 'respond')}
             />
-            <ImplementFlagChip state={implementFlags?.get(id)} />
+            {isCase && caseNumber !== null && (
+              <QuickFlagButton
+                kind="implement"
+                sourceDocId={id}
+                sourceDocTitle={docLabel(data, id)}
+                outstanding={implementFlags ? implementFlags.get(id) ?? null : undefined}
+                inactiveReason={flagClaimReason(claimsHere, 'implement')}
+              />
+            )}
             <RelationshipPicker sourceDocId={id} />
             <ClaimChips claims={claimsHere} />
             {isCase && caseNumber !== null && caseStatus && (
