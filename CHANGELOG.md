@@ -3,6 +3,15 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-14 — Implement means every item; questions carry a recommendation (CASE-1316)
+
+- **Changed (playbook):** an implementation does every item in scope. The only
+  item left undone is one that needs the owner's answer, and then the case is not
+  implemented: the implementer posts a `respond` with `## Questions` and parks the
+  implement claim. "Left open" or "deferred" by the implementer is not allowed.
+- **Changed (playbook):** each question to the owner has context, at least two
+  options with consequences, and a recommendation.
+
 ## 2026-11-14 — One-click implement flag
 
 - **Added (UI):** "Flag: implement → BE-YAC" beside the respond button on a case

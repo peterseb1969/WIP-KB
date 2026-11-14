@@ -16,7 +16,7 @@ which talks only to the KB **gateway** (never the document-store backend).
 - `/wip-case respond <n>` — append a response (drives open→responded)
 - `/wip-case comment <n>` — add a comment (any state; no transition)
 - `/wip-case close <n>` — close without implementing (won't-fix / not-an-issue / deferred)
-- `/wip-case implement <n>` — apply the proposed patch, then close as implemented
+- `/wip-case implement <n>` — do every item in scope; implemented only when every item is done
 - `/wip-case reopen <n>` — bring a closed/implemented case back to open (regression / disproven close)
 
 ## Prerequisites
@@ -305,8 +305,18 @@ convention, the file:line of every site beyond the request>
 
 ## Questions
 
-<optional: a change bigger than the case asked for, put to the project owner with
-evidence, options and cost — instead of recommending it>
+<optional: a decision for the project owner — for example a change bigger than the
+case asked for — one numbered item per question, each with:>
+
+1. **<the question, in one sentence>**
+   - **Context:** what happens today and why it matters, in plain words, for a reader
+     who has not read the code: who or what is affected, and when. `file:line` once,
+     as evidence.
+   - **Options**, at least two, each with its consequences: what it fixes, what it
+     costs (size, sites, a migration, a shared contract), what it risks or leaves open.
+     "Leave it as it is" is one of them when it is a real option.
+   - **Recommendation:** the option you would pick and why, naming the consequence
+     that decides it.
 ```
 
 - **Length:** about 600 words, 1,000 at most. Go longer only with a stated reason
@@ -323,7 +333,10 @@ evidence, options and cost — instead of recommending it>
   Files in scope lists what the recommended fix touches, for the scheduler; a widened
   scope that is only a question lists no files there.
 - **Questions** is optional, and it is **for the project owner only**. A question for
-  another agent is a comment on that agent's case, not a section here. When the
+  another agent is a comment on that agent's case, not a section here. The owner reads
+  the questions without the code: give each one its context, its options with their
+  consequences and your recommendation. A question without a recommendation hands the
+  analysis back to the owner. When the
   questions hold the main point, the recommendation is *question for the project
   owner*, and nothing is implemented until the owner answers. `kb-write.py` counts the
   questions into the response's `questions` field (each top-level list item is one; a
@@ -408,10 +421,23 @@ wait for a decision).
    don't trust. Stay in the response's scope: when a finding challenges your
    instructions (the fix contradicts a convention, the same defect sits elsewhere), stop
    and say so rather than widening the change yourself.
-2. **Apply each change**; if quoted "current text" no longer matches, flag and skip it.
+2. **Do every item in scope.** The scope is the case's Expected, as the response
+   narrowed it, and every item in it is done in this implementation. Where quoted
+   "current text" no longer matches, re-derive the change against the code as it is
+   now; that is part of the work, not a reason to skip the item.
+   - **The only item that may be left undone is one that needs an answer from the
+     project owner.** Put it to them as a question, and the case is **not**
+     implemented (see "When an item needs the owner's answer" below).
+   - "Left open", "follow-up", "out of time" or "deferred" for an item that needs no
+     answer is not allowed: do it, or stop without closing and say why. An
+     implementer never defers an item on their own; deferring is the owner's call
+     (a `close` with that reason).
+   - A comment on an implemented case is not read, so a "left open" note there is
+     lost until a review finds it and reopens the case.
 3. **Show the diff** (`git diff`) and let Peter review before committing.
-4. **Push, then record + close.** The implement response is where a reader finds the
-   fix, so write it only after the push, and cite each commit hash as it is on the
+4. **Push, then record + close**, when every item in scope is done. The implement
+   response is where a reader finds the fix, so write it only after the push, and
+   cite each commit hash as it is on the
    remote (`git log --format='%h %s' <remote>/develop`). If the push was rejected and
    you rebased, every hash changed. `kb-write.py` refuses an implement response that
    cites a commit present in your clone but on no remote branch; a hash it cannot find
@@ -426,7 +452,25 @@ wait for a decision).
    kbc kb-write.py CLAIM release <n> implement
    ```
 
-Terminal. Tell Peter what was applied and that the case is implemented.
+Terminal. Tell Peter what was applied, and that the case is implemented because every
+item in scope is done.
+
+**When an item needs the owner's answer**, the case stays `open` or `responded`, and
+the implementation stops on the question:
+
+```bash
+kbc kb-write.py CASE_RESPONSE questions.md --edge RESPONDS_TO:CASE_RECORD:<n>
+#   questions.md frontmatter: case_number: <n> / response_kind: respond / doc_status: published
+#   body: what is done so far, citing each pushed commit hash, then `## Questions`
+#   in the shape the respond template gives (context, options with consequences,
+#   recommendation)
+kbc kb-write.py CLAIM park <n> implement --note "waiting on the owner's answer in CASE-<n>#<seq>"
+```
+
+It is a `respond`, not an `implement` response. An implement response on a case that
+is not implemented misleads the review queue. The `## Questions` section puts the case
+on the owner's waiting list. Once they answer, `acquire` the claim again, finish, and
+close as above. Tell Peter which question the case is waiting on.
 
 ---
 
