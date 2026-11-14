@@ -3,6 +3,15 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-15 — Claim outcomes, leases and case types in the playbook (CASE-1321)
+
+- **Docs (playbook):** the Claims section tells a refusal that names a holder
+  (`cannot be claimed for … is held by …`) apart from every other exit 1, and says
+  what exit 2 means (transport failure: read the case's claims before retrying;
+  usage: nothing was sent). It gives the per-kind leases in force (implement and fix
+  120 min and excluding each other, review 90, respond 45, otherwise 60) and how to
+  read them. The command list names the seven case types.
+
 ## 2026-11-15 — Withdraw a flag
 
 - **Added (UI write):** each live flag on a doc page's Flags line has a
