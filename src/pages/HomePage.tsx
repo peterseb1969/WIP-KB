@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { fetchSummary, type HeaderDoc, type SummaryGroup, type KbSummary } from '../lib/reporting'
+import { fetchCasesWithOutstandingFlag, fetchSummary, type HeaderDoc, type SummaryGroup, type KbSummary } from '../lib/reporting'
 import { docLabel } from '../lib/casePrefix'
 import { CaseLabel } from '../components/CaseLabel'
 import { CaseStats } from '../components/CaseStats'
@@ -288,6 +288,12 @@ export default function HomePage() {
     queryFn: () => fetchSummary(NAMESPACES, HIDDEN_TYPES, 200),
     staleTime: 30_000,
   })
+  // Cases with an outstanding implement flag: the "ready to implement" stat.
+  const readyQ = useQuery({
+    queryKey: ['outstanding-implement-flags', CORPUS_NS, 'all'],
+    queryFn: () => fetchCasesWithOutstandingFlag(CORPUS_NS, 'implement'),
+    staleTime: 15_000,
+  })
 
   if (isLoading) return <p className="text-sm text-text-muted">Loading…</p>
   if (error) return <p className="text-sm text-danger">Failed to load: {(error as Error).message}</p>
@@ -314,7 +320,7 @@ export default function HomePage() {
           {totalDocs} doc{totalDocs === 1 ? '' : 's'} across {groups.length} type
           {groups.length === 1 ? '' : 's'}.
         </p>
-        <CaseStats open={caseStats.open} responded={caseStats.responded} />
+        <CaseStats open={caseStats.open} responded={caseStats.responded} readyToImplement={readyQ.data?.size} />
       </div>
 
       <WaitingPanel namespace={CORPUS_NS} />

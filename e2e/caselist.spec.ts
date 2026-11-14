@@ -71,11 +71,13 @@ test('every case row has a one-click implement flag, live only on a responded ca
 test('a case with a pending implement flag shows its implement button greyed out', async ({ page, request }) => {
   const { namespace } = await appConfig(request)
   const ns = `"${namespace}"`
-  // A published (not yet picked up) implement flag on a case no implement or close
-  // response has answered since: outstanding by fetchOutstandingFlags' rule.
+  // A published (not yet picked up) implement flag on a case that is not implemented
+  // or closed, and no implement or close response has answered since: outstanding by
+  // fetchOutstandingFlags' rule.
   const sql = `SELECT c.document_id, c.case_number FROM ${ns}."doc_flag_record" f`
     + ` JOIN ${ns}."doc_case_record" c ON f.flagged_document IN (c.document_id, 'CASE-' || c.case_number)`
     + ` WHERE f.status = 'active' AND c.status = 'active' AND f.flag_type = 'implement' AND f.doc_status = 'published'`
+    + ` AND c.data_status NOT IN ('implemented', 'closed')`
     + ` AND NOT EXISTS (SELECT 1 FROM ${ns}."doc_case_response" r WHERE r.case_number = c.case_number`
     + ` AND r.status = 'active' AND r.response_kind IN ('implement', 'close') AND r.created_at > f.created_at) LIMIT 1`
   const res = await request.post('wip/api/reporting-sync/query', { data: { namespace, sql } })
@@ -94,4 +96,27 @@ test('a case with a pending implement flag shows its implement button greyed out
   const docBtn = page.getByRole('button', { name: 'Flagged: implement' })
   await expect(docBtn).toBeVisible()
   await expect(docBtn).toBeDisabled()
+})
+
+test('"ready to implement" lists only cases with an outstanding implement flag', async ({ page }) => {
+  await page.goto('search?t=CASE_RECORD', { waitUntil: 'networkidle' })
+  const stat = page.getByRole('link', { name: /ready to implement/ })
+  await expect(stat).toBeVisible()
+  const n = Number((await stat.innerText()).match(/\d+/)?.[0])
+  await stat.click()
+  await page.waitForLoadState('networkidle')
+  await expect(page).toHaveURL(/flag=implement/)
+  await expect(page.getByText('ready to implement', { exact: true })).toBeVisible() // the filter chip
+  const rows = page.locator('main ul > li').filter({ has: page.locator('a[href*="/doc/"]') })
+  test.skip(n === 0, 'no case has an outstanding implement flag')
+  // Every listed case carries the flag, so its one-click implement button is greyed.
+  const shown = await rows.count()
+  expect(shown).toBeGreaterThan(0)
+  for (let i = 0; i < Math.min(shown, 10); i++) {
+    const btn = rows.nth(i).getByRole('button', { name: 'Implement', exact: true })
+    await expect(btn, `row ${i}`).toBeDisabled()
+    await expect(btn).toHaveAttribute('title', /Flagged for implementation|claimed for implement/)
+  }
+  // None of them is finished.
+  await expect(rows.filter({ has: page.locator('span', { hasText: /^(implemented|closed)$/ }) })).toHaveCount(0)
 })

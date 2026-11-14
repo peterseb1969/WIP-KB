@@ -730,6 +730,14 @@ const CLEARED_BY: Record<FlagKind, string> = {
   respond: '',
   implement: ` AND r.response_kind IN ('implement', 'close')`,
 }
+// An implement flag also stops counting once its case is implemented or closed,
+// even if nothing ever picked it up: there is nothing left to implement. Without
+// this, a flag no worker dispatched kept a finished case "ready to implement".
+// A reopened case is open again, so its flag counts again.
+const CASE_STILL_NEEDS: Record<FlagKind, string> = {
+  respond: '',
+  implement: ` AND (c.document_id IS NULL OR c.data_status NOT IN ('implemented', 'closed'))`,
+}
 export async function fetchOutstandingFlags(
   namespace: string,
   docs: Array<{ documentId: string; caseNumber?: number | null }>,
@@ -747,22 +755,52 @@ export async function fetchOutstandingFlags(
   const out = new Map<string, OutstandingFlag>()
   if (!byKey.size) return out
   const list = [...byKey.keys()].map((k) => `'${k}'`).join(',')
-  const ns = `"${namespace}"`
   const { rows } = await reportingQuery<{ flagged_document: string; doc_status: string }>(
     namespace,
-    `SELECT f.flagged_document, f.doc_status FROM ${ns}."doc_flag_record" f`
-      + ` LEFT JOIN ${ns}."doc_case_record" c ON c.${ONLY_ACTIVE}`
-      + ` AND f.flagged_document IN (c.document_id, 'CASE-' || c.case_number)`
-      + ` WHERE f.${ONLY_ACTIVE} AND f.flag_type = '${kind}' AND f.flagged_document IN (${list})`
-      + ` AND (f.doc_status = 'published' OR (c.case_number IS NOT NULL AND NOT EXISTS (`
-      + `SELECT 1 FROM ${ns}."doc_case_response" r WHERE r.${ONLY_ACTIVE}`
-      + ` AND r.case_number = c.case_number AND r.created_at > f.updated_at${CLEARED_BY[kind]})))`,
+    outstandingFlagsSql(namespace, kind, ` AND f.flagged_document IN (${list})`),
   )
   for (const r of rows) {
     const id = byKey.get(r.flagged_document)
     if (id) out.set(id, r.doc_status === 'published' ? 'pending' : 'dispatched')
   }
   return out
+}
+
+// Every case in the namespace with an outstanding flag of a kind, by the same rule
+// as fetchOutstandingFlags: case document_id → pending or dispatched. Backs the case
+// list's "ready to implement" filter and its count. Flags on documents that are not
+// cases are left out.
+export async function fetchCasesWithOutstandingFlag(
+  namespace: string,
+  kind: FlagKind,
+): Promise<Map<string, OutstandingFlag>> {
+  if (!NS_RE.test(namespace)) throw new Error(`invalid namespace: ${namespace}`)
+  const { rows } = await reportingQuery<{ case_id: string | null; doc_status: string }>(
+    namespace,
+    outstandingFlagsSql(namespace, kind, ' AND c.document_id IS NOT NULL'),
+    10000,
+  )
+  const out = new Map<string, OutstandingFlag>()
+  for (const r of rows) {
+    if (!r.case_id) continue
+    // A case flagged twice (once by ID, once by handle) counts once; pending wins.
+    if (out.get(r.case_id) !== 'pending') out.set(r.case_id, r.doc_status === 'published' ? 'pending' : 'dispatched')
+  }
+  return out
+}
+
+// A flag of a kind is outstanding while it waits to be picked up (published), or was
+// picked up and no response of the kind that answers it (CLEARED_BY) has come since.
+// `narrow` is an extra WHERE clause over f (the flag) and c (its case, if any).
+function outstandingFlagsSql(namespace: string, kind: FlagKind, narrow: string): string {
+  const ns = `"${namespace}"`
+  return `SELECT f.flagged_document, f.doc_status, c.document_id AS case_id FROM ${ns}."doc_flag_record" f`
+    + ` LEFT JOIN ${ns}."doc_case_record" c ON c.${ONLY_ACTIVE}`
+    + ` AND f.flagged_document IN (c.document_id, 'CASE-' || c.case_number)`
+    + ` WHERE f.${ONLY_ACTIVE} AND f.flag_type = '${kind}'${narrow}${CASE_STILL_NEEDS[kind]}`
+    + ` AND (f.doc_status = 'published' OR (c.case_number IS NOT NULL AND NOT EXISTS (`
+    + `SELECT 1 FROM ${ns}."doc_case_response" r WHERE r.${ONLY_ACTIVE}`
+    + ` AND r.case_number = c.case_number AND r.created_at > f.updated_at${CLEARED_BY[kind]})))`
 }
 
 // Relationship degree (edges touching each id, both directions, all edge types) for

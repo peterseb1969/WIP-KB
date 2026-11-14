@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, ChevronDown, ChevronRight, Search as SearchIcon, X } from 'lucide-react'
 import { wipFetchJson } from '../lib/wipBulk'
-import { fetchCaseClaims, fetchCaseThreads, fetchCorpusHeaders, fetchOutstandingFlags, fetchOutstandingRespondFlags, type CaseClaimView, type HeaderDoc, type OutstandingFlag, type ThreadSummary } from '../lib/reporting'
+import { fetchCaseClaims, fetchCaseThreads, fetchCasesWithOutstandingFlag, fetchCorpusHeaders, fetchOutstandingFlags, fetchOutstandingRespondFlags, type CaseClaimView, type HeaderDoc, type OutstandingFlag, type ThreadSummary } from '../lib/reporting'
 import { ClaimChips, flagClaimReason } from '../components/ClaimChips'
 import { ThreadChip } from '../components/ThreadChip'
 import { fetchTopicTree, type TopicNode, type TopicTree } from '../lib/topics'
@@ -330,6 +330,9 @@ export default function SearchPage() {
   const pFilter = useMemo(() => csvSet(params.get('p')), [params])
   const rFilter = useMemo(() => csvSet(params.get('r')), [params])
   const oFilter = useMemo(() => csvSet(params.get('o')), [params])
+  // flag=implement: only cases with an outstanding implement flag ("ready to
+  // implement"). Not a facet: it is read from the flags, not from the docs.
+  const implementOnly = params.get('flag') === 'implement'
   // Response matches FOLD into their parent case by default: a matching
   // CASE_RESPONSE contributes an attributed sub-hit under the case it belongs to
   // rather than a standalone row, and a case whose ONLY match is in a response
@@ -349,6 +352,15 @@ export default function SearchPage() {
     queryFn: () => fetchCorpusHeaders(NAMESPACES, SEARCH_HIDDEN),
     staleTime: 30_000,
   })
+  // Every corpus case with an outstanding implement flag: the flag=implement filter
+  // and the "ready to implement" stat. Same key as the home page's, so the one-click
+  // flag's invalidation refreshes both.
+  const readyQ = useQuery({
+    queryKey: ['outstanding-implement-flags', CORPUS_NS, 'all'],
+    queryFn: () => fetchCasesWithOutstandingFlag(CORPUS_NS, 'implement'),
+    staleTime: 15_000,
+  })
+  const readyIds = readyQ.data
 
   const searchQ = useQuery<FtsResponse>({
     queryKey: ['fts-search', nsKey, query, mode],
@@ -669,6 +681,7 @@ export default function SearchPage() {
         if (doc.template_value === 'CASE_RESPONSE' && foldResponses) return false
         if (tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
         if (sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
+        if (implementOnly && !readyIds?.has(doc.document_id)) return false
         if (aFilter.size > 0 && !docAuthors(authorSource(doc)).some((r) => aFilter.has(r)))
           return false
         if (kFilter.size > 0 && !kFilter.has(doc.data.kind ?? '')) return false
@@ -679,7 +692,7 @@ export default function SearchPage() {
           return false
         return true
       }),
-    [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, selectedTopics, appOf, severityOf],
+    [hits, tFilter, sFilter, implementOnly, readyIds, aFilter, kFilter, vFilter, pFilter, rFilter, selectedTopics, appOf, severityOf],
   )
 
   // Per-option counts for each facet. "What would the result count be if I
@@ -696,6 +709,7 @@ export default function SearchPage() {
         return false
       if (skip !== 't' && tFilter.size > 0 && !tFilter.has(doc.template_value)) return false
       if (skip !== 's' && sFilter.size > 0 && !sFilter.has(workflowStatus(doc) ?? '')) return false
+      if (implementOnly && !readyIds?.has(doc.document_id)) return false
       if (
         skip !== 'a' &&
         aFilter.size > 0 &&
@@ -753,7 +767,7 @@ export default function SearchPage() {
       r: bucket('r', (d) => d.data.release),
       o: oCounts,
     }
-  }, [hits, tFilter, sFilter, aFilter, kFilter, vFilter, pFilter, rFilter, selectedTopics, topicTree, appOf, severityOf])
+  }, [hits, tFilter, sFilter, implementOnly, readyIds, aFilter, kFilter, vFilter, pFilter, rFilter, selectedTopics, topicTree, appOf, severityOf])
 
   const hasCaseInScope = useMemo(
     () => filtered.some((h) => typeof h.doc.data.case_number === 'number'),
@@ -926,6 +940,7 @@ export default function SearchPage() {
 
   const activeFilterCount =
     tFilter.size + sFilter.size + aFilter.size + kFilter.size + vFilter.size + pFilter.size + rFilter.size + oFilter.size
+    + (implementOnly ? 1 : 0)
   const isLoading =
     allDocsQ.isLoading || (query.trim() && searchQ.isLoading)
   const error = allDocsQ.error ?? searchQ.error
@@ -1115,7 +1130,7 @@ export default function SearchPage() {
           </button>
         </form>
 
-        <CaseStats docs={filterableDocs} className="mb-4" />
+        <CaseStats docs={filterableDocs} readyToImplement={readyIds?.size} className="mb-4" />
 
         {/* Active filter chips */}
         {activeFilterCount > 0 && (
@@ -1127,6 +1142,9 @@ export default function SearchPage() {
             {[...sFilter].map((v) => (
               <FilterChip key={`s:${v}`} label={v} onRemove={() => toggleSet('s', sFilter, v)} />
             ))}
+            {implementOnly && (
+              <FilterChip label="ready to implement" onRemove={() => setParam('flag', null)} />
+            )}
             {[...vFilter].map((v) => (
               <FilterChip key={`v:${v}`} label={v} onRemove={() => toggleSet('v', vFilter, v)} />
             ))}

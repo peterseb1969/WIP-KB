@@ -3,6 +3,17 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-14 — "Ready to implement" filter
+
+- **Added (UI):** a "ready to implement" stat beside open / responded on the home
+  page and the case list. It links to the case list filtered to cases with an
+  outstanding implement flag (`flag=implement`, removable as a filter chip).
+- **Fixed (UI):** an implement flag stops counting once its case is implemented
+  or closed, even if nothing ever picked it up. On canonical, five finished cases
+  (512, 1101, 1284, 1293, 1298) still had such flags, so their one-click implement
+  button was greyed out and they would have counted as ready to implement.
+- **Tests:** e2e caselist.spec.ts (the filter lists only flagged, unfinished cases).
+
 ## 2026-11-14 — Implement means every item; questions carry a recommendation (CASE-1316)
 
 - **Changed (playbook):** an implementation does every item in scope. The only

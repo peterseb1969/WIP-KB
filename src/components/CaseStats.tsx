@@ -5,11 +5,11 @@ interface CaseStatDoc {
   data: { status?: string }
 }
 
-// Three clickable case-status stats — open, responded, and both — each linking to
-// the CASE_RECORD search pre-filtered to that status (open → s=open, responded →
-// s=responded, both → s=open,responded). `open` and `responded` are disjoint
-// statuses, so the combined count is their sum. Hidden entirely when there are no
-// open or responded cases — nothing actionable to link to.
+// Clickable case stats, each linking to the CASE_RECORD search pre-filtered: open,
+// responded and both by status (s=open, s=responded, s=open,responded; the two are
+// disjoint, so the combined count is their sum), and ready to implement — cases with
+// an outstanding implement flag (flag=implement), which is not a status. Hidden
+// entirely when none of them has anything to link to.
 //
 // Counts are supplied directly (HomePage sources them from a reporting aggregation
 // over ALL cases — CASE-687) or derived from an in-scope `docs` set (SearchPage,
@@ -21,17 +21,20 @@ export function CaseStats({
   docs,
   open: openProp,
   responded: respondedProp,
+  readyToImplement,
   className = '',
 }: {
   docs?: CaseStatDoc[]
   open?: number
   responded?: number
+  /** Cases with an outstanding implement flag; the link is left out while unknown. */
+  readyToImplement?: number
   className?: string
 }) {
   const cases = (docs ?? []).filter((d) => d.template_value === 'CASE_RECORD')
   const open = openProp ?? cases.filter((d) => d.data.status === 'open').length
   const responded = respondedProp ?? cases.filter((d) => d.data.status === 'responded').length
-  if (open === 0 && responded === 0) return null
+  if (open === 0 && responded === 0 && !readyToImplement) return null
 
   const base = '/search?t=CASE_RECORD'
   return (
@@ -46,6 +49,11 @@ export function CaseStats({
       <Link to={`${base}&s=open,responded`} className={LINK} title="Open or responded cases">
         <span className="font-semibold text-text">{open + responded}</span> open&nbsp;or&nbsp;responded
       </Link>
+      {readyToImplement !== undefined && (
+        <Link to={`${base}&flag=implement`} className={LINK} title="Cases with an implement flag no implement or close response has answered yet">
+          <span className="font-semibold text-text">{readyToImplement}</span> ready&nbsp;to&nbsp;implement
+        </Link>
+      )}
     </div>
   )
 }
