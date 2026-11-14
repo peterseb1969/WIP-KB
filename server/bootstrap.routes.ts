@@ -9,17 +9,18 @@
  */
 
 import { Router } from 'express'
-import { checkStatus, runBootstrap, type BootstrapProgress } from './lib/bootstrap.js'
+import { checkStatusDetail, runBootstrap, type BootstrapProgress } from './lib/bootstrap.js'
 import { initSSE, sendSSE, endSSE } from './lib/sse.js'
 
 const router = Router()
 
+// The check answers 200 with what it found; a failure of the check itself (the seed
+// plans, say) is check_failed with its message, not "WIP is unreachable".
 router.get('/bootstrap/status', async (_req, res) => {
   try {
-    const status = await checkStatus()
-    res.json({ status })
+    res.json(await checkStatusDetail())
   } catch (err) {
-    res.json({ status: 'wip_unreachable', error: (err as Error).message })
+    res.json({ status: 'check_failed', error: (err as Error).message })
   }
 })
 

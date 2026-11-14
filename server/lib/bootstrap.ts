@@ -177,10 +177,23 @@ function assertBulkSuccess(response: unknown, context: string): void {
   }
 }
 
-// wip_key_refused: WIP answered, and refused the app's API key (401/403) — a key
-// not yet imported after an install, rotated, or revoked. Not an outage, so the
-// page says which it is instead of "unreachable".
-export type BootstrapStatus = 'unknown' | 'wip_unreachable' | 'wip_key_refused' | 'needs_bootstrap' | 'ready'
+// How the status check went, as the start page tells it apart:
+//   wip_unreachable — no answer from WIP at all (connection refused, timeout, DNS);
+//   wip_key_refused — WIP answered, and refused the app's API key (401/403): a key
+//                     not yet accepted after an install (on k8s, until the mounted
+//                     key file refreshes), rotated, or revoked. Not an outage;
+//   wip_error       — WIP answered with another error status (a 5xx, typically);
+//   check_failed    — the check itself failed here, before or after asking WIP (set
+//                     by the route, never by checkStatus).
+export type BootstrapStatus =
+  | 'unknown' | 'wip_unreachable' | 'wip_key_refused' | 'wip_error' | 'check_failed' | 'needs_bootstrap' | 'ready'
+
+/** A status, with the HTTP status WIP answered and the error, where there was one. */
+export interface StatusDetail {
+  status: BootstrapStatus
+  http_status?: number
+  error?: string
+}
 
 export interface BootstrapProgress {
   step: string
@@ -195,17 +208,26 @@ export interface BootstrapProgress {
  * app offers bootstrap.
  */
 export async function checkStatus(): Promise<BootstrapStatus> {
+  return (await checkStatusDetail()).status
+}
+
+/** checkStatus, with the HTTP status and error message the start page shows. */
+export async function checkStatusDetail(): Promise<StatusDetail> {
   let namespaces: Array<{ prefix: string }>
   try {
     namespaces = (await wipGet('/api/registry/namespaces')) as Array<{ prefix: string }>
   } catch (e) {
-    const status = (e as { status?: number }).status
-    return status === 401 || status === 403 ? 'wip_key_refused' : 'wip_unreachable'
+    const http = (e as { status?: number }).status
+    const error = (e as Error).message
+    // wipGet attaches the status only when WIP answered; no status means no answer.
+    if (typeof http !== 'number') return { status: 'wip_unreachable', error }
+    if (http === 401 || http === 403) return { status: 'wip_key_refused', http_status: http, error }
+    return { status: 'wip_error', http_status: http, error }
   }
 
   const have = new Set(namespaces.map((ns) => ns.prefix))
   const plans = buildPlans()
-  return plans.every((p) => have.has(p.namespace)) ? 'ready' : 'needs_bootstrap'
+  return { status: plans.every((p) => have.has(p.namespace)) ? 'ready' : 'needs_bootstrap' }
 }
 
 /** Accumulates everything created across all namespaces for the audit record. */

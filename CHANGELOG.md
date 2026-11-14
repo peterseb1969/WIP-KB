@@ -3,6 +3,19 @@
 Human-readable evolution (one entry per logical change, not per commit). Older work
 than 2026-06-21 is in git history and DESIGN.md's Phase notes.
 
+## 2026-11-15 — The start page says what failed, and re-checks a refused key (CASE-1309)
+
+- **Changed (UI):** a refused key (401/403) names the key (`app-wip-kb`) and the
+  HTTP status, says a new key can take a few minutes to be accepted on k8s, and
+  is re-checked on its own: 5 s, doubling to 30 s, for about five minutes, with a
+  countdown. Then the page waits for "Retry now".
+- **Added (UI):** "WIP answered with an error (HTTP n)" for any other error status
+  from WIP, and "The KB server did not answer" / "could not run its check" when the
+  app's own server fails. Before, all of these read "WIP is unreachable". That now
+  means only no answer from WIP, and the error is shown.
+- **Tests:** server/lib/bootstrap-status.test.ts (5xx → wip_error, no answer →
+  unreachable); e2e bootstrapgate.spec.ts (status call intercepted in the browser).
+
 ## 2026-11-15 — Claim outcomes, leases and case types in the playbook (CASE-1321)
 
 - **Docs (playbook):** the Claims section tells a refusal that names a holder
