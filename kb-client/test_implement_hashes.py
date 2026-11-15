@@ -134,8 +134,9 @@ class _Done:
 
 
 def _fake_git(repo, *argv):
+    # 21137700 is a pushed commit, 31137700 a local one on no remote branch.
     if argv[:3] == ("rev-parse", "--verify", "--quiet"):
-        return _Done(0 if argv[3].startswith("21137700") else 1)
+        return _Done(0 if argv[3].startswith(("21137700", "31137700")) else 1)
     if argv[:3] == ("branch", "-r", "--contains"):
         return _Done(0, "  origin/develop\n" if argv[3] == "21137700" else "")
     return _real_git(repo, *argv)
@@ -146,6 +147,8 @@ got, err = run_check("Fixed in 21137700 on 20261112; see the log.", work)
 check("all-digit hash that is a commit: checked and pushed", got, [])
 check("all-digit hash: no 'cites no commit hash' warning", "cites no commit hash" in err, False)
 check("a date is not reported as a missing commit", "20261112" in err, False)
+got, err = run_check("Fixed in 31137700.", work)
+check("all-digit hash on no remote branch: refused", got, ["31137700"])
 got, err = run_check("Released on 20261112, build 1234567.", work)
 check("only numbers that are not commits: no hash cited", "cites no commit hash" in err, True)
 kb._git = _real_git
